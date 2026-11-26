@@ -62,6 +62,8 @@ vi.mock("@/lib/trpc", () => ({
       assetsNeeds: duble.consulta({ possui: [], procura: [] }),
       removeAsset: duble.registrar("removeAsset"),
       removeNeed: duble.registrar("removeNeed"),
+      addItem: duble.registrar("addItem"),
+      editItem: duble.registrar("editItem"),
     },
     enrichment: {
       startSession: duble.registrar("startSession"),

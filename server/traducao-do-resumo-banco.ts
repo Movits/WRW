@@ -2,9 +2,11 @@ import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslations } from "../drizzle/schema";
-import { IDIOMA_DA_REUNIAO_PADRAO, idiomaDaReuniao, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
-import { conferirMapaMental, rotulosDoMapaMental } from "@shared/mapa-mental";
+import { IDIOMA_DA_REUNIAO_PADRAO, idiomaFalado, type IdiomaDaReuniao, type IdiomaFalado } from "@shared/idioma-da-reuniao";
+import { rotulosDoMapaMental } from "@shared/mapa-mental";
+import { mapaQueVale } from "@shared/mapa-mental-edicao";
 import { exigirDb } from "./db";
+import { reuniaoVisivel } from "./reuniao-visivel";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 
 /**
@@ -31,7 +33,7 @@ export type LeituraParaTraduzir =
       estado: "pronto";
       resumoId: string;
       versao: number;
-      idiomaOriginal: IdiomaDaReuniao;
+      idiomaOriginal: IdiomaFalado;
       itens: ItemParaTraduzir[];
       rotulosDoMapa: string[];
       // O conteúdo guardado para este idioma, só se saiu deste resumo e desta versão.
@@ -63,9 +65,12 @@ function versaoNaTela(status: string | null, versao: number | null): "pronta" | 
  * pronto, não há rótulo a traduzir; o mapa que fica pronto depois pede a
  * tradução de novo pela tela, e o servidor traduz só os rótulos que faltam.
  */
-function rotulosDoMapa(status: string | null, bruto: unknown): string[] {
-  if (status !== "ready") return [];
-  const mapa = conferirMapaMental(bruto);
+function rotulosDoMapa(status: string | null, bruto: unknown, editado: unknown): string[] {
+  // H10b: o mapa que vale, o editado pela dona antes do da IA. Com o mapa
+  // sendo refeito em outro estilo (o estado fora de "pronto"), o de antes
+  // segue à vista e é traduzido; sem mapa guardado, não há o que traduzir.
+  if (status !== "ready" && bruto == null && editado == null) return [];
+  const mapa = mapaQueVale({ mindMap: bruto, mindMapEdited: editado });
   return mapa ? rotulosDoMapaMental(mapa) : [];
 }
 
@@ -85,16 +90,18 @@ export async function lerResumoParaTraduzir(ownerId: string, meetingId: string, 
     idiomaDoResumo: meetingSummaries.language,
     statusDoMapa: meetingSummaries.mindMapStatus,
     mapa: meetingSummaries.mindMap,
+    mapaEditado: meetingSummaries.mindMapEdited,
   }).from(meetings)
     .leftJoin(meetingSummaries, and(eq(meetingSummaries.meetingId, meetings.id), eq(meetingSummaries.ownerId, meetings.ownerId)))
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted")))
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel()))
     .limit(1);
   if (!linha) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
   // Em processamento, o resumo é da tentativa anterior e está para ser trocado:
   // traduzir agora gastaria IA com um texto que vai sumir.
   const naTela = linha.status === "ready" && linha.resumoId ? versaoNaTela(linha.statusDoResumo, linha.versao) : null;
   if (!naTela || !linha.resumoId || linha.versao === null) return { estado: "sem_resumo" };
-  const idiomaOriginal = idiomaDaReuniao(linha.idiomaDoResumo) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // O idioma em que o resumo foi escrito: qualquer um que a IA transcreve (G16).
+  const idiomaOriginal = idiomaFalado(linha.idiomaDoResumo) ?? IDIOMA_DA_REUNIAO_PADRAO;
   if (idiomaOriginal === idioma) return { estado: "original" };
 
   const itens = await db.select({
@@ -129,7 +136,7 @@ export async function lerResumoParaTraduzir(ownerId: string, meetingId: string, 
     versao: linha.versao,
     idiomaOriginal,
     itens,
-    rotulosDoMapa: rotulosDoMapa(linha.statusDoMapa, linha.mapa),
+    rotulosDoMapa: rotulosDoMapa(linha.statusDoMapa, linha.mapa, linha.mapaEditado),
     guardado: valeAinda ? guardada.content : null,
     soGuardada: naTela === "so_guardada",
   };

@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, type SQL } from "drizzle-orm";
 import {
   contactAssets,
   contactContexts,
@@ -7,14 +7,19 @@ import {
   contextParticipants,
   contexts,
   meetings,
+  meetingSummaries,
+  meetingSummaryItems,
   meetingTranscripts,
   memoryDocuments,
   privateContacts,
 } from "../drizzle/schema";
 import { sql } from "drizzle-orm";
 import { rotaDaReuniao } from "@shared/rotas";
+import { nomesDosFalantes } from "@shared/const";
+import { vozesNoTexto } from "@shared/vozes-no-texto";
 import { dividirEmJanelas } from "./janelas-de-texto";
 import { exigirDb } from "./db";
+import { estaNaLixeira } from "./reuniao-visivel";
 import { embedManyWithGemini, embedWithGemini } from "./gemini";
 import { invokeLLM } from "./_core/llm";
 
@@ -38,7 +43,9 @@ const EMBED_BATCH_PAUSE_MS = 300;
 const INDEX_BUDGET_MS = 30_000;
 const espera = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export type MemorySourceType = "contact" | "context" | "meeting";
+// "meeting_summary": o resumo da reunião, só com os itens que a dona confirmou
+// (documentosDosResumosConfirmados, abaixo).
+export type MemorySourceType = "contact" | "context" | "meeting" | "meeting_summary";
 export type SearchHit = {
   id: string;
   sourceType: MemorySourceType;
@@ -85,7 +92,7 @@ async function embed(text: string, taskType: "RETRIEVAL_DOCUMENT" | "RETRIEVAL_Q
 
 async function collectOwnerSources(ownerId: string): Promise<MemorySource[]> {
   const db = await exigirDb();
-  const [contacts, privateContexts, transcripts, assets, needs, participantes, reunioes, vinculos] = await Promise.all([
+  const [contacts, privateContexts, transcripts, assets, needs, participantes, reunioes, vinculos, resumos, itensConfirmados] = await Promise.all([
     db.select().from(privateContacts).where(eq(privateContacts.ownerId, ownerId)),
     db.select().from(contexts).where(and(eq(contexts.ownerId, ownerId), eq(contexts.visibility, "private"))),
     // Projeção explícita: `segments` (o JSON palavra-a-palavra) nunca entra no
@@ -96,7 +103,7 @@ async function collectOwnerSources(ownerId: string): Promise<MemorySource[]> {
     db.select().from(contactNeeds).where(eq(contactNeeds.ownerId, ownerId)),
     db.select({ contextId: contextParticipants.contextId, name: contextParticipants.name, company: contextParticipants.company, role: contextParticipants.role, notes: contextParticipants.notes })
       .from(contextParticipants).where(eq(contextParticipants.ownerId, ownerId)),
-    db.select({ id: meetings.id, title: meetings.title, status: meetings.status }).from(meetings).where(eq(meetings.ownerId, ownerId)),
+    db.select({ id: meetings.id, title: meetings.title, status: meetings.status, trashedAt: meetings.trashedAt, speakerNames: meetings.speakerNames }).from(meetings).where(eq(meetings.ownerId, ownerId)),
     // O vínculo contato↔contexto (onde e como a pessoa foi conhecida, com
     // cidade/país/notas do encontro) ficava fora dos documentos: "Quem conheço
     // na Nigéria?" não achava a Ana vinculada à "Missão Comercial Lagos"
@@ -107,6 +114,19 @@ async function collectOwnerSources(ownerId: string): Promise<MemorySource[]> {
       eventDate: contactContexts.eventDate, notes: contactContexts.notes,
       relationshipType: contactContexts.relationshipType,
     }).from(contactContexts).where(eq(contactContexts.ownerId, ownerId)),
+    // O resumo guardado (H4) entra na Memória só com o que a dona confirmou:
+    // o item "para conferir" e o ignorado ficam de fora (nada extraído por IA
+    // entra sozinho). Projeção explícita: o trecho da transcrição já está no
+    // documento da transcrição.
+    db.select({ id: meetingSummaries.id, meetingId: meetingSummaries.meetingId, status: meetingSummaries.status, version: meetingSummaries.version, language: meetingSummaries.language })
+      .from(meetingSummaries).where(eq(meetingSummaries.ownerId, ownerId)),
+    db.select({
+      summaryId: meetingSummaryItems.summaryId, meetingId: meetingSummaryItems.meetingId, section: meetingSummaryItems.section,
+      position: meetingSummaryItems.position, subject: meetingSummaryItems.subject, text: meetingSummaryItems.text,
+      assignee: meetingSummaryItems.assignee, due: meetingSummaryItems.due,
+      complementText: meetingSummaryItems.complementText, complementSourceUrl: meetingSummaryItems.complementSourceUrl,
+      complementStatus: meetingSummaryItems.complementStatus,
+    }).from(meetingSummaryItems).where(and(eq(meetingSummaryItems.ownerId, ownerId), eq(meetingSummaryItems.status, "confirmed"))),
   ]);
 
   // O que o contato possui/procura é O dado de negócio da base — "Quem exporta
@@ -249,8 +269,10 @@ async function collectOwnerSources(ownerId: string): Promise<MemorySource[]> {
   // apagar. O filtro é em memória, de propósito: a lista de reuniões da dona
   // já está carregada (para os títulos), então não custa nada — e um JOIN na
   // consulta das transcrições exigiria dos testes da memória um fake de banco
-  // que hoje simula só SELECT simples por tabela.
-  const reunioesVivas = reunioes.filter(reuniao => reuniao.status !== "deleted");
+  // que hoje simula só SELECT simples por tabela. A reunião na lixeira (H7d)
+  // também fica fora: o documento dela sai na rodada seguinte, e volta se a
+  // dona a restaurar.
+  const reunioesVivas = reunioes.filter(reuniao => reuniao.status !== "deleted" && !estaNaLixeira(reuniao.trashedAt));
   const tituloDaReuniao = new Map(reunioesVivas.map(reuniao => [reuniao.id, reuniao.title]));
 
   // A reunião longa é lida INTEIRA, em janelas (G8): o embedding só lê os
@@ -282,10 +304,76 @@ async function collectOwnerSources(ownerId: string): Promise<MemorySource[]> {
     });
   }
 
+  const nomesDaReuniao = new Map(reunioesVivas.map(reuniao => [reuniao.id, nomesDosFalantes(reuniao.speakerNames)]));
+  const resumosConfirmados = documentosDosResumosConfirmados(resumos, itensConfirmados, tituloDaReuniao, nomesDaReuniao);
+
   // As janelas extras vão para o FIM: o teto de documentos por dona corta pelo
   // fim da lista, e uma reunião longa não pode empurrar contatos, contextos ou
-  // a primeira janela de outras reuniões para fora do índice.
-  return [...contactSources, ...contextSources, ...catalogSources, ...primeirasJanelas, ...janelasExtras].filter(source => source.content.trim().length > 2);
+  // a primeira janela de outras reuniões para fora do índice. O resumo
+  // confirmado vem antes delas: é curto e é o que a dona conferiu.
+  return [...contactSources, ...contextSources, ...catalogSources, ...primeirasJanelas, ...resumosConfirmados, ...janelasExtras].filter(source => source.content.trim().length > 2);
+}
+
+// Os títulos das seções no documento da Memória, em português como o resto
+// dos documentos (o prompt da resposta é em português).
+const SECAO_NA_MEMORIA: Record<string, string> = {
+  action: "Ações", focus: "Foco do trabalho", task: "Tarefas", decision: "Decisões", blocker: "Bloqueios", question: "Questões pendentes",
+};
+const ORDEM_DAS_SECOES_NA_MEMORIA = ["action", "focus", "task", "decision", "blocker", "question"];
+
+type ResumoNaMemoria = { id: string; meetingId: string; status: string; version: number; language: string | null };
+type ItemConfirmadoNaMemoria = {
+  summaryId: string; meetingId: string; section: string; position: number; subject: string | null; text: string;
+  assignee: string | null; due: string | null; complementText: string | null; complementSourceUrl: string | null; complementStatus: string | null;
+};
+
+/**
+ * O resumo confirmado de cada reunião viva, um documento por reunião (o
+ * sourceId é o id dela, no tipo "meeting_summary"): só os itens que a dona
+ * confirmou, do resumo com uma versão que vale na tela (o pronto, ou o que está
+ * sendo refeito ou cujo refazer falhou, que segue mostrando a anterior). Sem
+ * item confirmado, não há documento, e o que existia sai na rodada (órfão).
+ * Quando o resumo muda (a dona confirma, edita, desfaz a confirmação, refaz),
+ * o texto muda, e o documento é refeito; a reunião na lixeira ou excluída leva
+ * o documento junto, como a transcrição. Os rótulos de voz viram os nomes que a
+ * dona deu (a Memória é só dela), ou "Falante n". O complemento pela busca na
+ * web (H4i) entra só confirmado, marcado como de fora da reunião e com a fonte.
+ */
+export function documentosDosResumosConfirmados(
+  resumos: ResumoNaMemoria[], itens: ItemConfirmadoNaMemoria[],
+  tituloDaReuniao: Map<string, string>, nomesDaReuniao: Map<string, Readonly<Record<string, string>>>,
+): MemorySource[] {
+  const fontes: MemorySource[] = [];
+  for (const resumo of resumos) {
+    if (!tituloDaReuniao.has(resumo.meetingId)) continue;
+    if (resumo.status !== "ready" && !(Number(resumo.version) > 0)) continue;
+    const doResumo = itens.filter(item => item.summaryId === resumo.id && item.meetingId === resumo.meetingId);
+    if (!doResumo.length) continue;
+    const nomes = nomesDaReuniao.get(resumo.meetingId) ?? {};
+    const comVozes = (texto: string) => vozesNoTexto(texto, nomes, numero => `Falante ${numero}`);
+    const titulo = tituloDaReuniao.get(resumo.meetingId) ?? "Reunião";
+    const linhas = [`Resumo confirmado da reunião: ${titulo}`];
+    for (const secao of ORDEM_DAS_SECOES_NA_MEMORIA) {
+      const daSecao = doResumo.filter(item => item.section === secao).sort((a, b) => a.position - b.position);
+      if (!daSecao.length) continue;
+      linhas.push(`${SECAO_NA_MEMORIA[secao]}:`);
+      for (const item of daSecao) {
+        const extras = [item.assignee && `responsável: ${comVozes(item.assignee)}`, item.due && `prazo: ${item.due}`].filter(Boolean).join("; ");
+        linhas.push(`- ${item.subject ? `${comVozes(item.subject)}: ` : ""}${comVozes(item.text)}${extras ? ` (${extras})` : ""}`);
+        if (item.complementStatus === "confirmed" && item.complementText) {
+          linhas.push(`  Complemento de fora da reunião (busca na web${item.complementSourceUrl ? `, fonte: ${item.complementSourceUrl}` : ""}): ${item.complementText}`);
+        }
+      }
+    }
+    fontes.push({
+      sourceType: "meeting_summary",
+      sourceId: resumo.meetingId,
+      title: titulo.slice(0, 300),
+      content: linhas.join("\n"),
+      metadata: { href: rotaDaReuniao(resumo.meetingId), meetingId: resumo.meetingId, kind: "Resumo da reunião", language: resumo.language },
+    });
+  }
+  return fontes;
 }
 
 export type ResultadoDaIndexacao = {
@@ -308,7 +396,7 @@ const assinaturaIndexada = new Map<string, { assinatura: string; truncated: numb
 async function assinaturaDaBase(db: Awaited<ReturnType<typeof exigirDb>>, ownerId: string) {
   type TabelaFonte = typeof privateContacts | typeof contexts | typeof meetingTranscripts
     | typeof contactAssets | typeof contactNeeds | typeof contextParticipants | typeof meetings
-    | typeof contactContexts;
+    | typeof contactContexts | typeof meetingSummaries | typeof meetingSummaryItems;
   const resumo = (tabela: TabelaFonte, escopo: SQL) =>
     db.select({ n: sql<number>`count(*)`, m: sql<number>`coalesce(max(${tabela.updatedAt}), 0)` })
       .from(tabela).where(escopo);
@@ -325,11 +413,26 @@ async function assinaturaDaBase(db: Awaited<ReturnType<typeof exigirDb>>, ownerI
   // editar outra coisa (revisão da PR-D). Um count/max sobre as linhas sem
   // dona é barato: a tabela é pequena (catálogo + contextos privados) e a
   // varredura é a mesma que o agregado da dona já faz nela.
+  // As reuniões contam sem as da lixeira (H7d): mandar uma reunião para a
+  // lixeira, ou tirá-la de lá, não mexe no updated_at (a ficha de quem a
+  // processa), mas muda a contagem, e a assinatura nova faz a rodada tirar (ou
+  // devolver) os documentos dela.
   const linhas = await Promise.all([
     daDona(privateContacts), daDona(contexts), daDona(meetingTranscripts),
     daDona(contactAssets), daDona(contactNeeds),
-    daDona(contextParticipants), daDona(meetings), daDona(contactContexts),
+    daDona(contextParticipants), resumo(meetings, and(eq(meetings.ownerId, ownerId), isNull(meetings.trashedAt))!), daDona(contactContexts),
     resumo(contexts, isNull(contexts.ownerId)),
+    // O resumo confirmado (H4 na Memória): confirmar, editar, desfazer e
+    // refazer mudam o updated_at do item (ou a contagem, quando a fila troca os
+    // itens), e a rodada refaz o documento do resumo.
+    daDona(meetingSummaries), daDona(meetingSummaryItems),
+    // E a própria lixeira: trocar uma reunião por outra entre duas buscas
+    // (mandar A para lá e restaurar B) mantém a contagem acima e, sem nenhuma
+    // das duas ser a de updated_at maior, o máximo; a rodada não reindexava, e
+    // B ficava fora da Memória até outra edição. A hora mais recente de ida
+    // para a lixeira muda a cada reunião que vai, e a contagem, a cada uma que volta.
+    db.select({ n: sql<number>`count(*)`, m: sql<number>`coalesce(max(${meetings.trashedAt}), 0)` })
+      .from(meetings).where(and(eq(meetings.ownerId, ownerId), isNotNull(meetings.trashedAt))!),
   ]);
   return linhas.map(([linha]) => (linha ? `${linha.n}:${linha.m}` : "0:0")).join("|");
 }
@@ -542,6 +645,12 @@ async function executarIndexacao(ownerId: string, forcar: boolean): Promise<Resu
 
 export type ResultadoDaBusca = { hits: SearchHit[]; pending: number; truncated: number };
 
+/** A reunião de um documento da memória: o meetingId do metadata, ou a chave sem a janela ("id#2"). */
+function reuniaoDoDocumento(documento: { sourceId: string; metadata: unknown }): string {
+  const metadata = documento.metadata as Record<string, unknown> | null;
+  return typeof metadata?.meetingId === "string" ? metadata.meetingId : documento.sourceId.split("#")[0];
+}
+
 export async function semanticSearch(ownerId: string, query: string, limit = 6): Promise<ResultadoDaBusca> {
   const cleanQuery = query.trim().slice(0, MAX_QUERY_LENGTH);
   if (!cleanQuery) return { hits: [], pending: 0, truncated: 0 };
@@ -568,7 +677,17 @@ export async function semanticSearch(ownerId: string, query: string, limit = 6):
     console.warn(`[Memória] reindexação adiada (${error instanceof Error ? error.message : error}); buscando no índice existente.`);
   }
   const documents = await db.select().from(memoryDocuments).where(eq(memoryDocuments.ownerId, ownerId));
+  // Só as reuniões que a dona vê (H7d): a reindexação é melhor-esforço, e o
+  // índice que ela não conseguiu atualizar ainda tem o documento da reunião
+  // que foi para a lixeira (ou que está sendo excluída). Aqui ele sai da busca
+  // na hora, sem depender da rodada. Filtro em memória, como o dos títulos.
+  const reunioesDaDona = await db.select({ id: meetings.id, status: meetings.status, trashedAt: meetings.trashedAt })
+    .from(meetings).where(eq(meetings.ownerId, ownerId));
+  const visiveis = new Set(reunioesDaDona
+    .filter(reuniao => reuniao.status !== "deleted" && !estaNaLixeira(reuniao.trashedAt))
+    .map(reuniao => reuniao.id));
   const hits = documents
+    .filter(document => (document.sourceType !== "meeting" && document.sourceType !== "meeting_summary") || visiveis.has(reuniaoDoDocumento(document)))
     .filter(document => Array.isArray(document.embedding) && document.embedding.length === queryEmbedding.length)
     .map(document => ({
       id: document.id,
@@ -601,7 +720,7 @@ export const AI_UNAVAILABLE_ANSWER = "A busca funcionou e as fontes estão lista
 // embedding via o texto todo e a reunião aparecia como fonte, e a resposta
 // dizia que a informação não existia porque só os ~3 primeiros minutos
 // entravam no prompt. O teto total protege o modelo de 6 hits × 12.000.
-export const JANELA_POR_FONTE: Record<MemorySourceType, number> = { meeting: 12_000, contact: 2_500, context: 2_500 };
+export const JANELA_POR_FONTE: Record<MemorySourceType, number> = { meeting: 12_000, meeting_summary: 6_000, contact: 2_500, context: 2_500 };
 export const TETO_DO_CONTEXTO = 40_000;
 
 export async function answerFromMemory(query: string, hits: SearchHit[]) {
@@ -616,7 +735,9 @@ export async function answerFromMemory(query: string, hits: SearchHit[]) {
   let orcamento = TETO_DO_CONTEXTO;
   hits.forEach((hit, index) => {
     const janela = JANELA_POR_FONTE[hit.sourceType] ?? JANELA_POR_FONTE.contact;
-    const trecho = `[${index + 1}] ${hit.title}\n${hit.content.slice(0, janela)}`;
+    // O resumo confirmado é citado como resumo, e não como a fala da reunião.
+    const titulo = hit.sourceType === "meeting_summary" ? `Resumo confirmado da reunião ${hit.title}` : hit.title;
+    const trecho = `[${index + 1}] ${titulo}\n${hit.content.slice(0, janela)}`;
     if (trecho.length > orcamento) {
       console.warn(`[Memória] fonte [${index + 1}] (${hit.sourceType}) ficou fora do prompt: ${trecho.length} caracteres não cabem no teto de ${TETO_DO_CONTEXTO}.`);
       return;
@@ -633,7 +754,7 @@ export async function answerFromMemory(query: string, hits: SearchHit[]) {
     response = await invokeLLM({
       max_tokens: 700,
       messages: [
-        { role: "system", content: "Você é a Memória Inteligente da WRW (Women Rocking the World). Responda em português somente com base no contexto privado fornecido. Nunca invente fatos. Se a evidência não for suficiente, diga isso claramente. Cite as fontes pelo número entre colchetes ao final de cada afirmação relevante." },
+        { role: "system", content: "Você é a Memória Inteligente da Marquesa Global Match. Responda em português somente com base no contexto privado fornecido. Nunca invente fatos. Se a evidência não for suficiente, diga isso claramente. Cite as fontes pelo número entre colchetes ao final de cada afirmação relevante. Uma fonte \"Resumo confirmado\" é o resumo da reunião conferido pela dona: cite-a pelo número dela como as outras. O que vier marcado \"de fora da reunião\" veio de uma busca na web, não da reunião: diga isso ao usá-lo." },
         { role: "user", content: `Pergunta: ${query}
 
 Contexto privado:

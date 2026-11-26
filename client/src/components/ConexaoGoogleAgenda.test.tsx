@@ -98,14 +98,14 @@ describe("conectar", () => {
     expect(screen.queryByRole("button", { name: /Desconectar/ })).not.toBeInTheDocument();
   });
 
-  it("antes de autorizar, o subtítulo e a nota de privacidade dizem tudo em que a WRW mexe: as reuniões e as próximas ações com prazo (H5c)", () => {
+  it("antes de autorizar, o subtítulo diz em que a Marquesa Global Match mexe (H5c) e a nota de privacidade é o texto da Cris (23/11)", () => {
     duble.estado.mockReturnValue(consulta({ disponivel: true, origem: naOrigem(), conectada: false }));
     render(<ConexaoGoogleAgenda />);
     expect(screen.getByText(
-      "Conecte a sua conta Google para a WRW pôr na sua Google Agenda as reuniões que você marcar e as suas próximas ações com prazo.",
+      "Conecte a sua conta Google para a Marquesa Global Match pôr na sua Google Agenda as reuniões que você marcar e as suas próximas ações com prazo.",
     )).toBeInTheDocument();
     expect(screen.getByText(
-      "A WRW só mexe nos eventos das reuniões que você marcar na agenda de reuniões da WRW e das suas próximas ações com prazo. Você pode desconectar quando quiser.",
+      "Ao conectar a Google Agenda, a Marquesa Global Match poderá consultar e criar eventos para agendar reuniões. Nenhum outro dado da conta Google é acessado, e a agenda pode ser desconectada a qualquer momento.",
     )).toBeInTheDocument();
   });
 
@@ -113,7 +113,7 @@ describe("conectar", () => {
     duble.estado.mockReturnValue(consulta({ disponivel: true, origem: "https://wrwglobal.org", conectada: false }));
     render(<ConexaoGoogleAgenda />);
     expect(screen.queryByRole("link", { name: /Conectar a Google Agenda/ })).not.toBeInTheDocument();
-    expect(screen.getByText("Para conectar a Google Agenda, entre na WRW pelo endereço wrwglobal.org.")).toBeInTheDocument();
+    expect(screen.getByText("Para conectar a Google Agenda, entre na Marquesa Global Match pelo endereço wrwglobal.org.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Abrir wrwglobal.org/ })).toHaveAttribute("href", "https://wrwglobal.org/profile");
   });
 });
@@ -237,7 +237,7 @@ describe("a volta da Google (?google=)", () => {
     window.history.replaceState(null, "", "/profile?google=erro-acesso-ficou");
     duble.estado.mockReturnValue(consulta({ disponivel: true, origem: naOrigem(), conectada: false }));
     render(<ConexaoGoogleAgenda />);
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("tire o acesso da WRW nas configurações da sua conta Google"), { duration: 15000 });
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("tire o acesso da Marquesa Global Match nas configurações da sua conta Google"), { duration: 15000 });
     expect(window.location.search).toBe("");
   });
 

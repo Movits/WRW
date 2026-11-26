@@ -38,6 +38,14 @@ const PerfilDoContatoNetwork = lazy(() => import("./pages/PerfilDoContatoNetwork
 const ReuniaoAberta = lazy(() => import("./pages/ReuniaoAberta"));
 const ProximasAcoes = lazy(() => import("./pages/ProximasAcoes"));
 const Agenda = lazy(() => import("./pages/Agenda"));
+const PainelDaEntidade = lazy(() => import("./pages/PainelDaEntidade"));
+const ConviteDaEntidade = lazy(() => import("./pages/ConviteDaEntidade"));
+const AtivarCadastro = lazy(() => import("./pages/AtivarCadastro"));
+const ConviteDaReuniao = lazy(() => import("./pages/ConviteDaReuniao"));
+const ReuniaoCompartilhada = lazy(() => import("./pages/ReuniaoCompartilhada"));
+const EquipeDaPasta = lazy(() => import("./pages/EquipeDaPasta"));
+const ConviteDaEquipe = lazy(() => import("./pages/ConviteDaEquipe"));
+const ReuniaoDaEquipe = lazy(() => import("./pages/ReuniaoDaEquipe"));
 
 // O cabeçalho da área logada entra pelo mesmo caminho das páginas (lazy) para
 // não engordar o pacote da landing, que não o usa. `lazy` só aceita export
@@ -53,7 +61,7 @@ function PageLoader() {
           <div className="w-12 h-12 rounded-full border-2 border-amber-500/20 border-t-amber-500 animate-spin" />
           <div className="absolute inset-0 w-12 h-12 rounded-full border-2 border-amber-500/10 border-b-amber-400/50 animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.5s" }} />
         </div>
-        <span className="text-sm font-medium tracking-wide text-white">WRW</span>
+        <span className="text-sm font-medium tracking-wide text-white">Marquesa Global Match</span>
       </div>
     </div>
   );
@@ -128,6 +136,15 @@ function Router() {
         {/* O link aberto de uma reunião (12/11/2026): público, sem conta. O
             caminho é ROTA_DA_REUNIAO_ABERTA, de shared/rotas.ts. */}
         <Route path="/r/:token" component={ReuniaoAberta} />
+
+        {/* O convite de uma entidade ao app (a base das associações, N1): público, sem conta.
+            O caminho é ROTA_DO_CONVITE_DA_ENTIDADE, de shared/entidades.ts; /convite/:token é
+            o convite para uma reunião (R1b), mais abaixo. */}
+        <Route path="/convite-da-entidade/:token" component={ConviteDaEntidade} />
+
+        {/* A ativação do cadastro importado (N3): o link de uso único que a entidade
+            distribui; público, sem conta. O caminho é ROTA_DA_ATIVACAO, de shared/entidades.ts. */}
+        <Route path="/ativar/:token" component={AtivarCadastro} />
 
         {/* Rota de onboarding — protegida, mas, de
             propósito, sem o menu global: com o cadastro incompleto toda outra
@@ -251,9 +268,54 @@ function Router() {
           </TelaAutenticada>
         </Route>
 
+        {/* As participantes (R1b): o convite por link (/convite/{token}, só
+            logada; o login volta para cá) e a reunião compartilhada com a
+            participante, a leitura dela, fora do detalhe da dona. Os caminhos
+            são ROTA_DO_CONVITE e ROTA_DA_REUNIAO_COMPARTILHADA, de shared/rotas.ts. */}
+        <Route path="/convite/:token">
+          <TelaAutenticada>
+            <ConviteDaReuniao />
+          </TelaAutenticada>
+        </Route>
+
+        <Route path="/reunioes-compartilhadas/:id">
+          <TelaAutenticada>
+            <ReuniaoCompartilhada />
+          </TelaAutenticada>
+        </Route>
+
+        {/* Os espaços de equipe (R2): o convite (/convite-da-equipe/{token}, só
+            logada), a equipe da pasta (reuniões, tarefas, agenda e membras) e a
+            reunião da equipe lida pela membra. Os caminhos são de shared/rotas.ts. */}
+        <Route path="/convite-da-equipe/:token">
+          <TelaAutenticada>
+            <ConviteDaEquipe />
+          </TelaAutenticada>
+        </Route>
+
+        <Route path="/equipes/:pastaId/reunioes/:id">
+          <TelaAutenticada>
+            <ReuniaoDaEquipe />
+          </TelaAutenticada>
+        </Route>
+
+        <Route path="/equipes/:pastaId">
+          <TelaAutenticada>
+            <EquipeDaPasta />
+          </TelaAutenticada>
+        </Route>
+
         {/* A agenda de reuniões (H16a): marcar, convidar e o "Gravar agora",
             que abre o /gravar com a reunião marcada. O caminho é
             ROTA_DA_AGENDA, de shared/rotas.ts. */}
+        {/* O painel da entidade (a base das associações, N1): só a conta com o poder
+            de entidade; o servidor recusa as outras (entidadeProcedure). */}
+        <Route path="/entidade">
+          <TelaAutenticada>
+            <PainelDaEntidade />
+          </TelaAutenticada>
+        </Route>
+
         <Route path="/agenda">
           <TelaAutenticada>
             <Agenda />

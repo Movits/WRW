@@ -16,6 +16,16 @@ FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
+# O ffmpeg do "Baixar o áudio" da reunião (H8c, server/conversao-do-audio.ts):
+# emenda as partes (WebM/Opus, MP4/AAC, MP3) e converte em MP3 ou M4A enquanto
+# o arquivo sai, sem guardar o resultado. Pacote da Debian, sem as
+# recomendações, numa camada antes do código: mudar o app não refaz esta camada.
+# Sem o ffmpeg, o servidor sobe do mesmo jeito, e só o "Baixar o áudio" responde
+# AUDIO_INDISPONIVEL (o boot não depende dele).
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+
 # node_modules vem inteiro do estágio de build, sem um segundo install.
 #
 # Não use `pnpm install --prod` aqui. O bundle do servidor é gerado com

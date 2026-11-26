@@ -1,14 +1,28 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import { ehCorteCancelado, type CodigoDaRecusaDoMp3, type CorteDoMp3 } from "@/lib/corte-do-mp3";
-import { cortarMp3NoWorker, type OpcoesDoCorteNoWorker } from "@/lib/corte-do-mp3-no-worker";
+import { ehCorteCancelado, montarParte, type CodigoDaRecusaDoCorte, type CorteDoArquivo, type ParteCortada, type RecusaDoCorte, type TipoDaParte } from "@/lib/corte-comum";
+import { cortarArquivoNoWorker, type OpcoesDoCorteNoWorker } from "@/lib/corte-do-arquivo-no-worker";
 import type { FimDoArquivo, ResultadoDoDescarte, useGravacaoEmPartes } from "./useGravacaoEmPartes";
 
 /** O que a importação usa da gravação em partes: o mesmo caminho até o servidor. */
 type GravacaoEmPartes = Pick<ReturnType<typeof useGravacaoEmPartes>, "iniciar" | "cancelar" | "subirParteDoArquivo" | "encerrarArquivo">;
 type Inicio = Omit<Parameters<GravacaoEmPartes["iniciar"]>[0], "origem">;
 
-/** Quem corta o MP3: o Worker na tela; nos testes, um dublê. */
-export type Cortador = (arquivo: Blob, opcoes: OpcoesDoCorteNoWorker) => Promise<CorteDoMp3>;
+/** Quem corta o arquivo: o Worker na tela; nos testes, um dublê. */
+export type Cortador = (arquivo: Blob, opcoes: OpcoesDoCorteNoWorker) => Promise<CorteDoArquivo>;
+
+/**
+ * O recuo do corte (G14, parte 2): diz se o arquivo que o corte recusou vai
+ * inteiro, como uma parte só, e em que tipo (null: não vai, e vale a recusa).
+ * É o arquivo curto de um formato que o corte reconhece mas não lê (o ALAC do
+ * Gravador do iPhone, o AC-3, o Vorbis no WebM); o servidor o converte em MP3
+ * quando o Gemini não lista o codec (server/fatias-de-reuniao.ts).
+ */
+export type RecuoDoCorte = (recusa: RecusaDoCorte) => Promise<{ mimeType: TipoDaParte; duracaoMs: number } | null>;
+
+/** O arquivo inteiro como a única parte: os bytes do arquivo, de 0 ao fim, sem nada novo. */
+export function parteComOArquivoInteiro(arquivo: Blob, duracaoMs: number): ParteCortada {
+  return { novos: new Uint8Array(0), ordem: Float64Array.of(1, 0, arquivo.size), bytes: arquivo.size, duracaoMs };
+}
 
 /** Onde a importação está, para a tela: lendo o arquivo, enviando as partes, cancelando. */
 export type AndamentoDaImportacao =
@@ -25,8 +39,12 @@ export type ResultadoDaImportacao =
    * "descartada" de lá é a "cancelada" daqui).
    */
   | { tipo: "enviada"; meetingId: string; fim: Exclude<FimDoArquivo, "descartada"> }
-  /** O arquivo não serve, e nenhuma reunião nasceu: não é MP3, passa de 12 h, ou não pôde ser lido. */
-  | { tipo: "recusada"; motivo: CodigoDaRecusaDoMp3 | "ILEGIVEL" }
+  /**
+   * O arquivo não serve, e nenhuma reunião nasceu: o formato não é conhecido
+   * ou não tem suporte (`detalhe`: qual), o vídeo não tem áudio, o arquivo está
+   * danificado, passa de 12 h ou de 200 partes, ou não pôde ser lido.
+   */
+  | { tipo: "recusada"; motivo: CodigoDaRecusaDoCorte | "ILEGIVEL"; detalhe?: string }
   /** A dona cancelou. `exclusao`: o que houve com a reunião que já tinha nascido (null se nenhuma nasceu). */
   | { tipo: "cancelada"; exclusao: Exclude<ResultadoDoDescarte, "nada"> | null }
   /** A sessão acabou no meio (o Sair, ou o servidor respondeu que ela venceu): o envio para, e a reunião fica com o que subiu. */
@@ -117,23 +135,27 @@ function esperarParaTentarDeNovo(ms: number, sinal: AbortSignal): Promise<void> 
 }
 
 /**
- * A importação de um MP3 em partes (H9a do plano do gravador; o caso da Dra.
- * Glenda, um MP3 de 38 min, que o envio único recusava por passar de 10 min e
- * 10 MB). O arquivo é cortado nos quadros, num Worker (lib/corte-do-mp3.ts), e
- * as partes seguem pelo caminho da gravação em partes (useGravacaoEmPartes): a
- * reunião nasce com a origem "arquivo", cada parte vai ao aparelho e depois ao
- * servidor, e o fim vem depois da última. A tela vai ao detalhe pelo
- * aoEncerrar da gravação em partes, como no Encerrar.
+ * A importação de um arquivo em partes (H9a, H9b e H9c do plano do gravador;
+ * o caso da Dra. Glenda, um MP3 de 38 min, que o envio único recusava por
+ * passar de 10 min e 10 MB, e depois tudo o que o HiNoter importa: M4A, MP4 e
+ * MOV, WAV, OGG do WhatsApp, WebM, FLAC e AAC). O arquivo é cortado sem
+ * recodificar, num Worker (lib/corte-do-arquivo.ts, que reconhece o formato
+ * pelos bytes), e as partes seguem pelo caminho da gravação em partes
+ * (useGravacaoEmPartes): a reunião nasce com a origem "arquivo", cada parte
+ * vai ao aparelho e depois ao servidor, no tipo que o corte diz (audio/mpeg,
+ * audio/mp4, audio/ogg...), e o fim vem depois da última. A tela vai ao
+ * detalhe pelo aoEncerrar da gravação em partes, como no Encerrar.
  *
- * - O corte vem antes de tudo: o arquivo que não é MP3, ou que passa de 12 h,
- *   é recusado sem a reunião nascer.
- * - Uma parte por vez, e só depois de a anterior chegar: a seguinte é cortada
+ * - O corte vem antes de tudo: o arquivo que não se lê, sem suporte, sem áudio
+ *   ou que passa de 12 h é recusado sem a reunião nascer.
+ * - Uma parte por vez, e só depois de a anterior chegar: a seguinte é montada
  *   quando o servidor confirmou esta (ou a recusou de vez). A que não subiu
  *   (rede, 429, 5xx, a trava com outra aba) vai de novo, lida outra vez do
  *   arquivo, depois de uma espera que dobra a cada falha (até 1 min), ou assim
  *   que a conexão volta. O arquivo de horas nunca fica inteiro na memória nem
- *   na cópia do aparelho, que guarda só a parte em curso: cada parte é um
- *   File.slice das faixas dela.
+ *   na cópia do aparelho, que guarda só a parte em curso: cada parte é montada
+ *   com os bytes novos do formato (cabeçalhos, páginas) e File.slice dos
+ *   trechos do arquivo (lib/corte-comum.ts, montarParte).
  * - Cancelar, lendo, só para o corte. Enviando, exclui a reunião pelo caminho
  *   do Descartar da gravação (cancelar da gravação em partes): a parte que já
  *   sobe termina, as que esperam a vez saem sem subir, e a exclusão que falha
@@ -147,9 +169,9 @@ export function useImportacaoEmPartes(opcoes: { partes: GravacaoEmPartes; temSes
   atuais.current = opcoes;
   const andamento = useSyncExternalStore(assinar, lerAndamento, lerAndamento);
 
-  const importar = useCallback(async (arquivo: File, inicio: Inicio, aoCriarReuniao?: (meetingId: string) => void): Promise<ResultadoDaImportacao> => {
+  const importar = useCallback(async (arquivo: File, inicio: Inicio, aoCriarReuniao?: (meetingId: string) => void, recuo?: RecuoDoCorte): Promise<ResultadoDaImportacao> => {
     if (emCurso) throw new Error("Já há um arquivo sendo enviado.");
-    const { partes, temSessao, cortar = cortarMp3NoWorker } = atuais.current;
+    const { partes, temSessao, cortar = cortarArquivoNoWorker } = atuais.current;
     const corrente: EmCurso = { controle: new AbortController(), partes, meetingId: null, exclusao: null };
     emCurso = corrente;
     const sinal = corrente.controle.signal;
@@ -162,7 +184,7 @@ export function useImportacaoEmPartes(opcoes: { partes: GravacaoEmPartes; temSes
     });
     try {
       mostrar(corrente, { fase: "lendo", lidos: 0, total: arquivo.size });
-      let corte: CorteDoMp3;
+      let corte: CorteDoArquivo;
       try {
         corte = await cortar(arquivo, {
           sinal,
@@ -172,27 +194,40 @@ export function useImportacaoEmPartes(opcoes: { partes: GravacaoEmPartes; temSes
         if (cancelado()) return await cancelada();
         // Para a dona, o arquivo estragado e o defeito do corte dão o mesmo
         // aviso; o console guarda a diferença para quem a atende.
-        if (!ehCorteCancelado(erro)) console.error("[Importação] o MP3 não pôde ser cortado:", erro);
+        if (!ehCorteCancelado(erro)) console.error("[Importação] o arquivo não pôde ser cortado:", erro);
         return { tipo: "recusada", motivo: "ILEGIVEL" };
       }
       if (cancelado()) return await cancelada();
-      if (!corte.ok) return { tipo: "recusada", motivo: corte.codigo };
+      let mimeType: TipoDaParte;
+      let partesDoArquivo: ParteCortada[];
+      if (corte.ok) {
+        mimeType = corte.mimeType;
+        partesDoArquivo = corte.partes;
+      } else {
+        // O recuo do corte: o arquivo inteiro vai como uma parte só, pela
+        // mesma rota, quando quem chamou diz que ele cabe numa.
+        const inteiro = recuo ? await recuo(corte).catch(() => null) : null;
+        if (cancelado()) return await cancelada();
+        if (!inteiro) return { tipo: "recusada", motivo: corte.codigo, ...(corte.detalhe ? { detalhe: corte.detalhe } : {}) };
+        mimeType = inteiro.mimeType;
+        partesDoArquivo = [parteComOArquivoInteiro(arquivo, inteiro.duracaoMs)];
+      }
 
       const meetingId = await partes.iniciar({ ...inicio, origem: "arquivo" });
       corrente.meetingId = meetingId;
       if (cancelado()) return await cancelada();
       aoCriarReuniao?.(meetingId);
-      const total = corte.partes.length;
+      const total = partesDoArquivo.length;
       mostrar(corrente, { fase: "enviando", enviadas: 0, total });
       for (let seq = 0; seq < total; seq++) {
-        const { faixas, duracaoMs } = corte.partes[seq];
+        const parte = partesDoArquivo[seq];
         for (let espera = PRIMEIRA_ESPERA_MS; ; espera = Math.min(espera * 2, ESPERA_MAXIMA_MS)) {
           // O Sair no meio apagou as cópias do aparelho e a sessão: nada mais sobe.
           if (!temSessao()) return { tipo: "sem-sessao", meetingId };
           const desfecho = await partes.subirParteDoArquivo(meetingId, {
-            blob: new Blob(faixas.map(faixa => arquivo.slice(faixa.inicio, faixa.fim)), { type: "audio/mpeg" }),
-            mimeType: "audio/mpeg",
-            duracaoMs,
+            blob: montarParte(arquivo, parte, mimeType),
+            mimeType,
+            duracaoMs: parte.duracaoMs,
             seq,
           });
           if (cancelado() || desfecho.tipo === "descartada") return await cancelada();

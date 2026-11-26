@@ -45,7 +45,21 @@
 //    linha é o único ponteiro para a voz de quem participou: ela fica, com o
 //    prazo vencido e, na parte, sem a transcrição e fora da fila (ver
 //    `audiosQueFicaramNoBucket`). Sem a reunião, a varredura das gravações
-//    (`limparGravacoesVencidas`) a acha e tenta o bucket de novo.
+//    (`limparGravacoesVencidas`) a acha e tenta o bucket de novo. O PDF da
+//    reunião de documento (meeting_documents, H12) segue a mesma regra, e as
+//    fotos e os desenhos do resumo (meeting_attachments, H4g e H4h) também.
+// 7. O perfil de voz (H3d, server/perfil-de-voz.ts) é dado biométrico: a
+//    amostra sai do bucket com TODAS as versões, como o áudio de reunião, e a
+//    linha sai no plano. Antes, a exclusão registra a revogação do
+//    consentimento (origem "exclusao_da_conta") em voice_profile_consents, que
+//    FICA: é a prova de que houve consentimento e de quando ele acabou, sem a
+//    voz. Se o bucket recusar, a chave vai para `arquivosComFalha` (log e
+//    auditoria, como os outros arquivos) e a linha FICA, como a do áudio na
+//    regra 6: é o único ponteiro para a voz. A linha só sai no plano quando a
+//    chave dela foi lida com as outras e saiu do bucket (`perfisQueSaem`); o
+//    perfil gravado ou regravado depois da leitura também fica. Sem a conta, a
+//    varredura das gravações (`limparGravacoesVencidas`, ramo "perfisDeVoz")
+//    o acha, tenta o bucket de novo e só então tira a linha.
 
 import { and, eq, inArray, notInArray, or, sql, getTableName } from "drizzle-orm";
 import type { MySqlColumn, MySqlTable } from "drizzle-orm/mysql-core";
@@ -54,15 +68,16 @@ import { ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 // Só o tipo: o módulo da Google Agenda continua com import tardio (excluirConta).
 import type { RevogacaoNaExclusao } from "./google-agenda";
 import { chaveDoStorageDaDona, CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
+import { PREFIXO_DO_PERFIL_DE_VOZ } from "@shared/perfil-de-voz";
 import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
-  agendaReunioes, aiMatchSuggestions, auditLogs, chavesDeAcesso, connections, consents, contactAssets, contactContexts,
+  agendaReunioes, aiMatchSuggestions, entidadeMembros, pedidosPelaEntidade, entidades, importacaoDocumentosVistos, importacoesDeEntidade, auditLogs, chavesDeAcesso, contasGoogle, connections, consents, contactAssets, contactContexts,
   desafiosDeChaveDeAcesso,
   contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
-  enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAudioSlices, meetingContactSuggestions,
+  enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAttachments, meetingAudioSlices, meetingContactSuggestions, meetingDocuments,
   meetingEntities, meetingRecordings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslations, meetingTranscriptTranslations, meetingTranscripts,
-  lembretes, meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
+  lembretes, meetingFolders, meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
   opportunityDocuments, opportunityInterests, opportunityMatches, passwordResetTokens,
   platformNotifications, presidentValidations, privateContacts, savedOpportunities,
   securityEvents, sessions, sivcChecks, sivcConsents, sivcDocuments, sivcVerifications,
@@ -70,6 +85,12 @@ import {
   networkSugestoes, conexoesParticipantes, consumoDeMinutos, assinaturasDeMinutos,
   proximasAcoes,
   googleAgendaConexoes,
+  resumoPorEmail,
+  perguntasEntreReunioes,
+  modelosDeResumoProprios, preferenciasDoResumo, resumosRefeitos,
+  resumoEmAudio, buscasDoComplemento,
+  meetingParticipants, meetingFolderMembers, meetingFolderTasks,
+  voiceProfiles,
 } from "../drizzle/schema";
 
 /**
@@ -78,8 +99,14 @@ import {
  */
 export type Db = Awaited<ReturnType<typeof exigirDb>>;
 
-/** As ações de auditoria que sobrevivem à exclusão (decisão do Roberto, 02/09/2026). */
-export const ACOES_DE_AUDITORIA_PRESERVADAS = ["GOLD_ACERVO_READ", "REVOKED_SESSION_ACCESS_ATTEMPT"] as const;
+/**
+ * As ações de auditoria que sobrevivem à exclusão (decisão do Roberto,
+ * 02/09/2026). Desde a R1a, também a lista e a consulta das reuniões pela
+ * administração (MEETINGS_ADMIN_LIST e MEETING_ADMIN_READ): "quem viu as
+ * minhas reuniões?" segue com resposta depois que a conta de quem consultou
+ * sai. A cópia em scripts/exame/limpeza.mjs anda junto.
+ */
+export const ACOES_DE_AUDITORIA_PRESERVADAS = ["GOLD_ACERVO_READ", "REVOKED_SESSION_ACCESS_ATTEMPT", "MEETINGS_ADMIN_LIST", "MEETING_ADMIN_READ"] as const;
 
 /**
  * Chaves da conta, e os ids que só existem depois de olhar o banco:
@@ -107,6 +134,15 @@ type Origem = "id" | "openId" | "email" | "oportunidades" | "salas" | "verificac
 export type ContextoDaExclusao = {
   fatiasQueFicam: string[];
   gravacoesQueFicam?: string[];
+  /** Os PDFs das reuniões de documento (ids de meeting_documents) cujo objeto não saiu. */
+  documentosQueFicam?: string[];
+  /** As fotos e os desenhos do resumo (ids de meeting_attachments, H4g e H4h) cujo objeto não saiu. */
+  anexosQueFicam?: string[];
+  /**
+   * Os perfis de voz (ids de voice_profiles, H3d) cuja amostra foi lida com as
+   * outras chaves e saiu do bucket: só essas linhas saem no plano (regra 7).
+   */
+  perfisQueSaem?: string[];
 };
 
 export type PassoDeExclusao = {
@@ -172,6 +208,27 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: lembretes, coluna: lembretes.ownerId, origem: "openId" },
   // O resumo guardado da reunião (H4), as traduções dele (H11) e os itens, que carregam trechos da transcrição.
   { tabela: meetingSummaryTranslations, coluna: meetingSummaryTranslations.ownerId, origem: "openId" },
+  // O resumo por e-mail (H22): a quem a dona mandou o link (o e-mail de terceiros) e quando.
+  { tabela: resumoPorEmail, coluna: resumoPorEmail.ownerId, origem: "openId" },
+  // O Pergunte a várias reuniões (H6c): uma linha por pergunta, sem o conteúdo (quantas
+  // reuniões, o tamanho, como terminou e a avaliação da dona), para o teto de 24 h.
+  { tabela: perguntasEntreReunioes, coluna: perguntasEntreReunioes.ownerId, origem: "openId" },
+  // Os modelos de resumo da dona (H4e: nome, ícone e instruções), as preferências do
+  // resumo (o padrão, o estilo e o ajuste do tamanho) e o teto do refazer (só a hora).
+  { tabela: modelosDeResumoProprios, coluna: modelosDeResumoProprios.ownerId, origem: "openId" },
+  { tabela: preferenciasDoResumo, coluna: preferenciasDoResumo.ownerId, origem: "openId" },
+  { tabela: resumosRefeitos, coluna: resumosRefeitos.ownerId, origem: "openId" },
+  // O áudio do resumo com a voz do Gemini (H19b): a linha (o objeto sai antes, em
+  // chavesDeArquivosDaConta) e as buscas do complemento (H4i), só para o teto de 24 h.
+  { tabela: resumoEmAudio, coluna: resumoEmAudio.ownerId, origem: "openId" },
+  {
+    tabela: voiceProfiles, coluna: voiceProfiles.ownerId, origem: "openId",
+    // Só a linha cuja amostra saiu do bucket (regra 7): sem o contexto, nada
+    // a filtrar; com ele, a lista vazia não apaga nenhuma (inArray vazio é falso).
+    filtro: (_chaves, contexto) => (contexto?.perfisQueSaem ? inArray(voiceProfiles.id, contexto.perfisQueSaem) : undefined),
+    motivo: "o perfil de voz (H3d), dado biométrico: sai só a linha cuja amostra saiu do bucket com todas as versões; a que ficou é o único ponteiro para a voz, e a varredura a retenta",
+  },
+  { tabela: buscasDoComplemento, coluna: buscasDoComplemento.ownerId, origem: "openId" },
   { tabela: meetingSummaryItems, coluna: meetingSummaryItems.ownerId, origem: "openId" },
   { tabela: meetingSummaries, coluna: meetingSummaries.ownerId, origem: "openId" },
   {
@@ -188,10 +245,35 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
       : undefined),
     motivo: "a gravação cujo áudio não saiu do bucket fica como o único ponteiro para o objeto",
   },
+  {
+    tabela: meetingDocuments, coluna: meetingDocuments.ownerId, origem: "openId",
+    filtro: (_chaves, contexto) => (contexto?.documentosQueFicam?.length
+      ? notInArray(meetingDocuments.id, contexto.documentosQueFicam)
+      : undefined),
+    motivo: "o PDF da reunião de documento (H12) que não saiu do bucket fica como o único ponteiro para o objeto",
+  },
+  {
+    tabela: meetingAttachments, coluna: meetingAttachments.ownerId, origem: "openId",
+    filtro: (_chaves, contexto) => (contexto?.anexosQueFicam?.length
+      ? notInArray(meetingAttachments.id, contexto.anexosQueFicam)
+      : undefined),
+    motivo: "a foto ou o desenho do resumo (H4g e H4h) que não saiu do bucket fica como o único ponteiro para o objeto",
+  },
+  // As participantes das reuniões da dona (R1b): as participações e os convites
+  // pendentes (só o hash do token). Antes das reuniões, que elas apontam.
+  { tabela: meetingParticipants, coluna: meetingParticipants.ownerId, origem: "openId" },
   // A agenda de reuniões (H16a): o título, a hora, o local e os participantes
   // (nome e e-mail de terceiros) que a dona marcou.
   { tabela: agendaReunioes, coluna: agendaReunioes.ownerId, origem: "openId" },
   { tabela: meetings, coluna: meetings.ownerId, origem: "openId" },
+  // As pastas das reuniões (H7d): o nome, o ícone e a cor que a dona escolheu.
+  // Depois das reuniões, que apontam para elas (as da lixeira saem junto, com
+  // o resto das reuniões da conta).
+  // Os espaços de equipe das pastas da dona (R2): as membras, os convites
+  // pendentes (só o hash do token) e as tarefas da equipe. Antes das pastas.
+  { tabela: meetingFolderMembers, coluna: meetingFolderMembers.ownerId, origem: "openId" },
+  { tabela: meetingFolderTasks, coluna: meetingFolderTasks.ownerId, origem: "openId" },
+  { tabela: meetingFolders, coluna: meetingFolders.ownerId, origem: "openId" },
   { tabela: enrichmentSuggestions, coluna: enrichmentSuggestions.ownerId, origem: "openId" },
   { tabela: enrichmentMessages, coluna: enrichmentMessages.ownerId, origem: "openId" },
   { tabela: enrichmentSessions, coluna: enrichmentSessions.ownerId, origem: "openId" },
@@ -207,7 +289,18 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: networkSugestoes, coluna: networkSugestoes.ownerId, origem: "openId" },
   { tabela: conexoesParticipantes, coluna: conexoesParticipantes.ownerId, origem: "openId" },
   { tabela: consumoDeMinutos, coluna: consumoDeMinutos.ownerId, origem: "openId" },
+  // A base das associações (N1): a conta de entidade leva os associados, as
+  // importações e os HMACs vistos; a linha da entidade sai depois dos contatos.
+  // N2: os pedidos de contato que chegaram à conta da entidade.
+  { tabela: pedidosPelaEntidade, coluna: pedidosPelaEntidade.ownerId, origem: "openId" },
+  { tabela: importacaoDocumentosVistos, coluna: importacaoDocumentosVistos.ownerId, origem: "openId" },
+  { tabela: importacoesDeEntidade, coluna: importacoesDeEntidade.ownerId, origem: "openId" },
+  {
+    tabela: entidadeMembros, coluna: entidadeMembros.ownerId, origem: "openId",
+    motivo: "documento e contatos cifrados dos associados; a lista de bloqueio do removido sai junto (pendência e do Dr. Ronei)",
+  },
   { tabela: privateContacts, coluna: privateContacts.ownerId, origem: "openId" },
+  { tabela: entidades, coluna: entidades.ownerId, origem: "openId" },
 
   // ── módulo institucional: chave id ────────────────────────────────────────
   { tabela: consents, coluna: consents.userId, origem: "id" },
@@ -216,6 +309,14 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
     motivo: "a conexão com a Google Agenda (H16b): a revogação na Google vem antes do laço (revogarGoogle), e a linha sai aqui mesmo sem a confirmação dela",
   },
   { tabela: conexoesParticipantes, coluna: conexoesParticipantes.userId, origem: "id" },
+  // N2: os pedidos de contato que esta conta fez a uma entidade (levam o nome dela).
+  { tabela: pedidosPelaEntidade, coluna: pedidosPelaEntidade.userId, origem: "id" },
+  // A conta como participante das reuniões de outras donas (R1b): ela sai de
+  // todas, e a voz que a dona tinha ligado a ela volta ao nome livre ou a
+  // "Falante n" (a leitura ignora a participação que não existe mais).
+  { tabela: meetingParticipants, coluna: meetingParticipants.userId, origem: "id" },
+  // A conta como membra das equipes de outras donas (R2): ela sai de todas.
+  { tabela: meetingFolderMembers, coluna: meetingFolderMembers.userId, origem: "id" },
   { tabela: assinaturasDeMinutos, coluna: assinaturasDeMinutos.userId, origem: "id" },
   { tabela: sivcDocuments, coluna: sivcDocuments.userId, origem: "id" },
   { tabela: sivcConsents, coluna: sivcConsents.userId, origem: "id" },
@@ -234,6 +335,9 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // sem conta e vence em 5 minutos; sai pelo prazo.
   { tabela: chavesDeAcesso, coluna: chavesDeAcesso.userId, origem: "id" },
   { tabela: desafiosDeChaveDeAcesso, coluna: desafiosDeChaveDeAcesso.userId, origem: "id" },
+  // A conta Google ligada para entrar (A8): o sub e o e-mail dela. Nenhum token
+  // fica guardado, então não há o que revogar na Google.
+  { tabela: contasGoogle, coluna: contasGoogle.userId, origem: "id" },
   { tabela: trustedDevices, coluna: trustedDevices.userId, origem: "id" },
   { tabela: securityEvents, coluna: securityEvents.userId, origem: "id" },
   { tabela: sessions, coluna: sessions.userId, origem: "id" },
@@ -252,7 +356,7 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
     filtro: () => sql`${auditLogs.action} NOT IN (${sql.join(
       ACOES_DE_AUDITORIA_PRESERVADAS.map(acao => sql`${acao}`), sql`, `,
     )})`,
-    motivo: "sai o ruído; ficam as duas ações que respondem 'quem viu meus contatos'",
+    motivo: "sai o ruído; ficam as ações que respondem 'quem viu meus contatos' e 'quem viu as minhas reuniões'",
   },
 
   // ── login_attempts guarda o e-mail em minúsculas, não o id ────────────────
@@ -286,6 +390,7 @@ export const ATORES_SECUNDARIOS_PRESERVADOS = [
   { tabela: "security_events", coluna: "resolvedBy", motivo: "quem tratou o evento de segurança de OUTRA" },
   { tabela: "enrichment_suggestions", coluna: "actionedBy", motivo: "sempre a própria dona; a linha sai pelo owner_id" },
   { tabela: "strategic_groups", coluna: "memberIds", motivo: "array JSON: a conta sai da lista com UPDATE (tirarDosGruposAlheios), não com DELETE" },
+  { tabela: "voice_profile_consents", coluna: "owner_id", motivo: "o registro dos consentimentos e das revogações do perfil de voz (H3d, pontos técnicos da Cris): sem a voz, fica como prova; a exclusão grava antes a revogação dela" },
 ] as const;
 
 /** Nome legível do passo, para o relatório e para o teste. */
@@ -370,6 +475,26 @@ export async function chavesDeArquivosDaConta(
     .from(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, chaves.openId));
   for (const parte of partes) guardar(chaveDoStorageDaDona("meetings", chaves.openId, parte.chave));
 
+  // O PDF da reunião de documento (H12): a chave também é montada pelo servidor
+  // sob meetings/<openId>/.
+  const documentos = await db.select({ chave: meetingDocuments.storageKey })
+    .from(meetingDocuments).where(eq(meetingDocuments.ownerId, chaves.openId));
+  for (const documento of documentos) guardar(chaveDoStorageDaDona("meetings", chaves.openId, documento.chave));
+
+  // As fotos e os desenhos do resumo (H4g e H4h): a chave também é montada pelo
+  // servidor sob meetings/<openId>/.
+  const anexos = await db.select({ chave: meetingAttachments.storageKey })
+    .from(meetingAttachments).where(eq(meetingAttachments.ownerId, chaves.openId));
+  for (const anexo of anexos) guardar(chaveDoStorageDaDona("meetings", chaves.openId, anexo.chave));
+  // O áudio do resumo (H19b): voz sintética, montada pelo servidor sob meetings/<openId>/.
+  const audiosDoResumo = await db.select({ chave: resumoEmAudio.storageKey })
+    .from(resumoEmAudio).where(eq(resumoEmAudio.ownerId, chaves.openId));
+  for (const audio of audiosDoResumo) if (audio.chave) guardar(chaveDoStorageDaDona("meetings", chaves.openId, audio.chave));
+  // A amostra do perfil de voz (H3d): montada pelo servidor sob perfis-de-voz/<openId>/.
+  const perfisDeVoz = await db.select({ chave: voiceProfiles.storageKey })
+    .from(voiceProfiles).where(eq(voiceProfiles.ownerId, chaves.openId));
+  for (const perfil of perfisDeVoz) guardar(chaveDoStorageDaDona(PREFIXO_DO_PERFIL_DE_VOZ, chaves.openId, perfil.chave));
+
   // SIVC e Deal Room indexam pelo id (int), não pelo openId: o prefixo é outro,
   // mas a prova de posse é a mesma — foi o servidor que montou a chave.
   const documentosSivc = await db.select({ chave: sivcDocuments.fileKey })
@@ -426,6 +551,25 @@ export async function tirarDosGruposAlheios(
 export const MOTIVO_DA_PARTE_QUE_FICOU = "conta excluída; o áudio desta parte não saiu do bucket";
 
 /**
+ * Os perfis de voz (H3d) que saem no plano: a chave da amostra estava entre as
+ * lidas antes do bucket (`arquivos`) e não falhou. O perfil cuja amostra o
+ * bucket recusou fica, e também o gravado (ou regravado) depois da leitura das
+ * chaves: a amostra dele não foi tentada, e a linha é o único ponteiro para ela.
+ * Sem a conta, a varredura das gravações tenta o bucket de novo (regra 7).
+ */
+async function perfisDeVozQueSaem(db: Db, chaves: ChavesDaConta, arquivos: string[], arquivosComFalha: string[]): Promise<string[]> {
+  const perfis = await db.select({ id: voiceProfiles.id, chave: voiceProfiles.storageKey })
+    .from(voiceProfiles).where(eq(voiceProfiles.ownerId, chaves.openId));
+  if (!perfis.length) return [];
+  const tentadas = new Set(arquivos);
+  const falharam = new Set(arquivosComFalha);
+  return perfis.filter(perfil => {
+    const chave = chaveDoStorageDaDona(PREFIXO_DO_PERFIL_DE_VOZ, chaves.openId, perfil.chave) ?? "";
+    return !!chave && tentadas.has(chave) && !falharam.has(chave);
+  }).map(perfil => perfil.id);
+}
+
+/**
  * O áudio de reunião cujo objeto NÃO saiu do bucket: os ids das partes
  * (meeting_audio_slices) e das gravações inteiras (meeting_recordings). Casa
  * pelo ID da linha, não pela chave: a chave de `arquivosComFalha` passou por
@@ -437,17 +581,23 @@ async function audiosQueFicaramNoBucket(
   db: Db,
   chaves: ChavesDaConta,
   arquivosComFalha: string[],
-): Promise<{ fatias: string[]; gravacoes: string[] }> {
+): Promise<{ fatias: string[]; gravacoes: string[]; documentos: string[]; anexos: string[] }> {
   const audiosComFalha = new Set(arquivosComFalha.filter(chave => chave.startsWith("meetings/")));
-  if (!audiosComFalha.size) return { fatias: [], gravacoes: [] };
+  if (!audiosComFalha.size) return { fatias: [], gravacoes: [], documentos: [], anexos: [] };
   const ficou = (chave: string) => audiosComFalha.has(chaveDoStorageDaDona("meetings", chaves.openId, chave) ?? "");
   const partes = await db.select({ id: meetingAudioSlices.id, chave: meetingAudioSlices.storageKey })
     .from(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, chaves.openId));
   const gravacoes = await db.select({ id: meetingRecordings.id, chave: meetingRecordings.storageKey })
     .from(meetingRecordings).where(eq(meetingRecordings.ownerId, chaves.openId));
+  const documentos = await db.select({ id: meetingDocuments.id, chave: meetingDocuments.storageKey })
+    .from(meetingDocuments).where(eq(meetingDocuments.ownerId, chaves.openId));
+  const anexos = await db.select({ id: meetingAttachments.id, chave: meetingAttachments.storageKey })
+    .from(meetingAttachments).where(eq(meetingAttachments.ownerId, chaves.openId));
   return {
     fatias: partes.filter(parte => ficou(parte.chave)).map(parte => parte.id),
     gravacoes: gravacoes.filter(gravacao => ficou(gravacao.chave)).map(gravacao => gravacao.id),
+    documentos: documentos.filter(documento => ficou(documento.chave)).map(documento => documento.id),
+    anexos: anexos.filter(anexo => ficou(anexo.chave)).map(anexo => anexo.id),
   };
 }
 
@@ -484,6 +634,23 @@ async function deixarSoOPonteiroDasGravacoes(db: Db, chaves: ChavesDaConta, grav
 }
 
 /**
+ * O PDF da reunião de documento (H12) que fica guarda só o ponteiro (chave,
+ * tipo e tamanho, sem texto de ninguém) e vence na hora, como a gravação inteira.
+ */
+async function deixarSoOPonteiroDosDocumentos(db: Db, chaves: ChavesDaConta, documentosQueFicam: string[]): Promise<number> {
+  const [resultado] = await db.update(meetingDocuments).set({ expiresAt: Date.now() })
+    .where(and(eq(meetingDocuments.ownerId, chaves.openId), inArray(meetingDocuments.id, documentosQueFicam)));
+  return Number((resultado as { affectedRows?: number } | undefined)?.affectedRows ?? 0);
+}
+
+/** A foto ou o desenho do resumo (H4g e H4h) que fica guarda só o ponteiro e vence na hora, como o PDF. */
+async function deixarSoOPonteiroDosAnexos(db: Db, chaves: ChavesDaConta, anexosQueFicam: string[]): Promise<number> {
+  const [resultado] = await db.update(meetingAttachments).set({ expiresAt: Date.now() })
+    .where(and(eq(meetingAttachments.ownerId, chaves.openId), inArray(meetingAttachments.id, anexosQueFicam)));
+  return Number((resultado as { affectedRows?: number } | undefined)?.affectedRows ?? 0);
+}
+
+/**
  * Apaga a conta e tudo que é dela. Recebe o `db` por parâmetro para o teste
  * executar a lógica de verdade, sem banco, como `apagarRastroDoContato`.
  *
@@ -506,6 +673,7 @@ export async function excluirConta(
   opcoes: {
     apagarArquivo?: (chave: string) => Promise<void>;
     revogarGoogle?: (userId: number) => Promise<RevogacaoNaExclusao>;
+    registrarRevogacaoDaVoz?: (ownerId: string) => Promise<boolean>;
   } = {},
 ): Promise<RelatorioDeExclusao> {
   // O apagador do bucket só é montado quando o teste não injeta o próprio, e
@@ -516,8 +684,13 @@ export async function excluirConta(
   // DELETE simples.
   const apagarArquivo = opcoes.apagarArquivo ?? await (async () => {
     const bucket = await import("./storage");
-    return (chave: string) => (chave.startsWith("meetings/") ? bucket.storageApagarTodasAsVersoes(chave) : bucket.storageDelete(chave));
+    // O áudio de reunião e a amostra do perfil de voz (H3d) saem com todas as versões.
+    const comVersoes = (chave: string) => chave.startsWith("meetings/") || chave.startsWith(`${PREFIXO_DO_PERFIL_DE_VOZ}/`);
+    return (chave: string) => (comVersoes(chave) ? bucket.storageApagarTodasAsVersoes(chave) : bucket.storageDelete(chave));
   })();
+  // Import tardio, como o do bucket: o módulo do perfil de voz traz o banco.
+  const registrarRevogacaoDaVoz = opcoes.registrarRevogacaoDaVoz
+    ?? (async (ownerId: string) => (await import("./perfil-de-voz")).registrarRevogacaoNaExclusao(db, ownerId));
   // Import tardio, como o do bucket: o módulo da Google Agenda só entra quando
   // a exclusão roda de verdade, e o teste injeta o próprio revogador.
   const revogarGoogle = opcoes.revogarGoogle
@@ -580,7 +753,11 @@ export async function excluirConta(
   // gravação inteira ficam só como ponteiro, e os passos delas no plano deixam
   // essas linhas de fora.
   const ficaram = await audiosQueFicaramNoBucket(db, chaves, arquivosComFalha);
-  const contexto: ContextoDaExclusao = { fatiasQueFicam: ficaram.fatias, gravacoesQueFicam: ficaram.gravacoes };
+  const perfisQueSaem = await perfisDeVozQueSaem(db, chaves, arquivos, arquivosComFalha);
+  const contexto: ContextoDaExclusao = {
+    fatiasQueFicam: ficaram.fatias, gravacoesQueFicam: ficaram.gravacoes, documentosQueFicam: ficaram.documentos, anexosQueFicam: ficaram.anexos,
+    perfisQueSaem,
+  };
   if (ficaram.fatias.length) {
     const linhas = await deixarSoOPonteiro(db, chaves, ficaram.fatias);
     if (linhas > 0) passos.push({ nome: "meeting_audio_slices (ponteiro, UPDATE)", linhas });
@@ -588,6 +765,14 @@ export async function excluirConta(
   if (ficaram.gravacoes.length) {
     const linhas = await deixarSoOPonteiroDasGravacoes(db, chaves, ficaram.gravacoes);
     if (linhas > 0) passos.push({ nome: "meeting_recordings (ponteiro, UPDATE)", linhas });
+  }
+  if (ficaram.documentos.length) {
+    const linhas = await deixarSoOPonteiroDosDocumentos(db, chaves, ficaram.documentos);
+    if (linhas > 0) passos.push({ nome: "meeting_documents (ponteiro, UPDATE)", linhas });
+  }
+  if (ficaram.anexos.length) {
+    const linhas = await deixarSoOPonteiroDosAnexos(db, chaves, ficaram.anexos);
+    if (linhas > 0) passos.push({ nome: "meeting_attachments (ponteiro, UPDATE)", linhas });
   }
 
   // A Google Agenda (H16b) antes do laço, enquanto a linha ainda guarda o
@@ -610,6 +795,10 @@ export async function excluirConta(
     );
   }
 
+  // A revogação do consentimento ao perfil de voz (H3d), antes de a linha do
+  // perfil sair no plano: o registro fica (regra 7 no topo).
+  if (await registrarRevogacaoDaVoz(chaves.openId)) passos.push({ nome: "voice_profile_consents (revogação, INSERT)", linhas: 1 });
+
   for (const passo of PLANO_DE_EXCLUSAO) {
     const valores = valoresDaOrigem(chaves, passo.origem);
     if (!valores.length) continue;
@@ -626,6 +815,14 @@ export async function excluirConta(
 
   const gruposAlterados = await tirarDosGruposAlheios(db, conta.id);
   if (gruposAlterados > 0) passos.push({ nome: "strategic_groups.memberIds (UPDATE)", linhas: gruposAlterados });
+
+  // A conta que nasceu da ativação de um cadastro importado (N3): o associado é
+  // da ENTIDADE e fica com ela, como `ativado` (a reimportação não o recria),
+  // mas sem apontar para a conta que deixou de existir.
+  const [desligados] = await db.update(entidadeMembros).set({ ativadoUserId: null })
+    .where(eq(entidadeMembros.ativadoUserId, conta.id));
+  const linhasDesligadas = Number((desligados as { affectedRows?: number } | undefined)?.affectedRows ?? 0);
+  if (linhasDesligadas > 0) passos.push({ nome: "entidade_membros.ativado_user_id (UPDATE)", linhas: linhasDesligadas });
 
   // Notificação que a oportunidade dela gerou em conta de TERCEIRA (alerta de
   // compatibilidade, aprovação): a chave é a URL, não a usuária. Sem isso, a

@@ -1,13 +1,22 @@
 import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_PARTES_SEM_TRANSCRICAO } from "@shared/const";
+import { idiomaDaTranscricao } from "@shared/idioma-da-reuniao";
+import { contasDasVozes, nomesDosFalantes } from "@shared/const";
+import { ROTULO_DA_VOZ_DA_DONA } from "@shared/perfil-de-voz";
 import { meetingAudioSlices, meetings } from "../drizzle/schema";
+import { amostraDaVozDaDona } from "./perfil-de-voz";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { foraDaLixeira } from "./reuniao-visivel";
 import { GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError } from "./gemini";
 import { extrairDadosDaReuniao, gravarResultadoDaReuniao, mensagemDaFalha, ReuniaoExcluidaDuranteProcessamento, ReuniaoTomadaPorOutraExecucao } from "./meeting-service";
 import { ObjetoAusenteNoStorageError, storageGetBytes } from "./storage";
 import { entradaDoResumo } from "./resumo-da-reuniao";
 import { TAMANHO_MAXIMO_DA_PARTE } from "./fatias-de-reuniao";
-import { contextoParaAProxima, DURACAO_DA_FATIA_SEGUNDOS, montarTranscricao, TemposForaDaParteError, transcreverFatia, type ContextoDaFatiaAnterior, type Segmento } from "./transcricao-de-fatia";
+import {
+  contasComAVozDaDona, contextoParaAProxima, deslocarRotulosDasFalas, DURACAO_DA_FATIA_SEGUNDOS, ehInicioDeOutraReuniao, MARCA_DA_VOZ_DA_DONA, MARCA_DE_OUTRA_REUNIAO,
+  montarTranscricao, numeroDoRotulo, parteUsouAVozDaDona, TemposForaDaParteError, transcreverFatia, type ContextoDaFatiaAnterior, type Segmento,
+} from "./transcricao-de-fatia";
 
 /**
  * A fila de transcrição da reunião gravada em partes (G7 do desenho do
@@ -142,6 +151,9 @@ async function partesProntasParaTranscrever(db: Banco, agora: number, escopo: Es
       lt(meetingAudioSlices.attempts, TENTATIVAS_POR_PARTE),
       eq(meetings.audioPipeline, "slices"),
       inArray(meetings.status, ["recording", "uploading"]),
+      // A reunião na lixeira (H7d) fica fora da fila: as partes dela esperam,
+      // e a fila as transcreve se a dona a restaurar.
+      foraDaLixeira(),
       daDona(meetingAudioSlices.ownerId, escopo),
     ))
     .orderBy(asc(meetingAudioSlices.createdAt), asc(meetingAudioSlices.seq))
@@ -195,28 +207,59 @@ async function ultimaChegada(db: Banco, meetingId: string): Promise<number> {
  * Parte 'received' sem tentativa sobrando e sem reserva viva (o processo caiu
  * nas três, sem SIGTERM): ninguém mais a reservaria, e as seguintes esperariam
  * para sempre. Vira 'failed' (lacuna na montagem).
+ *
+ * As varreduras desta fila travam só pela chave: as linhas saem de uma leitura
+ * sem trava, e cada uma muda num UPDATE pelo id que repete as condições (a que
+ * mudou no meio não casa mais e fica). O UPDATE pela condição travava o
+ * intervalo inteiro do índice que ele percorre, com o vão até a linha
+ * seguinte, que é de outra reunião ou de outra dona; quem inseria ou movia uma
+ * linha ali se travava com ele (deadlock no laço dos testes de integração, que
+ * rodam em paralelo no mesmo banco).
  */
 async function desistirDasEsgotadas(db: Banco, agora: number, escopo: Escopo) {
   // A parte cuja linha nasceu e cujo objeto nunca subiu (o bucket recusou e a
   // aba fechou): passada a espera, é lacuna, como a que nem chegou.
-  await db.update(meetingAudioSlices).set({ status: "failed", lastError: "NAO_RECEBIDA", updatedAt: agora })
-    .where(and(
-      eq(meetingAudioSlices.status, "uploading"),
-      lt(meetingAudioSlices.createdAt, agora - ESPERA_PELA_PARTE_QUE_FALTA_MS),
-      daDona(meetingAudioSlices.ownerId, escopo),
-    ));
-  await db.update(meetingAudioSlices).set({ status: "failed", lastError: "TENTATIVAS_ESGOTADAS", lockToken: null, lockedUntil: null, updatedAt: agora })
-    .where(and(
-      eq(meetingAudioSlices.status, "received"),
-      sql`${meetingAudioSlices.attempts} >= ${TENTATIVAS_POR_PARTE}`,
-      or(isNull(meetingAudioSlices.lockedUntil), lt(meetingAudioSlices.lockedUntil, agora)),
-      daDona(meetingAudioSlices.ownerId, escopo),
-    ));
+  const naoRecebida = (id?: string) => and(
+    id ? eq(meetingAudioSlices.id, id) : undefined,
+    eq(meetingAudioSlices.status, "uploading"),
+    lt(meetingAudioSlices.createdAt, agora - ESPERA_PELA_PARTE_QUE_FALTA_MS),
+    daDona(meetingAudioSlices.ownerId, escopo),
+  );
+  for (const { id } of await db.select({ id: meetingAudioSlices.id }).from(meetingAudioSlices).where(naoRecebida())) {
+    await db.update(meetingAudioSlices).set({ status: "failed", lastError: "NAO_RECEBIDA", updatedAt: agora }).where(naoRecebida(id));
+  }
+  const esgotada = (id?: string) => and(
+    id ? eq(meetingAudioSlices.id, id) : undefined,
+    eq(meetingAudioSlices.status, "received"),
+    sql`${meetingAudioSlices.attempts} >= ${TENTATIVAS_POR_PARTE}`,
+    or(isNull(meetingAudioSlices.lockedUntil), lt(meetingAudioSlices.lockedUntil, agora)),
+    daDona(meetingAudioSlices.ownerId, escopo),
+  );
+  for (const { id } of await db.select({ id: meetingAudioSlices.id }).from(meetingAudioSlices).where(esgotada())) {
+    await db.update(meetingAudioSlices).set({ status: "failed", lastError: "TENTATIVAS_ESGOTADAS", lockToken: null, lockedUntil: null, updatedAt: agora })
+      .where(esgotada(id));
+  }
 }
 
-/** O que a parte anterior passa adiante: onde a reunião está e quem já falou. */
-async function contextoDaAnterior(db: Banco, meetingId: string, seq: number): Promise<{ inicioMs: number; anterior?: ContextoDaFatiaAnterior }> {
-  if (seq === 0) return { inicioMs: 0 };
+/**
+ * O que a parte anterior passa adiante: onde a reunião está e quem já falou.
+ *
+ * Na reunião juntada que retranscreve (H17), a primeira parte de cada reunião
+ * juntada traz a marca de outra conversa (MARCA_DE_OUTRA_REUNIAO, em
+ * server/transcricao-de-fatia.ts); a parte que vem depois de uma dessas sem
+ * nenhuma transcrita da mesma conversa no meio (a marcada falhou de vez)
+ * também começa outra conversa. Aí não vai `anterior`: vem `rotulosUsados`,
+ * os rótulos que as partes de antes já usam, para a fila pôr os desta parte
+ * depois deles.
+ *
+ * `vozDaDonaContinua` (H3d): esta parte pode levar a amostra da voz da dona
+ * sem trocar quem é o rótulo fixo dela. Na mesma conversa, só se a parte
+ * anterior transcrita também levou (ou não há nenhuma); na outra conversa, só
+ * se todas as transcritas antes levaram. Uma reunião que começou sem a amostra
+ * (o perfil gravado no meio dela) segue sem ela até o fim.
+ */
+async function contextoDaAnterior(db: Banco, meetingId: string, seq: number, propria: unknown): Promise<{ inicioMs: number; anterior?: ContextoDaFatiaAnterior; rotulosUsados?: string[]; vozDaDonaContinua: boolean }> {
+  if (seq === 0) return { inicioMs: 0, vozDaDonaContinua: true };
   const anteriores = await db.select({
     seq: meetingAudioSlices.seq, status: meetingAudioSlices.status, durationMs: meetingAudioSlices.durationMs,
     offsetMs: meetingAudioSlices.offsetMs, result: meetingAudioSlices.result,
@@ -227,15 +270,35 @@ async function contextoDaAnterior(db: Banco, meetingId: string, seq: number): Pr
   const porSeq = new Map(anteriores.map(a => [a.seq, a]));
   let inicioMs = 0;
   for (let s = 0; s < seq; s++) inicioMs += porSeq.get(s)?.durationMs ?? DURACAO_DA_FATIA_SEGUNDOS * 1000;
-  const ultimaTranscrita = [...anteriores].reverse().find(a => a.status === "transcribed");
+  // De trás para a frente: a primeira transcrita é da mesma conversa, a não ser
+  // que antes dela apareça o começo de outra que não foi transcrita.
+  let outraConversa = ehInicioDeOutraReuniao(propria);
+  let ultimaTranscrita: (typeof anteriores)[number] | undefined;
+  if (!outraConversa) {
+    for (const parte of [...anteriores].reverse()) {
+      if (parte.status === "transcribed") { ultimaTranscrita = parte; break; }
+      if (ehInicioDeOutraReuniao(parte.result)) { outraConversa = true; break; }
+    }
+  }
+  if (outraConversa) {
+    const rotulos = new Set<string>();
+    for (const parte of anteriores) {
+      if (parte.status !== "transcribed") continue;
+      const r = parte.result as { segmentos?: Array<{ falante?: unknown }>; contexto?: { falantes?: unknown } } | null;
+      for (const segmento of Array.isArray(r?.segmentos) ? r.segmentos : []) if (numeroDoRotulo(segmento?.falante)) rotulos.add(String(segmento.falante));
+      for (const falante of Array.isArray(r?.contexto?.falantes) ? r.contexto.falantes : []) if (numeroDoRotulo(falante)) rotulos.add(String(falante));
+    }
+    const vozDaDonaContinua = anteriores.filter(parte => parte.status === "transcribed").every(parte => parteUsouAVozDaDona(parte.result));
+    return { inicioMs, rotulosUsados: Array.from(rotulos).sort((a, b) => numeroDoRotulo(a) - numeroDoRotulo(b)), vozDaDonaContinua };
+  }
   const contexto = (ultimaTranscrita?.result as { contexto?: ContextoDaFatiaAnterior } | null)?.contexto;
-  return { inicioMs, anterior: contexto };
+  return { inicioMs, anterior: contexto, vozDaDonaContinua: !ultimaTranscrita || parteUsouAVozDaDona(ultimaTranscrita.result) };
 }
 
 async function transcreverUmaParte(db: Banco, parte: { id: string; meetingId: string; seq: number }, token: string) {
   const [linha] = await db.select({
     ownerId: meetingAudioSlices.ownerId, storageKey: meetingAudioSlices.storageKey, mimeType: meetingAudioSlices.mimeType,
-    durationMs: meetingAudioSlices.durationMs, attempts: meetingAudioSlices.attempts, idioma: meetings.language,
+    durationMs: meetingAudioSlices.durationMs, attempts: meetingAudioSlices.attempts, idioma: meetings.language, result: meetingAudioSlices.result,
   }).from(meetingAudioSlices)
     .innerJoin(meetings, and(eq(meetings.id, meetingAudioSlices.meetingId), eq(meetings.ownerId, meetingAudioSlices.ownerId)))
     .where(and(eq(meetingAudioSlices.id, parte.id), eq(meetingAudioSlices.lockToken, token))).limit(1);
@@ -244,19 +307,52 @@ async function transcreverUmaParte(db: Banco, parte: { id: string; meetingId: st
   // tempos degradados (e devolve as contagens) em vez de pedir outra.
   const ultimaTentativa = linha.attempts >= TENTATIVAS_POR_PARTE;
   try {
-    const { inicioMs, anterior } = await contextoDaAnterior(db, parte.meetingId, parte.seq);
+    const { inicioMs, anterior, rotulosUsados, vozDaDonaContinua } = await contextoDaAnterior(db, parte.meetingId, parte.seq, linha.result);
     const audio = await storageGetBytes(linha.storageKey, TAMANHO_MAXIMO_DA_PARTE);
-    const { segmentos, modelo, tempos } = await comVagaDeIA(() => transcreverFatia({
+    // O perfil de voz da dona (H3d, server/perfil-de-voz.ts): a amostra vai
+    // junto, e a voz dela sai com o rótulo fixo. Sem perfil, como antes.
+    let amostra = vozDaDonaContinua ? await amostraDaVozDaDona(db, linha.ownerId) : null;
+    const transcrever = (amostraDaVoz: typeof amostra) => comVagaDeIA(() => transcreverFatia({
       audio, mimeType: linha.mimeType, idioma: linha.idioma, inicioSegundos: inicioMs / 1000, duracaoSegundos: linha.durationMs / 1000, anterior,
-      ultimaTentativa,
+      ultimaTentativa, ...(amostraDaVoz ? { amostraDaVoz } : {}),
     }));
-    const contexto = contextoParaAProxima(segmentos, anterior);
+    let transcrita: Awaited<ReturnType<typeof transcrever>>;
+    try {
+      transcrita = await transcrever(amostra);
+    } catch (erro) {
+      // A IA recusou o pedido com a amostra (uma amostra corrompida dá 400) ou
+      // cortou a resposta: a parte não paga pela amostra. Vai de novo, na mesma
+      // tentativa, sem ela, e fica sem a marca da voz da dona (as partes
+      // seguintes também seguem sem a amostra, e a montagem não liga o F1).
+      if (!amostra || !(erro instanceof GeminiRecusouChamadaError || erro instanceof GeminiRespostaCortadaError)) throw erro;
+      console.warn(`[Fila] a IA não aceitou a parte ${parte.seq} com a amostra da voz da dona (${codigoDoErro(erro)}); vai sem ela`);
+      amostra = null;
+      transcrita = await transcrever(null);
+    }
+    const { modelo, tempos } = transcrita;
+    // Outra conversa (a junção, H17): a IA rotulou as vozes do zero (F1, F2...),
+    // e os rótulos vão para depois dos que as partes de antes já usam. Com a
+    // amostra, a dona fica no rótulo fixo (é a mesma pessoa nas reuniões
+    // juntadas, todas dela) e as outras, que a IA começou em F2, vão para
+    // depois dos usados.
+    const outraConversa = rotulosUsados !== undefined;
+    const maiorUsado = outraConversa ? Math.max(0, ...rotulosUsados.map(numeroDoRotulo)) : 0;
+    const segmentos = !outraConversa
+      ? transcrita.segmentos
+      : amostra
+        ? deslocarRotulosDasFalas(transcrita.segmentos, Math.max(0, maiorUsado - 1), [ROTULO_DA_VOZ_DA_DONA])
+        : deslocarRotulosDasFalas(transcrita.segmentos, maiorUsado);
+    const contexto = contextoParaAProxima(segmentos, outraConversa ? { falantes: rotulosUsados, ultimasFalas: [] } : anterior);
+    // A marca da outra conversa fica no result depois de transcrita: se a parte
+    // seguinte falhar de vez, a de depois dela não herda a conversa de antes.
+    const marca = ehInicioDeOutraReuniao(linha.result) ? { [MARCA_DE_OUTRA_REUNIAO]: true } : {};
     // Só grava quem ainda tem a reserva: outra instância que a retomou depois
     // de vencer, ou a exclusão da reunião, vencem esta escrita. A parte aceita
     // com os tempos degradados leva as contagens (`tempos`) no result, para
     // uma consulta achá-la.
     await db.update(meetingAudioSlices).set({
-      status: "transcribed", result: { segmentos, contexto, ...(tempos ? { tempos } : {}) }, model: modelo.slice(0, 80), offsetMs: inicioMs,
+      status: "transcribed", result: { segmentos, contexto, ...(tempos ? { tempos } : {}), ...marca, ...(amostra ? { [MARCA_DA_VOZ_DA_DONA]: true } : {}) },
+      model: modelo.slice(0, 80), offsetMs: inicioMs,
       lastError: null, lockToken: null, lockedUntil: null, updatedAt: Date.now(),
     }).where(and(eq(meetingAudioSlices.id, parte.id), eq(meetingAudioSlices.lockToken, token)));
   } catch (erro) {
@@ -289,7 +385,7 @@ async function encerrarAbandonadas(db: Banco, agora: number, escopo: Escopo) {
     }).from(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, r.id));
     if (partes?.ultimaParte !== null && partes?.ultimaParte !== undefined && Number(partes.ultimaParte) > corte) continue;
     if (partes?.maiorSeq === null || partes?.maiorSeq === undefined) {
-      await db.update(meetings).set({ status: "failed", processingError: "A gravação foi interrompida antes de enviar o áudio.", updatedAt: agora })
+      await db.update(meetings).set({ status: "failed", processingError: MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, updatedAt: agora })
         .where(and(eq(meetings.id, r.id), eq(meetings.status, "recording")));
       continue;
     }
@@ -303,15 +399,23 @@ async function encerrarAbandonadas(db: Banco, agora: number, escopo: Escopo) {
  * reserva venceu): volta a 'uploading', e a próxima rodada a retoma.
  */
 async function retomarMontagensPresas(db: Banco, agora: number, escopo: Escopo) {
-  const presas = and(eq(meetings.audioPipeline, "slices"), eq(meetings.status, "processing"), lt(meetings.lockedUntil, agora), daDona(meetings.ownerId, escopo));
-  // Esgotadas as tentativas (o processo caiu em todas), vira falha; senão, volta.
-  await db.update(meetings).set({ status: "failed", processingError: MENSAGEM_DA_FALHA_DA_MONTAGEM, lockToken: null, lockedUntil: null, updatedAt: agora })
-    .where(and(presas, sql`${meetings.attempts} >= ${TENTATIVAS_POR_REUNIAO}`));
-  await db.update(meetings).set({ status: "uploading", lockToken: null, lockedUntil: null })
-    .where(and(presas, lt(meetings.attempts, TENTATIVAS_POR_REUNIAO)));
+  // Pela chave, como as varreduras das partes (desistirDasEsgotadas): a leitura
+  // não trava, e cada UPDATE pelo id repete as condições.
+  const presa = (id?: string) => and(
+    id ? eq(meetings.id, id) : undefined,
+    eq(meetings.audioPipeline, "slices"), eq(meetings.status, "processing"), lt(meetings.lockedUntil, agora), daDona(meetings.ownerId, escopo),
+  );
+  for (const { id, attempts } of await db.select({ id: meetings.id, attempts: meetings.attempts }).from(meetings).where(presa())) {
+    // Esgotadas as tentativas (o processo caiu em todas), vira falha; senão, volta.
+    if (attempts >= TENTATIVAS_POR_REUNIAO) {
+      await db.update(meetings).set({ status: "failed", processingError: MENSAGEM_FALHA_DA_MONTAGEM, lockToken: null, lockedUntil: null, updatedAt: agora })
+        .where(and(presa(id), sql`${meetings.attempts} >= ${TENTATIVAS_POR_REUNIAO}`));
+    } else {
+      await db.update(meetings).set({ status: "uploading", lockToken: null, lockedUntil: null })
+        .where(and(presa(id), lt(meetings.attempts, TENTATIVAS_POR_REUNIAO)));
+    }
+  }
 }
-
-const MENSAGEM_DA_FALHA_DA_MONTAGEM = "Não foi possível processar esta reunião. Tente de novo mais tarde.";
 
 /**
  * Reuniões encerradas cujas partes estão todas resolvidas: transcritas ou com
@@ -324,6 +428,7 @@ async function reunioesProntasParaMontar(db: Banco, agora: number, escopo: Escop
       eq(meetings.audioPipeline, "slices"), eq(meetings.status, "uploading"),
       or(isNull(meetings.lockedUntil), lt(meetings.lockedUntil, agora)),
       lt(meetings.attempts, TENTATIVAS_POR_REUNIAO),
+      foraDaLixeira(),
       daDona(meetings.ownerId, escopo),
     ))
     .limit(10);
@@ -349,7 +454,7 @@ async function montarUmaReuniao(db: Banco, reuniao: { id: string; ownerId: strin
     attempts: sql`${meetings.attempts} + 1`,
   }).where(and(
     eq(meetings.id, reuniao.id), eq(meetings.ownerId, reuniao.ownerId), eq(meetings.status, "uploading"),
-    or(isNull(meetings.lockedUntil), lt(meetings.lockedUntil, ficha)),
+    or(isNull(meetings.lockedUntil), lt(meetings.lockedUntil, ficha)), foraDaLixeira(),
   ));
   if (!linhas(tomada)) {
     tokensVivos.delete(token);
@@ -366,8 +471,13 @@ async function montarUmaReuniao(db: Banco, reuniao: { id: string; ownerId: strin
       segmentos: ((p.result as { segmentos?: Segmento[] } | null)?.segmentos ?? []),
     }));
     const { segmentos, texto } = montarTranscricao(transcritas, Math.max(reuniao.esperadas ?? 0, ...partes.map(p => p.seq + 1)));
-    if (!texto.trim()) throw new Error("Não foi possível transcrever o áudio desta reunião.");
-    const [r] = await db.select({ idioma: meetings.language }).from(meetings).where(eq(meetings.id, reuniao.id)).limit(1);
+    // A frase é compartilhada (shared/const.ts): a tela a mostra no idioma da dona.
+    if (!texto.trim()) throw new Error(MENSAGEM_PARTES_SEM_TRANSCRICAO);
+    const [r] = await db.select({ idioma: meetings.language, speakerAccounts: meetings.speakerAccounts, speakerNames: meetings.speakerNames }).from(meetings)
+      .where(and(eq(meetings.id, reuniao.id), eq(meetings.ownerId, reuniao.ownerId))).limit(1);
+    // A voz da dona reconhecida pela amostra (H3d) já sai ligada à conta dela,
+    // menos se a dona deu nome livre ao rótulo (ela soltou a conta).
+    const contasDasVozesNovas = contasComAVozDaDona(partes, segmentos, contasDasVozes(r?.speakerAccounts), nomesDosFalantes(r?.speakerNames));
     // A extração lê as falas com o rótulo da voz ("{F1}: fala"), a mesma
     // entrada do resumo: sem ele, a IA não via quem fala e chutava a presença
     // de quem fala sem dizer o próprio nome (revisão do pacote P2B). A
@@ -376,9 +486,19 @@ async function montarUmaReuniao(db: Banco, reuniao: { id: string; ownerId: strin
     const extraction = await comVagaDeIA(() => extrairDadosDaReuniao(entrada.texto, { rotulada: entrada.rotulada }));
     // Só o que foi transcrito conta minutos: a lacuna não é cobrada.
     const durationSeconds = Math.round(partes.filter(p => p.status === "transcribed").reduce((total, p) => total + p.durationMs, 0) / 1000);
+    // Os nomes das vozes ficam (zerarNomes: false): a montagem relê as falas
+    // que as partes guardam, com os mesmos rótulos. O reprocesso, que
+    // transcreve de novo, os zera antes (em meeting-service.ts). A junção
+    // (server/juntar-reunioes.ts) traz os nomes das reuniões juntadas já nos
+    // rótulos novos; quando ela retranscreve, ficam só os de antes da primeira
+    // parte retranscrita, e cada reunião retranscrita começa depois dos
+    // rótulos já usados (contextoDaAnterior), sem herdar as vozes nem os nomes.
     await gravarResultadoDaReuniao(db, {
-      meetingId: reuniao.id, ownerId: reuniao.ownerId, ficha, limparAntes: true, durationSeconds,
-      transcription: { text: texto, segments: segmentos, language: r?.idioma ?? "pt-BR" },
+      meetingId: reuniao.id, ownerId: reuniao.ownerId, ficha, limparAntes: true, zerarNomes: false, durationSeconds,
+      ...(contasDasVozesNovas ? { contasDasVozes: contasDasVozesNovas } : {}),
+      // Com "Detectar sozinho" (G16), o idioma da transcrição (e do resumo) é o
+      // que mais aparece nas falas de todas as partes; senão, o escolhido.
+      transcription: { text: texto, segments: segmentos, language: idiomaDaTranscricao(r?.idioma, segmentos) },
       extraction,
     });
     await db.update(meetings).set({ lockToken: null, lockedUntil: null }).where(and(eq(meetings.id, reuniao.id), eq(meetings.lockToken, token)));
@@ -484,12 +604,31 @@ export async function pararFila(): Promise<{ partes: number; reunioes: number }>
   // A tentativa devolvida não conta: a parte não falhou, o processo é que saiu.
   const tokens = Array.from(tokensVivos);
   if (!tokens.length) return { partes: 0, reunioes: 0 };
-  const partes = await db.update(meetingAudioSlices).set({ lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetingAudioSlices.attempts} - 1, 0)` })
-    .where(and(inArray(meetingAudioSlices.lockToken, tokens), eq(meetingAudioSlices.status, "received")));
-  const reunioes = await db.update(meetings).set({ status: "uploading", lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetings.attempts} - 1, 0)` })
-    .where(and(inArray(meetings.lockToken, tokens), eq(meetings.status, "processing"), eq(meetings.audioPipeline, "slices")));
+  // Cada reserva volta pela chave da linha, com o token no WHERE. O UPDATE por
+  // `lock_token IN (...)` não tem índice para a coluna: varria as partes em
+  // 'received' e as reuniões em montagem de todas as donas, travando cada uma,
+  // e se travava com quem as movia no índice. As linhas saem de uma leitura
+  // sem trava pelo índice do estado.
+  const parteNaFila = (token: string, id?: string) => and(id ? eq(meetingAudioSlices.id, id) : undefined, eq(meetingAudioSlices.status, "received"), eq(meetingAudioSlices.lockToken, token));
+  const emMontagem = (token: string, id?: string) => and(id ? eq(meetings.id, id) : undefined, eq(meetings.audioPipeline, "slices"), eq(meetings.status, "processing"), eq(meetings.lockToken, token));
+  let partes = 0;
+  const reservasDePartes = await db.select({ id: meetingAudioSlices.id, token: meetingAudioSlices.lockToken }).from(meetingAudioSlices)
+    .where(and(eq(meetingAudioSlices.status, "received"), inArray(meetingAudioSlices.lockToken, tokens)));
+  for (const { id, token } of reservasDePartes) {
+    if (!token) continue;
+    partes += linhas(await db.update(meetingAudioSlices).set({ lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetingAudioSlices.attempts} - 1, 0)` })
+      .where(parteNaFila(token, id)));
+  }
+  let reunioes = 0;
+  const reservasDeReunioes = await db.select({ id: meetings.id, token: meetings.lockToken }).from(meetings)
+    .where(and(eq(meetings.audioPipeline, "slices"), eq(meetings.status, "processing"), inArray(meetings.lockToken, tokens)));
+  for (const { id, token } of reservasDeReunioes) {
+    if (!token) continue;
+    reunioes += linhas(await db.update(meetings).set({ status: "uploading", lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetings.attempts} - 1, 0)` })
+      .where(emMontagem(token, id)));
+  }
   tokensVivos.clear();
-  return { partes: linhas(partes), reunioes: linhas(reunioes) };
+  return { partes, reunioes };
 }
 
 /** Só para os testes: a fila volta a aceitar rodadas. */
@@ -497,4 +636,6 @@ export function religarParaTestes() {
   parada = false;
 }
 
-export const _paraTestes = { tokensVivos, novoToken, rodando: () => rodando, emCurso };
+// montarUmaReuniao entra para o teste da tomada: a reunião que vai para a
+// lixeira entre a seleção (reunioesProntasParaMontar) e a tomada não é tomada.
+export const _paraTestes = { tokensVivos, novoToken, rodando: () => rodando, emCurso, montarUmaReuniao };

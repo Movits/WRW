@@ -19,13 +19,18 @@ import { ALVOS_DO_ITEM } from "@shared/reuniao-no-match";
 import { resumoDoNetworkInteligente } from "../network-inteligente";
 import { garantirCodigosAnonimos } from "../network-codigo-anonimo";
 import { perfilDoContato } from "../network-perfil-do-contato";
-import { ContatoNaoEncontrado, definirDisponibilidade, procurarConexoesNaRedeGlobal } from "../network-rede-global";
+import { AssociadoAtivado, ContatoNaoEncontrado, definirDisponibilidade, procurarConexoesNaRedeGlobal } from "../network-rede-global";
 import {
   avancarConexao, ComissaoAntesDoFechamento, ConexaoNaoEncontrada, contarConexoes, definirStatusDeComissao,
   ETAPAS_DA_CONEXAO, EtapaForaDeOrdem, listarConexoesDaSolicitante, listarTodasAsConexoes, ORIGENS_DA_CONEXAO, sincronizarConexoesInternas,
+  trancarANotaEntreMembras, type ConexaoParaQuemPergunta,
 } from "../network-registro";
 import { createAuditLog } from "../security";
+import { anotarConexoesComEntidade, contatoPeloPedido, pedirContatoPelaEntidade } from "../pedidos-pela-entidade";
+import { MENSAGEM_DO_PEDIDO_MAX } from "@shared/pedidos-pela-entidade";
+import { veAsConexoesSugeridas } from "@shared/qualificacao-do-perfil";
 import { hasValidConsent } from "./consent";
+import { plataformaProcedure } from "./_procedures";
 
 /**
  * Meu Network Inteligente — a rede particular da dona como inteligência
@@ -72,21 +77,8 @@ const termoDoSmartMatch = (userId: number) => hasValidConsent(userId, "termo_sma
 /** As 17 categorias de "O que preciso", na forma que o z.enum pede (a lista é a de shared/o-que-preciso.ts). */
 const CHAVES_DO_PRECISO = CHAVES_O_QUE_PRECISO as unknown as [ChaveOQuePreciso, ...ChaveOQuePreciso[]];
 
-/**
- * A rastreabilidade das conexões é da PLATAFORMA, e a plataforma aqui é a
- * staff: admin e presidente — a mesma régua de `isStaff` em
- * oportunidade-acesso.ts. Não é o `adminProcedure`, que aceita Ouro: Ouro é a
- * categoria premium paga (Governança, 14/09), e a lista atravessa a rede
- * particular de TODAS as donas (o que os contatos têm e procuram, e qual conta
- * responde por cada ID anônimo), por fora das travas do acervo Ouro (nível
- * 'ouro' no contato, termo da dona, GOLD_ACERVO_READ).
- */
-const plataformaProcedure = protectedProcedure.use(({ ctx, next }) => {
-  if (ctx.user.role !== "admin" && ctx.user.role !== "president") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Acesso restrito à administração da plataforma." });
-  }
-  return next({ ctx });
-});
+// A rastreabilidade das conexões é da PLATAFORMA (admin e presidente):
+// plataformaProcedure, em routers/_procedures.ts.
 
 export const MENSAGEM_INTERPRETACAO_FALHOU = "Não foi possível interpretar as informações agora. Tente de novo em alguns minutos.";
 
@@ -129,7 +121,7 @@ function traduzirErro(erro: unknown): never {
   if (erro instanceof ContatoNaoEncontrado || erro instanceof ConexaoNaoEncontrada || erro instanceof PendenciaNaoEncontrada) {
     throw new TRPCError({ code: "NOT_FOUND", message: erro.message });
   }
-  if (erro instanceof EtapaForaDeOrdem || erro instanceof ComissaoAntesDoFechamento) {
+  if (erro instanceof EtapaForaDeOrdem || erro instanceof ComissaoAntesDoFechamento || erro instanceof AssociadoAtivado) {
     throw new TRPCError({ code: "CONFLICT", message: erro.message });
   }
   if (erro instanceof ValorInvalido) throw new TRPCError({ code: "BAD_REQUEST", message: erro.message });
@@ -167,7 +159,12 @@ export const networkInteligenteRouter = router({
     if (!(await termoDoSmartMatch(ctx.user.id))) return { termoAceito: false as const };
     await sincronizarConexoesInternas(ctx.user.openId);
     const lista = await listarConexoesDaSolicitante(ctx.user);
-    return { termoAceito: true as const, contagem: contarConexoes(lista), lista: lista.slice(0, 50) };
+    // U3: a nota das conexões entre membras (PLATFORM_MATCH) não vai a quem ainda não vê a lista das conexões
+    // sugeridas (a Bronze, inclusive a que tem o poder de distribuidora: o poder não é nível). A contagem não lê nota.
+    const visiveis: ConexaoParaQuemPergunta[] = veAsConexoesSugeridas(ctx.user.role) ? lista : trancarANotaEntreMembras(lista);
+    // N2: o lado que é associado de uma entidade sai como "membro da entidade X", com o pedido de contato.
+    const anotadas = await anotarConexoesComEntidade(ctx.user, visiveis.slice(0, 50));
+    return { termoAceito: true as const, contagem: contarConexoes(lista), lista: anotadas };
   }),
 
   avancarConexao: protectedProcedure
@@ -196,6 +193,26 @@ export const networkInteligenteRouter = router({
       return procurarConexoesNaRedeGlobal(ctx.user, { contactId: input?.contactId });
     }),
 
+  // N2: pedir o contato do associado do outro lado de uma conexão pela entidade
+  // dele. O nome de quem pede vai à entidade (a tela avisa e pede a ciência).
+  pedirContatoPelaEntidade: protectedProcedure
+    .input(z.object({
+      conexaoId: z.string().uuid(),
+      mensagem: z.string().max(MENSAGEM_DO_PEDIDO_MAX).optional(),
+      cienteDoNome: z.literal(true),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (!(await termoDoSmartMatch(ctx.user.id))) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "SMART_MATCH_CONSENT_REQUIRED" });
+      }
+      return pedirContatoPelaEntidade(ctx.user, { conexaoId: input.conexaoId, mensagem: input.mensagem });
+    }),
+
+  // N2: no "aceito", o nome da empresa e o canal que ela escolheu, com auditoria.
+  contatoPeloPedido: protectedProcedure
+    .input(z.object({ pedidoId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => contatoPeloPedido(ctx.user, input.pedidoId)),
+
   // Itens 20 e 22: o perfil do contato e a memória de relacionamento.
   contato: protectedProcedure
     .input(z.object({ contactId: z.number().int().positive() }))
@@ -203,7 +220,8 @@ export const networkInteligenteRouter = router({
       const termoSmartMatch = await termoDoSmartMatch(ctx.user.id);
       const perfil = await perfilDoContato(ctx.user, input.contactId, { termoSmartMatch });
       if (!perfil) throw new TRPCError({ code: "NOT_FOUND", message: "Contato não encontrado na sua rede." });
-      return perfil;
+      if (!perfil.conexoes.termoAceito) return perfil;
+      return { ...perfil, conexoes: { ...perfil.conexoes, lista: await anotarConexoesComEntidade(ctx.user, perfil.conexoes.lista) } };
     }),
 
   // Itens 14 e 26: "Disponibilizar este contato para oportunidades da rede",

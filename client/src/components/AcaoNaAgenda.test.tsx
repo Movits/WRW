@@ -121,10 +121,10 @@ describe("a linha da agenda", () => {
     act(() => onSuccess!({ naGoogle: "ok" }, { id: "x" }));
     expect(toast.success).toHaveBeenCalledWith("A ação está na sua Google Agenda.");
     act(() => onSuccess!({ naGoogle: null }, { id: "x" }));
-    expect(toast.info).toHaveBeenCalledWith("O prazo desta ação já passou: ela fica só na WRW.");
+    expect(toast.info).toHaveBeenCalledWith("O prazo desta ação já passou: ela fica só na Marquesa Global Match.");
     act(() => onSuccess!({ naGoogle: "falhou", motivo: "revogada" }, { id: "x" }));
     expect(toast.warning).toHaveBeenCalledWith(
-      "A ação está salva na WRW, mas não foi para a sua Google Agenda. Reconecte a Google Agenda no Perfil.", { duration: 10_000 });
+      "A ação está salva na Marquesa Global Match, mas não foi para a sua Google Agenda. Reconecte a Google Agenda no Perfil.", { duration: 10_000 });
     // A conexão quebrada: o estado dela é relido.
     expect(duble.invalidados).toEqual(["googleAgenda"]);
     onSettled!();

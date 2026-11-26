@@ -140,6 +140,15 @@ O repositório já tem `Dockerfile`, então o Railway não precisa adivinhar nad
 cofre for cifrado com o `JWT_SECRET` e um dia esse segredo for rotacionado por
 motivo de segurança, o conteúdo do cofre se torna ilegível.
 
+A base das associações (N1, `docs/arquitetura/entidades.md`) EXIGE a
+`VAULT_ENCRYPTION_KEY` com 32 caracteres ou mais e uma chave própria,
+`ENTIDADES_HMAC_KEY` (32 ou mais; `openssl rand -base64 48`): o HMAC do CNPJ dos
+associados, que acha o repetido sem guardar o número em claro. Sem as duas, o
+servidor sobe, mas a importação e a lista do painel da entidade recusam com
+`ENTIDADES_CHAVES_AUSENTES`. Não troque a `ENTIDADES_HMAC_KEY` depois da primeira
+carga: os repetidos deixariam de ser achados (e a troca da `VAULT_ENCRYPTION_KEY`
+torna ilegíveis os documentos e contatos guardados).
+
 A recusa é proposital, em `server/_core/env.ts`. A versão do Manus caía para
 um valor padrão embutido no código, o que significa que qualquer pessoa com o
 código conseguia assinar uma sessão válida.
@@ -152,14 +161,18 @@ código conseguia assinar uma sessão válida.
 | `FRONTEND_URL` | links de e-mail e redirects | o endereço público do site |
 | `LLM_API_URL` | as chamadas de texto: matches, enriquecimento, extração, tradução | `https://generativelanguage.googleapis.com/v1beta/openai` |
 | `LLM_API_KEY` | a chave do endpoint acima | Google AI Studio |
-| `RESEND_API_KEY` | e-mail de recuperação de senha | resend.com |
+| `RESEND_API_KEY` | e-mail de recuperação de senha e o resumo por e-mail (H22, até 50 e-mails por conta a cada 24 h); no plano grátis da Resend (100 por dia para a plataforma inteira), o resumo pode esgotar a cota do "Esqueci a senha" | resend.com |
 | `EMAIL_FROM` | remetente | `nao-responda@seudominio` (o nome WRW é posto pelo código) |
 | `LLM_AUDIO_MODEL` | opcional: modelo da transcrição | padrão `gemini-3.5-flash`; só id do Gemini, no formato `gemini-<versão>`, nunca alias: `-latest`, id sem versão (`gemini-pro`) ou de outro provedor é recusado, avisa no log e cai no padrão |
 | `LLM_AUDIO_MODEL_RESERVA` | opcional: modelo reserva da transcrição (assume no 503/cota) | padrão `gemini-3.5-flash-lite`; a mesma guarda do `LLM_AUDIO_MODEL` |
+| `LLM_TTS_MODEL` | opcional: a voz do Gemini do "Baixar o áudio do resumo" (H19b) | padrão `gemini-3.8-flash-lite-tts`; a mesma guarda do `LLM_AUDIO_MODEL` |
+| `MATCH_SEMANTICO_ESTREITO` | opcional: liga o critério semântico estreito do motor privado de match (N7, `server/match-service.ts`) | vazio (o padrão) = desligado, e nenhum texto da agenda vai ao Gemini; `1` liga. Não ligue em produção antes de publicar a versão nova do termo do Smart Match, que hoje diz que nada sai da plataforma, nem antes de calibrar o limiar (`docs/medir-o-match.md`) |
+| `LLM_MODEL_BUSCA` | opcional: o modelo da busca na web do complemento de um item (H4i, ferramenta `google_search`) | padrão `gemini-3.5-flash`; a mesma guarda do `LLM_AUDIO_MODEL` |
 | `LLM_MODEL` | opcional: modelo das chamadas de texto sem função (tradução, FAQ, Memória, recomendações, complementos de contato, mapa mental, tradução do resumo guardado e e-mail de retorno), que vão ao `LLM_API_URL`; é também o da extração, o do resumo e o do Pergunte, quando a variável deles está vazia | padrão `gemini-3.5-flash`; id concreto, nunca alias: `latest` ou id sem número de versão (`gemini-pro`) é recusado, avisa no log e cai no padrão; id de outro provedor compatível com a OpenAI passa (`gpt-4o-2024-08-06`) |
 | `LLM_MODEL_EXTRACAO` | opcional: modelo da extração da reunião (Tenho/Preciso e contatos) | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL`. Antes de pôr o `gemini-3.5-flash-lite` aqui, leia o parágrafo abaixo da tabela: ele não devolve todas as entidades da reunião |
 | `LLM_MODEL_RESUMO` | opcional: modelo do resumo guardado da reunião. O mapa mental, que sai da mesma fila logo depois do resumo, e a tradução do resumo não seguem esta variável: ficam no `LLM_MODEL` | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL` |
 | `LLM_MODEL_PERGUNTA` | opcional: modelo do Pergunte à reunião | sem padrão próprio: segue o `LLM_MODEL`; a mesma guarda; recusado, cai no `LLM_MODEL` |
+| `LLM_MODEL_ESCOLHA_DO_MODELO` | opcional: modelo do "a IA escolhe o modelo" do resumo (H4e), uma classificação curta | padrão próprio `gemini-3.5-flash-lite` quando o `LLM_API_URL` é a API do Gemini; fora dela, o `LLM_MODEL`; a mesma guarda; recusado, cai no degrau seguinte. `LLM_RACIOCINIO_ESCOLHA_DO_MODELO` é a variável do raciocínio dela, como as abaixo |
 | `LLM_RACIOCINIO_EXTRACAO`, `LLM_RACIOCINIO_RESUMO` e `LLM_RACIOCINIO_PERGUNTA` | opcionais: quanto o modelo raciocina na extração da reunião, no resumo guardado e no Pergunte à reunião, cada função com a sua | sem valor (o padrão), o pedido sai sem o campo e o modelo raciocina no padrão dele, como sempre; `minimal`, `low`, `medium` ou `high` sobem como `reasoning_effort`; outro valor (inclusive `none`, que só desliga o raciocínio no Gemini 2.5) é recusado, avisa no log e não manda nada. Defina só depois de a bancada rodar o braço b, e só na função que usa o Flash: o Flash-Lite não raciocinou na bancada, e `low` pode fazê-lo raciocinar (não medido) |
 
 A transcrição e os embeddings (`server/gemini.ts`) não usam o `LLM_API_URL`:
@@ -169,12 +182,14 @@ sem ela, `GOOGLE_API_KEY`). Por isso o modelo do áudio só aceita o formato
 embeddings com a chave errada: chaves separadas ainda não existem no código.
 
 O texto tem um modelo por função, na ordem: a variável da função
-(`LLM_MODEL_EXTRACAO`, `LLM_MODEL_RESUMO` ou `LLM_MODEL_PERGUNTA`) > o padrão
+(`LLM_MODEL_EXTRACAO`, `LLM_MODEL_RESUMO`, `LLM_MODEL_PERGUNTA` ou
+`LLM_MODEL_ESCOLHA_DO_MODELO`) > o padrão
 da função no código, quando houver e o `LLM_API_URL` for a API do Gemini
 (`generativelanguage.googleapis.com`) > `LLM_MODEL` > o padrão. Variável
-recusada cai no degrau seguinte. Hoje nenhuma função tem padrão no código: sem
-variável, as três seguem o `LLM_MODEL`, e o deploy não troca o modelo de
-nenhuma. Ficam no `LLM_MODEL` as chamadas sem função: a tradução, o FAQ, a
+recusada cai no degrau seguinte. Das três funções que a bancada mediu, nenhuma
+tem padrão no código: sem variável, as três seguem o `LLM_MODEL`, e o deploy
+não troca o modelo de nenhuma. A escolha do modelo do resumo (H4e) tem o Lite
+como padrão. Ficam no `LLM_MODEL` as chamadas sem função: a tradução, o FAQ, a
 Memória, as recomendações e os complementos de contato, que não passam função
 nenhuma, e o mapa mental, a tradução do resumo guardado e o e-mail de retorno,
 que passam `funcao: null`. Quem chama sem função não lê nenhuma variável de
@@ -321,6 +336,53 @@ WRW só mexe nos eventos das reuniões da agenda e das próximas ações com pra
 Política de Privacidade (Cris) e a descrição do uso da agenda na verificação da Google
 precisam dizer o mesmo.
 
+### Só para "Continuar com Google" (opcional)
+
+Entrar e se cadastrar com a conta Google, e ligar a conta Google a uma conta de e-mail
+que já existe, no Perfil (A8; `server/entrar-com-google.ts` e
+`server/rotas-de-entrar-com-google.ts`). Usa o MESMO cliente OAuth da Google Agenda,
+com um URI de retorno próprio e só os escopos `openid` e `email` (nenhum token da
+Google fica guardado). Só existe com as quatro variáveis abaixo; sem qualquer uma, o
+botão some do login, do cadastro e do Perfil, e `/api/entrar-com-google/ir` e
+`/api/entrar-com-google/retorno` dão 404. O Desligar do Perfil continua valendo para
+quem já ligou.
+
+| Variável | Para quê | Valor |
+|---|---|---|
+| `GOOGLE_OAUTH_CLIENT_ID` | o mesmo cliente da Google Agenda | o ID do cliente |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | o segredo do mesmo cliente | o segredo do cliente |
+| `FRONTEND_URL` | vira o URI de retorno, `<FRONTEND_URL>/api/entrar-com-google/retorno` | https; http só em `localhost` |
+| `ENTRAR_COM_GOOGLE` | liga a função | `ligado`; qualquer outro valor, ou nenhum, a desliga |
+
+**Antes de pôr `ENTRAR_COM_GOOGLE=ligado`:**
+
+1. Cadastre no cliente OAuth do Google Cloud (Credenciais, o cliente "Aplicativo da
+   Web", "URIs de redirecionamento autorizados") o endereço
+   `https://wrwglobal.org/api/entrar-com-google/retorno`, exatamente assim (o
+   `FRONTEND_URL` de produção mais o caminho). Sem ele, a Google para numa página de
+   erro (`redirect_uri_mismatch`).
+2. **Enquanto o app do Google Cloud estiver em modo Teste, só os testadores entram.** As
+   contas Google fora da lista de usuários de teste param na página "Acesso bloqueado"
+   da própria Google, sem voltar à WRW. Diferente da Google Agenda, aqui não há lista
+   de contas da WRW: o botão aparece antes de a pessoa entrar, para todo mundo. Por isso
+   a chave fica desligada até a Google verificar o app, ou ligada só enquanto a Glenda e
+   o time testam com as contas Google deles na lista de testadores.
+
+**Como funciona:** state, PKCE (S256) e nonce na ida, num cookie cifrado de 10 min só no
+caminho das rotas; na volta, o `id_token` vem do endpoint de token da Google (pelo
+TLS) e são conferidos o destinatário, o emissor, o prazo, o nonce e o
+`email_verified`. A conta decide pelo `sub` (`contas_google`), nunca pelo e-mail: a
+conta da WRW que já tem o e-mail da conta Google NÃO é ligada sozinha; a pessoa entra
+com a senha e liga no Perfil (ligar pede uma entrada dos últimos 10 minutos). O login
+nunca cria conta: só o botão do cadastro cria (Bronze, sem senha, cadastro por concluir).
+A sessão é a do login por senha (90 dias), com o mesmo bloqueio por tentativas, e há um
+teto de 60 idas e voltas por rede a cada 15 min. Entrada, ligar e desligar vão à
+auditoria (`LOGIN` com `metodo: "google"`, `GOOGLE_ACCOUNT_LINKED`,
+`GOOGLE_ACCOUNT_UNLINKED`), na transação. A redefinição de senha tira a conta Google
+ligada, como tira as chaves de acesso. No app das lojas e nos navegadores de dentro de
+outros apps (Instagram, Facebook), o botão não aparece: a Google recusa entrar de
+dentro de WebView.
+
 ### Só para o exame de produção
 
 `scripts/checar-producao.mjs` roda na sua máquina, não no Render, e por isso não
@@ -362,6 +424,22 @@ ela redirecionava qualquer requisição anônima para a URL assinada. Exceção 
 12/11/2026: o áudio da reunião com link aberto sai por
 `/reuniao-aberta/{token}/audio`, sem sessão, enquanto a dona mantém o link ligado
 (`server/link-aberto-da-reuniao.ts`).
+
+**Baixar o áudio da reunião (H8c, 20/11/2026).** A dona baixa o áudio inteiro em MP3 ou
+M4A por `GET /api/reunioes/baixar-audio/{ficha}`: a ficha é de uso único, vale 2 minutos
+e só para a sessão que a pediu (`meetings.baixarAudio`, que audita
+`MEETING_AUDIO_DOWNLOADED` na mesma transação), e as partes vêm do bucket pelo servidor,
+sem URL assinada para o navegador. Quem converte é o **ffmpeg que o `Dockerfile` instala**
+(pacote da Debian bookworm, sem as recomendações): pela conta dos índices da Debian, são
+200 pacotes e cerca de 480 MB a mais na imagem, porque o `libavdevice` do ffmpeg traz o
+Mesa e o LLVM junto, e cerca de 134 MB de download no build. A conversão roda com
+prioridade baixa (nice 10), no máximo 2 por vez, e cada dona baixa até 10 áudios por
+hora. Sem o ffmpeg o servidor sobe do mesmo jeito, e só o "Baixar o áudio" responde
+`AUDIO_INDISPONIVEL` (o log diz `[Áudio] o ffmpeg ... não subiu`). Com o Node como root (a
+imagem não tem `USER`), o ffmpeg só roda como o usuário nobody: se o host negar a troca de
+usuário (as capacidades SETUID e SETGID removidas do contêiner), ele não sobe como root, e o
+mesmo `AUDIO_INDISPONIVEL` sai, com `[Áudio] o sistema não deixou o ffmpeg rodar como o
+usuário nobody` no log.
 
 **Gravação de reunião.** `server/routers/meetings.ts` recebe o áudio como base64
 de até 15 MB em uma requisição e transcreve com LLM dentro dela. Um request pode

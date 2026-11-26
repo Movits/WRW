@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -73,10 +74,10 @@ const traducoesDe = async (meetingId: string) => (await db()).select().from(meet
 async function limpar() {
   const banco = await db();
   for (const dona of [DONA, OUTRA]) {
-    await banco.delete(meetingSummaryTranslations).where(eq(meetingSummaryTranslations.ownerId, dona));
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, dona));
-    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
-    await banco.delete(meetings).where(eq(meetings.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaryTranslations, eq(meetingSummaryTranslations.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaries, eq(meetingSummaries.ownerId, dona));
+    await apagarPelaChave(banco, meetings, eq(meetings.ownerId, dona));
   }
 }
 
@@ -131,8 +132,10 @@ describe.skipIf(!temBanco)("Tradução do resumo guardado no banco (integração
     const enviado = enviadoEm(pedirJsonAIA.mock.calls[0][0] as Pedido);
     expect(enviado.itens).toEqual([]);
     expect(enviado.rotulos.map(r => r.rotulo).sort()).toEqual(["Contrato", "Lojas", "Transportadora"]);
-    // O mapa ainda na fila não manda rótulo nenhum.
-    await (await db()).update(meetingSummaries).set({ mindMapStatus: "pending" }).where(eq(meetingSummaries.meetingId, meetingId));
+    // O mapa ainda na fila, sem mapa guardado, não manda rótulo nenhum. (Com um
+    // mapa guardado, a fila está refazendo em outro estilo, H10b: o de antes
+    // segue à vista e é traduzido, em server/mapa-mental-edicao.integracao.test.ts.)
+    await (await db()).update(meetingSummaries).set({ mindMapStatus: "pending", mindMap: null }).where(eq(meetingSummaries.meetingId, meetingId));
     pedirJsonAIA.mockClear();
     await traducao.traduzirResumoDaDona(DONA, meetingId, "es");
     expect(enviadoEm(pedirJsonAIA.mock.calls[0][0] as Pedido).rotulos).toEqual([]);
@@ -163,8 +166,8 @@ describe.skipIf(!temBanco)("Tradução do resumo guardado no banco (integração
     expect(resposta).toEqual({
       estado: "pronta", idioma: "en", mapa: {},
       itens: [
-        { section: "action", subject: null, text: "EN {F2} avisa a transportadora", assignee: "{F2}", due: "EN até sexta", excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 0, status: "pending", escritoPelaDona: false },
-        { section: "task", subject: "EN Lojas", text: "EN Publicar o app com {F1}", assignee: null, due: null, excerpt: "a gente publica o app nas lojas", startSeconds: 5, status: "confirmed", escritoPelaDona: false },
+        { section: "action", subject: null, text: "EN {F2} avisa a transportadora", assignee: "{F2}", due: "EN até sexta", excerpt: "Decidimos não renovar o contrato com a transportadora", startSeconds: 0, status: "pending", escritoPelaDona: false, trechoForaDaTranscricao: false },
+        { section: "task", subject: "EN Lojas", text: "EN Publicar o app com {F1}", assignee: null, due: null, excerpt: "a gente publica o app nas lojas", startSeconds: 5, status: "confirmed", escritoPelaDona: false, trechoForaDaTranscricao: false },
       ],
     });
     expect(antes).toHaveBeenCalledTimes(1);
@@ -178,6 +181,16 @@ describe.skipIf(!temBanco)("Tradução do resumo guardado no banco (integração
     const processando = await reuniaoComResumo({ status: "processing" });
     await expect(traducao.traduzirResumoDaDona(DONA, processando.meetingId, "en")).resolves.toEqual({ estado: "sem_resumo", idioma: "en" });
     expect(pedirJsonAIA).not.toHaveBeenCalled();
+  });
+
+  it("G16: o resumo escrito num idioma fora dos 10 da tela (italiano) é traduzido para o pt-BR, e a IA sabe de que idioma", async () => {
+    const pronta = await reuniaoComResumo();
+    await (await db()).update(meetingSummaries).set({ language: "it" }).where(eq(meetingSummaries.id, pronta.resumoId));
+    pedirJsonAIA.mockImplementation(paraIngles);
+    const resposta = await traducao.traduzirResumoDaDona(DONA, pronta.meetingId, "pt-BR");
+    expect(resposta.estado === "traduzindo" || resposta.estado === "pronta").toBe(true);
+    await vi.waitFor(() => expect(pedirJsonAIA).toHaveBeenCalled());
+    expect(String(pedirJsonAIA.mock.calls[0][0].sistema)).toContain("escritas em italiano");
   });
 
   it("a dona edita um item pelo caminho de verdade (H4f): só ele vai à IA, sem o resto do resumo nem o mapa, e a vaga sai uma vez", async () => {
@@ -226,7 +239,7 @@ describe.skipIf(!temBanco)("Tradução do resumo guardado no banco (integração
     const banco = await db();
 
     // A fila refaz o resumo: itens novos e a versão sobe.
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.summaryId, resumoId));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.summaryId, resumoId));
     const novo = crypto.randomUUID();
     await banco.insert(meetingSummaryItems).values({
       id: novo, summaryId: resumoId, meetingId, ownerId: DONA, section: "decision", position: 0, text: "Renovar com outra transportadora",

@@ -158,6 +158,16 @@ describe("o appRouter inteiro", () => {
     "reuniaoAberta.mapaMental", "reuniaoAberta.pedirMapa",
     // A tradução do resumo guardado (H11), pelo link.
     "reuniaoAberta.traduzirResumo",
+    // A senha do link (H23): quem a digita não tem conta.
+    "reuniaoAberta.entrar",
+    // As fotos e os desenhos do resumo (H4g e H4h), pelo link.
+    "reuniaoAberta.anexos",
+    // O convite da entidade ao app (N1): quem abre o link ainda não tem conta.
+    "conviteDeEntidade.ver",
+    // A ativação do cadastro importado (N3): quem abre o link ainda não tem conta.
+    "ativacaoDeCadastro.ver", "ativacaoDeCadastro.ativar",
+    // Entrar com a conta Google (A8): o login e o cadastro perguntam se o botão aparece.
+    "contaGoogle.disponivel",
   ]);
   let caminhos: string[] = [];
 

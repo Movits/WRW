@@ -79,11 +79,12 @@ vi.mock("./db", async importOriginal => {
         },
       }),
     }),
-    // O reset apaga as chaves de acesso e os desafios da conta (A6); esta conta não tem nenhum.
+    // O reset apaga as chaves de acesso e os desafios da conta (A6) e a conta
+    // Google ligada (A8); esta conta não tem nenhum.
     delete: (tabela: Table) => ({
       where: async () => {
         const nome = getTableName(tabela);
-        if (nome !== "chaves_de_acesso" && nome !== "desafios_de_chave_de_acesso") throw new Error(`DELETE inesperado em ${nome}`);
+        if (nome !== "chaves_de_acesso" && nome !== "desafios_de_chave_de_acesso" && nome !== "contas_google") throw new Error(`DELETE inesperado em ${nome}`);
         return [{ affectedRows: 0 }, undefined];
       },
     }),

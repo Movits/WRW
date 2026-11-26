@@ -10,6 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExcluirMinhaConta } from "@/components/ExcluirMinhaConta";
 import { ConexaoGoogleAgenda } from "@/components/ConexaoGoogleAgenda";
+import { PerfilDeVoz } from "@/components/PerfilDeVoz";
+import { ChavesDeAcesso } from "@/components/ChavesDeAcesso";
+import { ContaGoogleNoPerfil } from "@/components/ContaGoogleNoPerfil";
 import { TravaDoApp } from "@/components/TravaDoApp";
 import { AssistenteDeTexto } from "@/components/AssistenteDeTexto";
 import { QualificacaoDoPerfil } from "@/components/QualificacaoDoPerfil";
@@ -18,6 +21,7 @@ import { LIMITE_DA_BIO_GRAVADA } from "@shared/apresentacao";
 import { DemandasDoPerfil, EditorDoQuePreciso } from "@/components/OQuePreciso";
 import { categoriasPendentes, demandasParaGravar, lerDemandas, type DemandaDetalhada } from "@shared/o-que-preciso";
 import { toast } from "sonner";
+import { traduzirMensagemDoServidor } from "@/lib/mensagem-de-erro";
 import { exigeCadastroEmpresarial, mascararCadastroEmpresarial, normalizarCadastroEmpresarial } from "@shared/business-registration";
 import { sortOptionsAlphabetically, sortTextAlphabetically } from "@shared/option-sorting";
 import { rotulosComLegado } from "@shared/setores";
@@ -194,6 +198,11 @@ export default function Profile() {
   // A segunda camada (14/09): as demandas detalhadas e as categorias que já estavam gravadas ao abrir a edição.
   const [whatINeedDetails, setWhatINeedDetails] = useState<DemandaDetalhada[]>([]);
   const [categoriasJaSalvas, setCategoriasJaSalvas] = useState<string[]>([]);
+  // A versão de "O que tenho" e "O que preciso" que ESTA edição carregou, guardada ao abrir
+  // a edição junto com as listas, e não lida de `data` ao salvar: o perfil pode ser relido
+  // no meio (a reunião confirmou um item em outra aba). O servidor a usa para acrescentar
+  // o que entrou depois, em vez de apagar (server/listas-do-perfil.ts).
+  const [versaoDasListas, setVersaoDasListas] = useState<string | undefined>(undefined);
 
   const startEditing = () => {
     setDisplayName(profile?.displayName || user?.name || "");
@@ -219,6 +228,7 @@ export default function Profile() {
     setWhatINeed(necessidadesSalvas);
     setWhatINeedDetails(lerDemandas((profile as any)?.whatINeedDetails));
     setCategoriasJaSalvas(necessidadesSalvas);
+    setVersaoDasListas(data?.versaoDasListas);
     setEditing(true);
   };
 
@@ -239,7 +249,9 @@ export default function Profile() {
       // primeira mensagem em vez do array cru.
       let msg = err.message;
       try { const issues = JSON.parse(err.message); if (Array.isArray(issues) && issues[0]?.message) msg = issues[0].message; } catch { /* mensagem simples */ }
-      toast.error(msg);
+      // As frases conhecidas do servidor saem no idioma da tela: entre elas, a do perfil
+      // que mudou em outra tela com a edição aberta (CONFLICT; nada foi salvo).
+      toast.error(traduzirMensagemDoServidor(msg, t));
     },
   });
 
@@ -275,6 +287,7 @@ export default function Profile() {
       whatINeed,
       // Cada demanda separada, sem as em branco; o servidor valida de novo.
       whatINeedDetails: demandasParaGravar(whatINeed, whatINeedDetails),
+      versaoDasListas,
     });
   };
 
@@ -746,6 +759,18 @@ export default function Profile() {
         {/* A Google Agenda (H16b): só aparece com a função disponível no
             servidor; fora da edição, como a zona de risco abaixo. */}
         {!editing && <ConexaoGoogleAgenda />}
+
+        {/* O perfil de voz (H3d): a dona grava a própria voz, e as reuniões
+            dela a reconhecem. Fora da edição, como a Google Agenda. */}
+        {!editing && <PerfilDeVoz />}
+
+        {/* As chaves de acesso (A7): entrar com Face ID ou digital. Só aparece
+            com a função disponível neste endereço e fora da casca das lojas. */}
+        {!editing && <ChavesDeAcesso />}
+
+        {/* Entrar com a conta Google (A8): ligar e desligar. Aparece com a função
+            ligada no servidor ou com uma conta Google já ligada. */}
+        {!editing && <ContaGoogleNoPerfil />}
 
         {/* A trava do app das lojas (Face ID ou digital ao abrir): só aparece
             dentro do app, que guarda a escolha e pede a biometria. */}

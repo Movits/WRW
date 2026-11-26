@@ -3,13 +3,53 @@ import { TRPCError } from "@trpc/server";
 import { and, asc, count, eq, max, ne, sql } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { reuniaoForaDeVista, reuniaoVisivel } from "./reuniao-visivel";
 import { exigirReuniaoDoLink } from "./link-aberto-da-reuniao";
 import { MENSAGEM_ITEM_NAO_ENCONTRADO, MENSAGEM_RESUMO_CHEIO, MENSAGEM_RESUMO_SENDO_GERADO, MENSAGEM_SO_ACAO_TEM_CAIXA } from "@shared/const";
-import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo, type ModeloDeResumo } from "@shared/modelos-de-resumo";
+import {
+  ESTILO_DO_RESUMO_PADRAO, INSTRUCOES_DO_PEDIDO_MAX, MODELO_DE_RESUMO_PADRAO, escolhaComoTexto, escolhaDoTexto, estiloDoResumo, iconeDoModelo, modeloDeResumo,
+  type EscolhaDoModelo, type EstiloDoResumo, type RespostaDoTamanho,
+} from "@shared/modelos-de-resumo";
+import { modelosDeResumoProprios } from "../drizzle/schema";
+import { colunasDaEscolha, colunasDoPrimeiroResumo, normalizarInstrucoes, reservarRefazer, type ColunasDoPedido } from "./modelos-proprios";
 import { ITENS_DO_RESUMO_MAX, secaoTemAssunto, secaoTemResponsavel, type SecaoDoItem } from "@shared/item-do-resumo";
+import { mesmoTitulo, tituloSugeridoValido } from "@shared/titulo-sugerido";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { MENSAGEM_SEM_TRANSCRICAO } from "./reuniao-com-ia";
 import { apagarAcaoDoItem, criarDoItem, escreverFeita, garantirAcoesDosItensConfirmados, levarEdicaoDoItemAAcao, type Executor } from "./proximas-acoes";
+import { transcricaoEstaEditada, trechosNaTranscricaoDeAgora } from "./editar-transcricao";
+import { consultasDoComplemento, fonteDoComplemento } from "@shared/complemento-pela-busca";
+
+/** As colunas do complemento pela busca (H4i), lidas com o item. */
+const COLUNAS_DO_COMPLEMENTO = {
+  complementText: meetingSummaryItems.complementText,
+  complementSourceUrl: meetingSummaryItems.complementSourceUrl,
+  complementSourceTitle: meetingSummaryItems.complementSourceTitle,
+  complementQueries: meetingSummaryItems.complementQueries,
+  complementStatus: meetingSummaryItems.complementStatus,
+};
+type ColunasDoComplemento = {
+  complementText: string | null; complementSourceUrl: string | null; complementSourceTitle: string | null;
+  complementQueries: unknown; complementStatus: string | null;
+};
+export type ComplementoNaTela = { texto: string; fonte: string | null; titulo: string | null; consultas: string[]; situacao: "pending" | "confirmed" };
+
+/**
+ * O complemento pela busca (H4i) como a tela o recebe. A dona vê o que espera
+ * a decisão e o confirmado; o link aberto, só o confirmado (`soConfirmado`), sem
+ * as consultas. A fonte passa de novo pela conferência (só https).
+ */
+export function complementoNaTela(linha: ColunasDoComplemento, soConfirmado: boolean): ComplementoNaTela | null {
+  const situacao = linha.complementStatus === "confirmed" ? "confirmed" : linha.complementStatus === "pending" ? "pending" : null;
+  if (!situacao || !linha.complementText || (soConfirmado && situacao !== "confirmed")) return null;
+  return {
+    texto: linha.complementText,
+    fonte: fonteDoComplemento(linha.complementSourceUrl),
+    titulo: linha.complementSourceTitle,
+    consultas: soConfirmado ? [] : consultasDoComplemento(linha.complementQueries),
+    situacao,
+  };
+}
 
 /**
  * O resumo guardado da reunião (H4 do desenho do gravador,
@@ -44,7 +84,23 @@ const COLUNAS_DO_RESUMO = {
   language: meetingSummaries.language,
   lastError: meetingSummaries.lastError,
   template: meetingSummaries.template,
+  // O pedido da dona (H4e): o modelo dela, "a IA escolhe", o estilo, as
+  // instruções e a resposta a "O resumo teve o tamanho certo?".
+  customTemplateId: meetingSummaries.customTemplateId,
+  aiTemplate: meetingSummaries.aiTemplate,
+  style: meetingSummaries.style,
+  instructions: meetingSummaries.instructions,
+  lengthFeedback: meetingSummaries.lengthFeedback,
   version: meetingSummaries.version,
+  // Quando a fila gravou a versão de agora: a transcrição editada depois disso
+  // (H18) faz a tela oferecer "Refazer o resumo".
+  generatedAt: meetingSummaries.generatedAt,
+  // Se a transcrição que essa versão leu estava editada (nulo: de antes da H18,
+  // leu a da IA): voltar tudo ao original devolve a que ela leu.
+  transcriptEdited: meetingSummaries.transcriptEdited,
+  // O título que a IA sugere (só para a dona; o link não o recebe).
+  suggestedTitle: meetingSummaries.suggestedTitle,
+  suggestedTitleStatus: meetingSummaries.suggestedTitleStatus,
 };
 
 /**
@@ -69,13 +125,13 @@ function temVersaoAnterior(linha: { status: string; version: number } | undefine
 const foraDaFila = (status: string) => status === "ready" || status === "failed";
 
 /**
- * A reunião da dona, não apagada, ou NOT_FOUND. O mapa mental
+ * A reunião da dona, não apagada e fora da lixeira (H7d), ou NOT_FOUND. O mapa mental
  * (server/mapa-mental-guardado.ts) usa a mesma. `travar`: numa transação, a
  * linha fica presa até o fim dela, e o estado lido é o mais novo.
  */
 export async function reuniaoDaDona(db: Executor, ownerId: string, meetingId: string, travar = false) {
-  const consulta = db.select({ status: meetings.status }).from(meetings)
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"))).limit(1);
+  const consulta = db.select({ status: meetings.status, title: meetings.title }).from(meetings)
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel())).limit(1);
   const [reuniao] = await (travar ? consulta.for("update") : consulta);
   if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
   return reuniao;
@@ -98,10 +154,10 @@ async function linhaDoResumo(db: Executor, ownerId: string, meetingId: string, t
  */
 export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
   const db = await exigirDb();
-  await reuniaoDaDona(db, ownerId, meetingId);
+  const reuniao = await reuniaoDaDona(db, ownerId, meetingId);
   const linha = await linhaDoResumo(db, ownerId, meetingId);
   const estado = estadoDe(linha, Date.now());
-  const itens = linha
+  const lidos = linha
     ? await db.select({
       id: meetingSummaryItems.id,
       section: meetingSummaryItems.section,
@@ -117,14 +173,84 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
       // Quem escreveu e se a dona editou (H4f): a tela marca o que é dela.
       origin: meetingSummaryItems.origin,
       editedAt: meetingSummaryItems.editedAt,
+      // O estado de antes do Ignorar: no item pendente, marca o que a dona
+      // ignorou e a IA trouxe de volta no refazer (T29; drizzle/schema.ts).
+      statusBeforeIgnore: meetingSummaryItems.statusBeforeIgnore,
+      ...COLUNAS_DO_COMPLEMENTO,
     }).from(meetingSummaryItems)
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, ownerId)))
       .orderBy(asc(meetingSummaryItems.position))
     : [];
+  // O modelo da dona (H4e) pelo nome e pelo ícone de agora; apagado, o resumo
+  // fica no Geral (apagarModeloProprio já solta a coluna).
+  const [proprio] = linha?.customTemplateId
+    ? await db.select({ id: modelosDeResumoProprios.id, nome: modelosDeResumoProprios.nome, icone: modelosDeResumoProprios.icone }).from(modelosDeResumoProprios)
+      .where(and(eq(modelosDeResumoProprios.id, linha.customTemplateId), eq(modelosDeResumoProprios.ownerId, ownerId))).limit(1)
+    : [];
+  const modelo = linha ? modeloDeResumo(linha.template) ?? MODELO_DE_RESUMO_PADRAO : null;
+  const escolha: EscolhaDoModelo | null = !linha ? null
+    : linha.aiTemplate === "pending" ? { tipo: "ia" }
+    : proprio ? { tipo: "proprio", id: proprio.id } : { tipo: "pronto", modelo: modelo ?? MODELO_DE_RESUMO_PADRAO };
+  const itens = lidos.map(({ complementText, complementSourceUrl, complementSourceTitle, complementQueries, complementStatus, statusBeforeIgnore, ...item }) => ({
+    ...item,
+    // O item que a dona ignorou e a IA repetiu no "Refazer como…" (H4d): volta
+    // pendente, e a tela avisa que voltou (decisão 3 da PR #217).
+    voltouDoIgnorado: item.status === "pending" && statusBeforeIgnore !== null,
+    complemento: complementoNaTela({ complementText, complementSourceUrl, complementSourceTitle, complementQueries, complementStatus }, false),
+  }));
   return {
-    estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, modelo: linha ? modeloDeResumo(linha.template) ?? MODELO_DE_RESUMO_PADRAO : null,
+    estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, modelo,
+    modeloProprio: proprio ? { id: proprio.id, nome: proprio.nome, icone: iconeDoModelo(proprio.icone) ?? "📝" } : null,
+    // O texto da escolha, como a tela o usa no "Refazer o resumo".
+    escolha: escolha ? escolhaComoTexto(escolha) : null,
+    escolhidoPelaIA: linha?.aiTemplate === "chosen", iaVaiEscolher: linha?.aiTemplate === "pending",
+    estilo: linha ? estiloDoResumo(linha.style) ?? ESTILO_DO_RESUMO_PADRAO : null,
+    instrucoes: linha?.instructions ?? null,
+    tamanho: (linha?.lengthFeedback ?? null) as RespostaDoTamanho | null,
     erro: estado === "falhou" ? linha?.lastError ?? null : null, versaoAnterior: temVersaoAnterior(linha), itens,
+    tituloSugerido: tituloSugeridoNaTela(estado, linha, reuniao.title),
+    transcricaoEditadaDepois: await transcricaoEditadaDepoisDoResumo(db, ownerId, meetingId, linha),
   };
+}
+
+/**
+ * A dona mudou a transcrição (H18) depois que a fila gravou a versão de agora
+ * do resumo: os itens e o mapa mental saíram da versão anterior, e a tela
+ * oferece "Refazer o resumo". Só com uma versão gravada e fora da fila: o
+ * resumo na fila (o primeiro, ou o refazer pedido) já vai ler a versão nova. A edição trava a reunião antes de
+ * pegar a hora, como a gravação do resumo: a que chega depois do resumo gravado
+ * tem sempre a hora maior (server/editar-transcricao.ts).
+ *
+ * Mudar depois do resumo não basta: a versão da IA é uma só. O resumo que leu
+ * a versão da IA (transcript_edited falso, ou nulo no resumo de antes da H18)
+ * diante da transcrição que voltou inteira a ela ("Voltar tudo ao original",
+ * ou o único trecho mudado de volta) leu o que está na tela: o aviso não sai,
+ * e a dona não gasta uma chamada à IA por nada. O resumo que leu uma versão
+ * editada continua de outra versão diante de qualquer mudança depois dele,
+ * mesmo a volta ao original.
+ */
+async function transcricaoEditadaDepoisDoResumo(
+  db: Executor, ownerId: string, meetingId: string,
+  linha: { status: string; version: number; generatedAt: number | null; transcriptEdited: boolean | null } | undefined,
+): Promise<boolean> {
+  // Na fila (o refazer pedido), a versão nova já vai ler a transcrição editada.
+  if (!linha || linha.status === "pending" || !linha.version || linha.generatedAt === null) return false;
+  const [transcricao] = await db.select({ editadaEm: meetingTranscripts.editedAt, editada: transcricaoEstaEditada }).from(meetingTranscripts)
+    .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
+  if (transcricao?.editadaEm == null || Number(transcricao.editadaEm) <= Number(linha.generatedAt)) return false;
+  return linha.transcriptEdited === true || Number(transcricao.editada) === 1;
+}
+
+/**
+ * O título que a IA sugeriu, enquanto espera a dona: só com o resumo pronto,
+ * só a sugestão pendente e só quando ela é outro título (a igual ao de agora
+ * não pede nada). Passa de novo pela conferência: a linha antiga, gravada sem
+ * ela, não chega à tela fora da regra.
+ */
+function tituloSugeridoNaTela(estado: EstadoDoResumo, linha: { suggestedTitle: string | null; suggestedTitleStatus: string | null } | undefined, tituloAtual: string): string | null {
+  if (estado !== "pronto" || linha?.suggestedTitleStatus !== "pending") return null;
+  const titulo = tituloSugeridoValido(linha.suggestedTitle);
+  return titulo && !mesmoTitulo(titulo, tituloAtual) ? titulo : null;
 }
 
 /**
@@ -150,17 +276,26 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
  * mapa vem com ele.
  */
 export type AntesDeCriar = () => (() => void) | void;
-export async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar, pedido: { modelo?: ModeloDeResumo; refazer?: boolean; peloLink?: boolean } = {}) {
+export type PedidoDoResumoNaFila = {
+  /** O modelo, o estilo e as instruções (H4d e H4e); sem eles, o resumo novo nasce com o pedido de antes de gravar ou as preferências da dona. */
+  colunas?: ColunasDoPedido;
+  refazer?: boolean;
+  peloLink?: boolean;
+  /** O teto de custo do refazer (H4e), no banco: reserva a vaga e devolve como soltá-la. */
+  antesDeRefazer?: () => Promise<() => Promise<void>>;
+};
+export async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar, pedido: PedidoDoResumoNaFila = {}) {
   const [transcricao] = await db.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
   if (!transcricao) throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
   const linha = await linhaDoResumo(db, ownerId, meetingId);
   const agora = Date.now();
   if (!linha) {
+    const colunas = pedido.colunas ?? await colunasDoPrimeiroResumo(db, ownerId, meetingId);
     const soltarVaga = antesDeCriar();
     try {
       await db.insert(meetingSummaries).values({
-        id: crypto.randomUUID(), meetingId, ownerId, status: "pending", template: pedido.modelo ?? MODELO_DE_RESUMO_PADRAO, createdAt: agora, updatedAt: agora,
+        id: crypto.randomUUID(), meetingId, ownerId, status: "pending", ...colunas, createdAt: agora, updatedAt: agora,
       });
     } catch (erro) {
       // Outro pedido criou o trabalho entre a leitura e aqui (índice único por
@@ -173,15 +308,36 @@ export async function pedirResumoDaReuniao(db: Banco, ownerId: string, meetingId
     return;
   } else if (linha.status === "failed" || (pedido.refazer && linha.status === "ready")) {
     const soltarVaga = antesDeCriar();
+    // O teto de custo do refazer (H4e), contado no banco: a recusa devolve a
+    // vaga do teto em memória.
+    let soltarRefazer: (() => Promise<void>) | undefined;
+    if (pedido.refazer && pedido.antesDeRefazer) {
+      try {
+        soltarRefazer = await pedido.antesDeRefazer();
+      } catch (erro) {
+        soltarVaga?.();
+        throw erro;
+      }
+    }
     const r = await db.update(meetingSummaries).set({
-      status: "pending", ...(pedido.modelo ? { template: pedido.modelo } : {}),
+      status: "pending", ...(pedido.colunas ?? {}),
       attempts: 0, lastError: null, lockedUntil: null, lockToken: null, updatedAt: agora,
     }).where(and(eq(meetingSummaries.id, linha.id), eq(meetingSummaries.ownerId, ownerId), eq(meetingSummaries.status, linha.status)));
-    // Outro pedido reabriu (ou refez) antes: a vaga volta.
-    if (!linhasAfetadas(r)) soltarVaga?.();
-  } else if (pedido.refazer && pedido.modelo && linha.status === "pending" && linha.template !== pedido.modelo) {
+    // Outro pedido reabriu (ou refez) antes: as vagas voltam.
+    if (!linhasAfetadas(r)) {
+      soltarVaga?.();
+      await soltarRefazer?.();
+    }
+  } else if (pedido.refazer && pedido.colunas && linha.status === "pending" && !mesmoPedido(linha, pedido.colunas)) {
     throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
   }
+}
+
+/** O pedido na fila é o mesmo que chega (o pedido repetido não muda nada)? */
+function mesmoPedido(linha: { template: string; customTemplateId: string | null; aiTemplate: string | null; style: string; instructions: string | null }, colunas: ColunasDoPedido): boolean {
+  return linha.template === colunas.template && (linha.customTemplateId ?? null) === colunas.customTemplateId
+    && (linha.aiTemplate === "pending") === (colunas.aiTemplate === "pending")
+    && linha.style === colunas.style && (linha.instructions ?? null) === colunas.instructions;
 }
 
 /** O MySQL recusou por índice único (ER_DUP_ENTRY), no erro ou na causa dele (o drizzle embrulha o do driver). */
@@ -197,11 +353,29 @@ function ehChaveRepetida(erro: unknown): boolean {
  * pronta, no modelo que escolheu; sem modelo, o resumo novo é o Geral e o que
  * falhou reabre no modelo em que estava.
  */
-export async function pedirResumoDaDona(ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar, modelo?: ModeloDeResumo) {
+export type PedidoDaDona = { modelo?: string; estilo?: EstiloDoResumo; instrucoes?: string | null };
+
+/**
+ * As colunas do pedido da tela (H4e): o modelo como texto (o código do pronto,
+ * "ia" ou "proprio:<id>"), o estilo e as instruções. O modelo da dona tem de
+ * ser dela.
+ */
+async function colunasDoPedidoDaDona(db: Banco, ownerId: string, pedido: PedidoDaDona & { modelo: string }): Promise<ColunasDoPedido> {
+  const escolha = escolhaDoTexto(pedido.modelo);
+  if (!escolha) throw new TRPCError({ code: "BAD_REQUEST", message: "Modelo inválido." });
+  return {
+    ...await colunasDaEscolha(db, ownerId, escolha),
+    style: pedido.estilo ?? ESTILO_DO_RESUMO_PADRAO,
+    instructions: normalizarInstrucoes(pedido.instrucoes, INSTRUCOES_DO_PEDIDO_MAX),
+  };
+}
+
+export async function pedirResumoDaDona(ownerId: string, meetingId: string, antesDeCriar: AntesDeCriar, pedido: PedidoDaDona = {}) {
   const db = await exigirDb();
   const reuniao = await reuniaoDaDona(db, ownerId, meetingId);
   if (reuniao.status !== "ready") throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
-  await pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar, { modelo });
+  const colunas = pedido.modelo ? await colunasDoPedidoDaDona(db, ownerId, { ...pedido, modelo: pedido.modelo }) : undefined;
+  await pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar, { colunas });
   return resumoGuardadoDaDona(ownerId, meetingId);
 }
 
@@ -212,11 +386,13 @@ export async function pedirResumoDaDona(ownerId: string, meetingId: string, ante
  * ficam; os outros pendentes e ignorados são trocados quando a fila gravar a
  * versão nova. Gasta uma vaga do teto, como pedir o resumo.
  */
-export async function refazerResumoDaDona(ownerId: string, meetingId: string, modelo: ModeloDeResumo, antesDeCriar: AntesDeCriar) {
+export async function refazerResumoDaDona(ownerId: string, meetingId: string, pedido: PedidoDaDona & { modelo: string }, antesDeCriar: AntesDeCriar) {
   const db = await exigirDb();
   const reuniao = await reuniaoDaDona(db, ownerId, meetingId);
   if (reuniao.status !== "ready") throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_SEM_TRANSCRICAO });
-  await pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar, { modelo, refazer: true });
+  const colunas = await colunasDoPedidoDaDona(db, ownerId, pedido);
+  // H4e: o modelo, o estilo e as instruções do refazer, e o teto de custo dele.
+  await pedirResumoDaReuniao(db, ownerId, meetingId, antesDeCriar, { colunas, refazer: true, antesDeRefazer: () => reservarRefazer(db, ownerId) });
   return resumoGuardadoDaDona(ownerId, meetingId);
 }
 
@@ -236,11 +412,11 @@ async function itemParaDecidir(db: Executor, ownerId: string, itemId: string) {
   const [onde] = await db.select({ summaryId: meetingSummaryItems.summaryId, meetingId: meetingSummaryItems.meetingId }).from(meetingSummaryItems)
     .where(and(eq(meetingSummaryItems.id, itemId), eq(meetingSummaryItems.ownerId, ownerId))).limit(1);
   if (!onde) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
-  const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
+  const [reuniao] = await db.select({ status: meetings.status, trashedAt: meetings.trashedAt }).from(meetings)
     .where(and(eq(meetings.id, onde.meetingId), eq(meetings.ownerId, ownerId))).for("update");
   const [resumo] = await db.select({ status: meetingSummaries.status }).from(meetingSummaries)
     .where(and(eq(meetingSummaries.id, onde.summaryId), eq(meetingSummaries.ownerId, ownerId))).for("update");
-  if (!reuniao || !resumo || reuniao.status === "deleted") throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
+  if (!reuniao || !resumo || reuniaoForaDeVista(reuniao)) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_ITEM_NAO_ENCONTRADO });
   if (!foraDaFila(resumo.status) || reuniao.status !== "ready") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_RESUMO_SENDO_GERADO });
   const [item] = await db.select({
     id: meetingSummaryItems.id,
@@ -416,9 +592,9 @@ type Transacao = Parameters<Parameters<Banco["transaction"]>[0]>[0];
  * junto o que ela gravou: nunca sobra item de reunião apagada.
  */
 async function travarResumoPronto(tx: Transacao, ownerId: string, meetingId: string, naoAchou: string) {
-  const [reuniao] = await tx.select({ status: meetings.status }).from(meetings)
+  const [reuniao] = await tx.select({ status: meetings.status, trashedAt: meetings.trashedAt }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1).for("update");
-  if (!reuniao || reuniao.status === "deleted") throw new TRPCError({ code: "NOT_FOUND", message: naoAchou });
+  if (!reuniao || reuniaoForaDeVista(reuniao)) throw new TRPCError({ code: "NOT_FOUND", message: naoAchou });
   const [resumo] = await tx.select({ id: meetingSummaries.id, status: meetingSummaries.status, version: meetingSummaries.version }).from(meetingSummaries)
     .where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId))).limit(1).for("update");
   const versaoNaTela = !!resumo && (resumo.status === "ready" || (resumo.status === "failed" && temVersaoAnterior(resumo)));
@@ -530,10 +706,25 @@ export async function acrescentarItemDoResumo(ownerId: string, meetingId: string
  * `escritoPelaDona`, um sim ou não, sem a origem nem a hora da edição: quem
  * tem o link sabe que o texto é de quem gravou e não da IA, e que o trecho do
  * item editado é o da versão da IA.
+ *
+ * Com a transcrição editada pela dona (H18), o link mostra a versão editada e
+ * não pode expor a da IA: o trecho de cada item saiu da transcrição de quando
+ * o resumo foi escrito, e o que não aparece mais na transcrição de agora (a
+ * dona tirou ou corrigiu aquela fala) vai vazio. O item continua, com o tempo,
+ * e a marca `trechoForaDaTranscricao` diz à página que o trecho existia.
  */
 export async function resumoGuardadoPeloLink(token: string) {
   const reuniao = await exigirReuniaoDoLink(token);
-  const db = await exigirDb();
+  return resumoParaLeitura(await exigirDb(), reuniao.ownerId, reuniao.id);
+}
+
+/**
+ * A projeção de leitura do resumo guardado: a do link aberto, e a mesma da
+ * consulta da administração (R1a, server/consulta-da-administracao.ts). Sem
+ * ids, sem os itens ignorados e só o complemento confirmado pela dona.
+ */
+export async function resumoParaLeitura(db: Awaited<ReturnType<typeof exigirDb>>, ownerId: string, meetingId: string) {
+  const reuniao = { ownerId, id: meetingId };
   const linha = await linhaDoResumo(db, reuniao.ownerId, reuniao.id);
   const estado = estadoDe(linha, Date.now());
   const versaoAnterior = temVersaoAnterior(linha);
@@ -549,11 +740,17 @@ export async function resumoGuardadoPeloLink(token: string) {
       status: meetingSummaryItems.status,
       origin: meetingSummaryItems.origin,
       editedAt: meetingSummaryItems.editedAt,
+      ...COLUNAS_DO_COMPLEMENTO,
     }).from(meetingSummaryItems)
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, reuniao.ownerId), ne(meetingSummaryItems.status, "ignored")))
       .orderBy(asc(meetingSummaryItems.position))
     : [];
-  const itens = lidos.map(({ origin, editedAt, ...item }) => ({ ...item, escritoPelaDona: escritoPelaDona({ origin, editedAt }) }));
+  // O complemento pela busca (H4i) só vai ao link confirmado pela dona.
+  const itens = (await trechosNaTranscricaoDeAgora(reuniao.ownerId, reuniao.id, lidos))
+    .map(({ origin, editedAt, complementText, complementSourceUrl, complementSourceTitle, complementQueries, complementStatus, ...item }) => ({
+      ...item, escritoPelaDona: escritoPelaDona({ origin, editedAt }),
+      complemento: complementoNaTela({ complementText, complementSourceUrl, complementSourceTitle, complementQueries, complementStatus }, true),
+    }));
   return { estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, versaoAnterior, itens };
 }
 

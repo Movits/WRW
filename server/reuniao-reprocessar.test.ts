@@ -329,7 +329,8 @@ describe("reprocessar — a tomada", () => {
 
     expect(trabalho).toBeInstanceOf(Promise);
     const [tomada] = de("update", schema.meetings);
-    expect(tomada.sql).toBe("(`meetings`.`id` = ? and `meetings`.`owner_id` = ? and `meetings`.`status` = ? and `meetings`.`consent_granted` = ?)");
+    // A reunião que foi para a lixeira (H7d) entre a leitura e a tomada não é tomada.
+    expect(tomada.sql).toBe("(`meetings`.`id` = ? and `meetings`.`owner_id` = ? and `meetings`.`status` = ? and `meetings`.`consent_granted` = ? and `meetings`.`trashed_at` is null)");
     expect(tomada.params.slice(0, 3)).toEqual([REUNIAO, DONA, "failed"]);
     expect([true, 1]).toContain(tomada.params[3]);
     expect(tomada.valores).toMatchObject({ status: "processing", processingError: null });
@@ -489,7 +490,8 @@ describe("reprocessar — quem tomou a reunião por último decide", () => {
     // longa da exclusão).
     expect(apagarAudio).toHaveBeenCalledWith(CHAVE);
     expect(storageDelete).not.toHaveBeenCalled();
-    expect(de("delete").map(o => o.tabela)).toEqual([...derivadas(), schema.meetingRecordings]);
+    // A exclusão leva também as participantes (R1b); o reprocesso, não (linha acima).
+    expect(de("delete").map(o => o.tabela)).toEqual([...derivadas(), schema.meetingParticipants, schema.meetingRecordings]);
     expect(soPredicado(de("delete", schema.meetingRecordings)[0])).toEqual({
       sql: "(`meeting_recordings`.`owner_id` = ? and `meeting_recordings`.`id` in (?))", params: [DONA, "gravacao-1"],
     });
@@ -519,7 +521,7 @@ describe("envio original — a mesma trava da ficha", () => {
     meetingId: REUNIAO, ownerId: DONA, audioBase64, mimeType: "audio/webm", durationSeconds: 30, language: "pt",
   });
 
-  it("submitRecording numa reunião já pronta: ReuniaoForaDoEstado, sem upload e sem IA, e ela continua pronta", async () => {
+  it("o envio único de antes (processMeetingRecording) numa reunião já pronta: ReuniaoForaDoEstado, sem upload e sem IA, e ela continua pronta", async () => {
     estado.reuniao = reuniaoComFalha({ status: "ready", processingError: null });
     await expect(servico.processMeetingRecording(envio())).rejects.toBeInstanceOf(servico.ReuniaoForaDoEstado);
     expect(storagePut).not.toHaveBeenCalled();

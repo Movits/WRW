@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pause, Play, Square, Volume2 } from "lucide-react";
 import { escolherVoz, falasCurtas, PRAZO_DAS_VOZES } from "@/lib/leitura-em-voz-alta";
-import type { IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import type { IdiomaFalado } from "@shared/idioma-da-reuniao";
 
 /**
  * "Ouvir o resumo" (H19 do plano do gravador, item HN-46 do app de referência
@@ -201,7 +201,7 @@ function useLeituraEmVozAlta(antesDeParar: () => void) {
 
 // O nome do idioma no idioma da tela ("inglês", "English"). Só a base: a voz
 // serve a qualquer região do idioma.
-function nomeDoIdioma(idioma: IdiomaDaReuniao, idiomaDaTela: string) {
+function nomeDoIdioma(idioma: IdiomaFalado, idiomaDaTela: string) {
   const base = idioma.split("-")[0];
   try {
     return new Intl.DisplayNames([idiomaDaTela], { type: "language" }).of(base) ?? base;
@@ -210,7 +210,7 @@ function nomeDoIdioma(idioma: IdiomaDaReuniao, idiomaDaTela: string) {
   }
 }
 
-export function OuvirOResumo({ falas, idioma }: { falas: readonly string[]; idioma: IdiomaDaReuniao }) {
+export function OuvirOResumo({ falas, idioma }: { falas: readonly string[]; idioma: IdiomaFalado }) {
   const { t, i18n } = useTranslation();
   const { suportado, vozes, procurando } = useVozesDoAparelho();
   const voz = escolherVoz(vozes, idioma);
@@ -244,6 +244,9 @@ export function OuvirOResumo({ falas, idioma }: { falas: readonly string[]; idio
   };
   const [Icone, rotulo] = leitura.estado === "lendo" ? [Pause, t("meetings.summary.listenPause")]
     : leitura.estado === "pausada" ? [Play, t("meetings.summary.listenResume")]
+    // O rótulo é o texto da Cris, "Ouvir resumo · áudio gerado pela IA da
+    // Google" (decisão do Roberto de 24/11/2026: a voz por IA da Google entra
+    // no app em outro pacote). A leitura de hoje segue com a voz do aparelho.
     : [Volume2, t("meetings.summary.listen")];
 
   return <div className="flex flex-col items-start gap-1 sm:items-end">

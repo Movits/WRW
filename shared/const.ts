@@ -88,6 +88,29 @@ export function margemDoReprocesso(partes: number | null | undefined): number {
 export const MENSAGEM_AUDIO_GUARDADO_AUSENTE = "O áudio guardado desta reunião não foi encontrado.";
 
 /**
+ * A reunião que não é da dona, que não existe, que está sendo excluída ou que
+ * está na lixeira (H7d: a guarda dos procedimentos pelo id,
+ * server/guarda-da-lixeira.ts, devolve esta mesma frase). Compartilhada porque
+ * a tela a traduz (client/src/lib/mensagem-de-erro.ts): a reunião mandada para
+ * a lixeira em outra aba aparecia em português em qualquer idioma.
+ */
+export const MENSAGEM_REUNIAO_NAO_ENCONTRADA = "Reunião não encontrada.";
+
+/**
+ * As frases que a fila da gravação em partes (server/fila-de-transcricao.ts)
+ * grava em `processing_error`: a gravação encerrada sem nenhuma parte, a
+ * montagem que caiu em todas as tentativas e a reunião em que nenhuma parte
+ * rendeu texto (todas falharam na IA, por exemplo). Frases, e não códigos,
+ * pelo mesmo motivo de MENSAGEM_AUDIO_GUARDADO_AUSENTE (o app Expo mostra a
+ * coluna como veio); compartilhadas, porque a tela do site as reconhece e as
+ * mostra no idioma da dona (client/src/lib/mensagem-de-erro.ts). Antes, a caixa
+ * vermelha dessas reuniões saía em português nos outros nove idiomas.
+ */
+export const MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO = "A gravação foi interrompida antes de enviar o áudio.";
+export const MENSAGEM_FALHA_DA_MONTAGEM = "Não foi possível processar esta reunião. Tente de novo mais tarde.";
+export const MENSAGEM_PARTES_SEM_TRANSCRICAO = "Não foi possível transcrever o áudio desta reunião.";
+
+/**
  * O título da reunião, depois do trim: o servidor recusa fora disso
  * (server/routers/meetings.ts), e o gravador confere o mesmo antes de enviar,
  * para a dona ver o aviso no idioma dela, e não o BAD_REQUEST do zod.
@@ -96,14 +119,25 @@ export const TITULO_DA_REUNIAO_MIN = 2;
 export const TITULO_DA_REUNIAO_MAX = 200;
 
 /**
- * Os tetos do envio único (meetings.submitRecording: o áudio inteiro, em
- * base64, num pedido só): 10 minutos e 10 MB. Moram aqui porque a tela confere
- * os mesmos antes de enviar, para a dona ver o aviso no idioma dela. Valem até
- * a G14 tirar o envio único (docs/arquitetura/gravador-de-reunioes.md); a
- * gravação em partes tem o teto dela, logo abaixo.
+ * Os tetos do envio único de antes (o áudio inteiro, em base64, num pedido só):
+ * 10 minutos e 10 MB. A rota dele (meetings.submitRecording) saiu na G14,
+ * parte 2 (25/11/2026), e nada novo chega mais assim; o servidor ainda lê com
+ * estes tetos a gravação inteira das reuniões antigas (meeting_recordings), no
+ * reprocesso e na junção (docs/arquitetura/gravador-de-reunioes.md). A
+ * gravação em partes, que é a de todas, tem o teto dela, logo abaixo.
  */
 export const ENVIO_UNICO_SEGUNDOS_MAX = 10 * 60;
 export const ENVIO_UNICO_BYTES_MAX = 10 * 1024 * 1024;
+
+/**
+ * O que a rota das partes aceita numa parte só (server/fatias-de-reuniao.ts):
+ * 16 MB e 12 min (os 10 min da parte, com 2 de folga para o relógio da aba em
+ * segundo plano). Moram aqui porque o recuo do corte (G14, parte 2: o arquivo
+ * curto que o corte reconhece mas não lê vai inteiro, como uma parte só)
+ * confere os mesmos na tela antes de a reunião nascer.
+ */
+export const PARTE_NO_SERVIDOR_BYTES_MAX = 16 * 1024 * 1024;
+export const PARTE_NO_SERVIDOR_SEGUNDOS_MAX = 12 * 60;
 
 /**
  * A gravação em partes não tem teto de tempo para quem grava (decisão do
@@ -114,6 +148,14 @@ export const ENVIO_UNICO_BYTES_MAX = 10 * 1024 * 1024;
  * bytes e o relógio da tela não batem ao segundo.
  */
 export const GRAVACAO_EM_PARTES_SEGUNDOS_MAX = 12 * 60 * 60;
+
+/**
+ * O teto de partes de uma reunião em partes: a rota das partes recusa a
+ * posição 200 em diante, e o encerrar, mais de 200 (server/fatias-de-reuniao.ts).
+ * Mora aqui porque a importação em partes confere o mesmo antes de a reunião
+ * nascer (H9b): o WAV e o FLAC de horas, em partes de 14 MB, passariam dele.
+ */
+export const PARTES_POR_REUNIAO_MAX = 200;
 
 /**
  * O aviso de hora da gravação em partes: a cada hora cheia de gravação (sem as
@@ -146,6 +188,24 @@ export const MENSAGEM_SO_ACAO_TEM_CAIXA = "Só as ações do resumo têm caixa d
 /** O item que a dona acrescenta passaria do teto (ITENS_DO_RESUMO_MAX, shared/item-do-resumo.ts). */
 export const MENSAGEM_RESUMO_CHEIO = "Este resumo já chegou ao máximo de itens.";
 
+/**
+ * O salvar do Meu Perfil achou "O que tenho" ou "O que preciso" mudado de um
+ * jeito que não dá para somar ao que a tela manda (outra aba salvou, um item
+ * saiu), outro campo da edição mudado no banco (a bio que outra aba reescreveu),
+ * ou a soma passaria de um teto (server/listas-do-perfil.ts). Nada foi
+ * gravado. A tela traduz pela tabela de client/src/lib/mensagem-de-erro.ts
+ * (chave profile.changedElsewhere).
+ */
+export const MENSAGEM_PERFIL_MUDOU_NO_MEIO = "Seu perfil foi alterado em outra tela enquanto você editava. Nada foi salvo, para não apagar essa alteração: recarregue a página e edite de novo.";
+
+/**
+ * U3: a Bronze vê só quantas conexões são possíveis, e demonstrar interesse por
+ * uma delas espera o cadastro completo (server/routers/connections.ts). Chega à
+ * tela quando a conta caiu para Bronze com o cartão ainda aberto; a tela traduz
+ * pela tabela de client/src/lib/mensagem-de-erro.ts (chave dashboard.interestNeedsSilver).
+ */
+export const MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO = "Complete seu perfil para ver as conexões sugeridas e demonstrar interesse por elas.";
+
 /** O nome que a dona dá a uma voz da transcrição (H3): até 60 caracteres. */
 export const NOME_DO_FALANTE_MAX = 60;
 /** O rótulo de voz que a transcrição por partes grava: F1, F2... (até F99). */
@@ -167,5 +227,40 @@ export function nomesDosFalantes(bruto: unknown): Record<string, string> {
   for (const [falante, nome] of Object.entries(bruto as Record<string, unknown>)) {
     if (FORMATO_DO_FALANTE.test(falante) && typeof nome === "string" && nome.trim()) saida[falante] = nome.trim().slice(0, NOME_DO_FALANTE_MAX);
   }
+  return saida;
+}
+
+/** A conta ligada a uma voz (H3c): a própria dona. */
+export const CONTA_DA_DONA = "owner";
+const FORMATO_DA_PARTICIPACAO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * As vozes ligadas às contas (H3c, meetings.speaker_accounts), só os pares
+ * válidos: a chave F1 a F99, e o valor "owner" (a dona) ou o id de uma
+ * participação (meeting_participants.id). A coluna é JSON livre.
+ */
+export function contasDasVozes(bruto: unknown): Record<string, string> {
+  if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return {};
+  const saida: Record<string, string> = {};
+  for (const [falante, conta] of Object.entries(bruto as Record<string, unknown>)) {
+    if (FORMATO_DO_FALANTE.test(falante) && typeof conta === "string" && (conta === CONTA_DA_DONA || FORMATO_DA_PARTICIPACAO.test(conta))) saida[falante] = conta.toLowerCase() === CONTA_DA_DONA ? CONTA_DA_DONA : conta.toLowerCase();
+  }
+  return saida;
+}
+
+/**
+ * As vozes juntadas (H3c, meetings.speaker_merges): { "F3": "F1" }, a voz
+ * juntada apontando para a principal. Só os pares válidos, e sem cadeia nem
+ * ciclo: a voz que aponta para si mesma cai, e a que aponta para uma voz que
+ * também está juntada cai (o servidor nunca grava assim; a coluna é JSON livre).
+ */
+export function vozesJuntadas(bruto: unknown): Record<string, string> {
+  if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return {};
+  const pares: Record<string, string> = {};
+  for (const [voz, principal] of Object.entries(bruto as Record<string, unknown>)) {
+    if (FORMATO_DO_FALANTE.test(voz) && typeof principal === "string" && FORMATO_DO_FALANTE.test(principal) && voz !== principal) pares[voz] = principal;
+  }
+  const saida: Record<string, string> = {};
+  for (const [voz, principal] of Object.entries(pares)) if (!(principal in pares)) saida[voz] = principal;
   return saida;
 }

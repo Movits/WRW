@@ -1,8 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cortarMp3, type CorteDoMp3 } from "@/lib/corte-do-mp3";
-import type { OpcoesDoCorteNoWorker } from "@/lib/corte-do-mp3-no-worker";
+import type { CorteDoArquivo } from "@/lib/corte-comum";
+import { cortarArquivo } from "@/lib/corte-do-arquivo";
+import type { OpcoesDoCorteNoWorker } from "@/lib/corte-do-arquivo-no-worker";
 import { juntar, leitorDe, leitorDeQuadrosRepetidos, MPEG1_128K, MPEG25_8K, quadroDeEtiqueta, quadros } from "@/test/mp3-sintetico";
+import { oggOpus } from "@/test/audio-sintetico";
+import { montar as montarParaConferir } from "@/test/conferir-partes";
 import { _reiniciarParaTestes, ESPERA_MAXIMA_MS, PRIMEIRA_ESPERA_MS, useImportacaoEmPartes, type ResultadoDaImportacao } from "./useImportacaoEmPartes";
 import type { DesfechoDaParte, FimDoArquivo, ParteDoArquivo } from "./useGravacaoEmPartes";
 
@@ -37,8 +40,8 @@ function gravacaoFalsa() {
 }
 
 /** Um corte de verdade, de um MP3 sintético, em partes de 1 s. */
-async function corteDe(bytes: Uint8Array): Promise<CorteDoMp3> {
-  return cortarMp3(leitorDe(bytes), bytes.length, { segundosPorParte: 1 });
+async function corteDe(bytes: Uint8Array): Promise<CorteDoArquivo> {
+  return cortarArquivo(leitorDe(bytes), bytes.length, { segundosPorParte: 1 });
 }
 
 const bytesDe = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
@@ -50,7 +53,7 @@ beforeEach(() => {
   gravacao = gravacaoFalsa();
 });
 
-function montar(cortar: (arquivo: Blob, opcoes: OpcoesDoCorteNoWorker) => Promise<CorteDoMp3>, temSessao = () => true) {
+function montar(cortar: (arquivo: Blob, opcoes: OpcoesDoCorteNoWorker) => Promise<CorteDoArquivo>, temSessao = () => true) {
   return renderHook(() => useImportacaoEmPartes({ partes: gravacao.partes, temSessao, cortar }));
 }
 
@@ -87,7 +90,7 @@ describe("useImportacaoEmPartes (H9a)", () => {
   });
 
   it("mostra o andamento da leitura enquanto corta", async () => {
-    let soltarCorte: (corte: CorteDoMp3) => void = () => {};
+    let soltarCorte: (corte: CorteDoArquivo) => void = () => {};
     const { result } = montar((_arquivo, opcoes) => {
       opcoes.aoLer?.(25, 100);
       return new Promise(resolver => { soltarCorte = resolver; });
@@ -95,13 +98,13 @@ describe("useImportacaoEmPartes (H9a)", () => {
     let importacao!: Promise<ResultadoDaImportacao>;
     act(() => { importacao = result.current.importar(new File(["x"], "a.mp3"), INICIO); });
     await waitFor(() => expect(result.current.andamento).toEqual({ fase: "lendo", lidos: 25, total: 100 }));
-    await act(async () => { soltarCorte({ ok: false, codigo: "NAO_E_MP3" }); });
-    expect(await importacao).toEqual({ tipo: "recusada", motivo: "NAO_E_MP3" });
+    await act(async () => { soltarCorte({ ok: false, codigo: "DANIFICADO", formato: "mp3" }); });
+    expect(await importacao).toEqual({ tipo: "recusada", motivo: "DANIFICADO" });
   });
 
   it("acima de 12 h, recusa antes de criar a reunião (o corte de verdade, num arquivo de 12 h e um quadro)", async () => {
     const { ler, tamanho } = leitorDeQuadrosRepetidos(MPEG25_8K, 600_001);
-    const { result } = montar(() => cortarMp3(ler, tamanho));
+    const { result } = montar(() => cortarArquivo(ler, tamanho));
     let resultado: ResultadoDaImportacao | undefined;
     await act(async () => { resultado = await result.current.importar(new File(["x"], "longa.mp3"), INICIO); });
     expect(resultado).toEqual({ tipo: "recusada", motivo: "LONGO_DEMAIS" });
@@ -146,6 +149,59 @@ describe("useImportacaoEmPartes (H9a)", () => {
     } finally {
       consoleDeErro.mockRestore();
     }
+  });
+
+  it("os outros formatos (H9b e H9c): cada parte sobe no tipo que o corte diz, montada com os bytes novos e os trechos do arquivo", async () => {
+    // Um Ogg de verdade (o áudio do WhatsApp), cortado em partes de 2 s: as páginas refeitas são bytes novos.
+    const { bytes } = oggOpus({ pacotes: 300 });
+    const corte = await cortarArquivo(leitorDe(bytes), bytes.length, { segundosPorParte: 2 });
+    if (!corte.ok) throw new Error("corte");
+    expect(corte.mimeType).toBe("audio/ogg");
+    const { result } = montar(async () => corte);
+    let importacao!: Promise<ResultadoDaImportacao>;
+    act(() => { importacao = result.current.importar(new File([bytes], "audio-do-whatsapp.ogg", { type: "audio/ogg" }), INICIO); });
+    for (let i = 0; i < corte.partes.length; i++) await gravacao.subir();
+    expect(await importacao).toEqual({ tipo: "enviada", meetingId: "reuniao-1", fim: "declarado" });
+    expect(gravacao.recebidas.map(p => [p.seq, p.mimeType, p.blob.type, p.duracaoMs])).toEqual(corte.partes.map((p, i) => [i, "audio/ogg", "audio/ogg", p.duracaoMs]));
+    for (let i = 0; i < corte.partes.length; i++) {
+      expect(Array.from(await bytesDe(gravacao.recebidas[i].blob))).toEqual(Array.from(montarParaConferir(bytes, corte.partes[i])));
+    }
+  });
+
+  it("a recusa do formato sem suporte leva o nome dele (para o aviso), sem reunião", async () => {
+    const { result } = montar(async () => ({ ok: false, codigo: "SEM_SUPORTE", formato: "mp4", detalhe: "ALAC" }));
+    let resultado: ResultadoDaImportacao | undefined;
+    await act(async () => { resultado = await result.current.importar(new File(["x"], "memo.m4a"), INICIO); });
+    expect(resultado).toEqual({ tipo: "recusada", motivo: "SEM_SUPORTE", detalhe: "ALAC" });
+    expect(gravacao.partes.iniciar).not.toHaveBeenCalled();
+  });
+
+  // G14, parte 2: o recuo do corte vai pelas partes, sem o envio único.
+  it("o recuo do corte: o arquivo que o corte não lê vai inteiro, como a parte 0, no tipo que o recuo diz, e o fim pede 1 parte", async () => {
+    const recusa = { ok: false, codigo: "SEM_SUPORTE", formato: "mp4", detalhe: "ALAC" } as const;
+    const recuo = vi.fn(async () => ({ mimeType: "audio/mp4" as const, duracaoMs: 30_000 }));
+    const { result } = montar(async () => recusa);
+    let importacao!: Promise<ResultadoDaImportacao>;
+    act(() => { importacao = result.current.importar(new File(["som do alac"], "memo.m4a", { type: "audio/x-m4a" }), INICIO, undefined, recuo); });
+    await waitFor(() => expect(gravacao.recebidas).toHaveLength(1));
+    expect(recuo).toHaveBeenCalledWith(recusa);
+    expect(gravacao.partes.iniciar).toHaveBeenCalledWith({ ...INICIO, origem: "arquivo" });
+    expect(gravacao.recebidas[0]).toMatchObject({ seq: 0, mimeType: "audio/mp4", duracaoMs: 30_000 });
+    expect(new TextDecoder().decode(await bytesDe(gravacao.recebidas[0].blob))).toBe("som do alac");
+    await gravacao.subir();
+    await expect(importacao).resolves.toEqual({ tipo: "enviada", meetingId: "reuniao-1", fim: "declarado" });
+    expect(gravacao.partes.encerrarArquivo).toHaveBeenCalledWith("reuniao-1", 1);
+  });
+
+  it.each([
+    ["o recuo diz que não cabe", async () => null],
+    ["o recuo falha", async () => { throw new Error("o navegador não leu"); }],
+  ] as const)("%s: a recusa do corte, sem reunião", async (_caso, recuo) => {
+    const { result } = montar(async () => ({ ok: false, codigo: "SEM_SUPORTE", formato: "webm", detalhe: "Vorbis (WebM)" }));
+    let resultado: ResultadoDaImportacao | undefined;
+    await act(async () => { resultado = await result.current.importar(new File(["x"], "r.webm"), INICIO, undefined, recuo); });
+    expect(resultado).toEqual({ tipo: "recusada", motivo: "SEM_SUPORTE", detalhe: "Vorbis (WebM)" });
+    expect(gravacao.partes.iniciar).not.toHaveBeenCalled();
   });
 
   it("Cancelar no envio: exclui a reunião na hora (a parte que sobe termina), e nenhuma outra parte entra", async () => {

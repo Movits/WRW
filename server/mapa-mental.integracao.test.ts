@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -73,11 +74,11 @@ const vencerAEspera = async (meetingId: string) => (await db()).update(meetingSu
 async function limpar() {
   const banco = await db();
   for (const dona of [DONA, OUTRA]) {
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, dona));
-    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
-    await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, dona));
-    await banco.delete(meetings).where(eq(meetings.ownerId, dona));
-    await banco.delete(consumoDeMinutos).where(eq(consumoDeMinutos.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaries, eq(meetingSummaries.ownerId, dona));
+    await apagarPelaChave(banco, meetingTranscripts, eq(meetingTranscripts.ownerId, dona));
+    await apagarPelaChave(banco, meetings, eq(meetings.ownerId, dona));
+    await apagarPelaChave(banco, consumoDeMinutos, eq(consumoDeMinutos.ownerId, dona));
   }
 }
 
@@ -109,7 +110,11 @@ describe.skipIf(!temBanco)("O mapa mental na fila do resumo (integração)", () 
     expect(gerarMapaMental).toHaveBeenCalledWith({ transcricao: TEXTO, idioma: "pt-BR" });
     expect(await linhaDoResumo(id)).toMatchObject({ status: "ready", version: 1, attempts: 1, lockToken: null, lockedUntil: null, mindMapStatus: "ready", mindMapError: null });
     expect(Number((await linhaDoResumo(id)).mindMapGeneratedAt)).toBeGreaterThan(0);
-    expect(await servico.mapaMentalDaDona(DONA, id)).toEqual({ estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA, versaoAnterior: false });
+    // H10b: o mapa gravado pela fila sobe a revisão do mapa, que a edição confere.
+    expect(await servico.mapaMentalDaDona(DONA, id)).toEqual({
+      estado: "pronto", idioma: "pt-BR", erro: null, mapa: MAPA, versaoAnterior: false,
+      edicao: { revisao: 1, editado: false, editadoEm: null, refazendo: false, erroDoRefazer: null },
+    });
     expect((await resumoGuardado.resumoGuardadoDaDona(DONA, id)).estado).toBe("pronto");
   });
 

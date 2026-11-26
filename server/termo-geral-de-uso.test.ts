@@ -201,8 +201,8 @@ describe("o termo diz CONEXÃO, e só SMART MATCH sobra com a palavra", () => {
   const AQUI = path.dirname(fileURLToPath(import.meta.url));
   const termo = () => readFileSync(path.resolve(AQUI, "..", "docs", "termos", "termo-geral-de-uso.md"), "utf8");
 
-  it("tirando SMART MATCH, a palavra não aparece em caixa alta, baixa nem no plural", () => {
-    const sobra = termo().replace(/SMART MATCH/g, "");
+  it("tirando SMART MATCH e a marca MARQUESA GLOBAL MATCH (24/11/2026), a palavra não aparece em caixa alta, baixa nem no plural", () => {
+    const sobra = termo().replace(/SMART MATCH|\bMARQUESA GLOBAL MATCH\b/g, "");
     expect(sobra.match(/match\w*/gi) ?? []).toEqual([]);
   });
 

@@ -1,8 +1,12 @@
 import crypto from "crypto";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
+  contexts,
+  meetingAttachments,
+  meetingParticipants,
   meetingAudioSlices,
   meetingContactSuggestions,
+  meetingDocuments,
   meetingEntities,
   meetingRecordings,
   meetings,
@@ -12,16 +16,22 @@ import {
   meetingSummaryItems,
   meetingSummaryTranslations,
   privateContacts,
+  resumoPorEmail,
+  resumoEmAudio,
   userProfiles,
   users,
+  voiceProfiles,
 } from "../drizzle/schema";
 import { pareceSerADona } from "@shared/reuniao-no-match";
-import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, NOME_DO_FALANTE_MAX, nomesDosFalantes } from "@shared/const";
+import { ehReuniaoDeDocumento } from "@shared/documento-da-reuniao";
+import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, FORMATO_DO_FALANTE, LIMITE_PROCESSAMENTO_MS, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, MENSAGEM_REUNIAO_NAO_ENCONTRADA, NOME_DO_FALANTE_MAX, nomesDosFalantes, contasDasVozes } from "@shared/const";
 import { tokensDoTermo } from "@shared/direcao-do-termo";
-import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, nomeDoIdioma } from "@shared/idioma-da-reuniao";
+import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao, idiomaFalado, nomeDoIdioma } from "@shared/idioma-da-reuniao";
+import { CAUSAS_DA_PARTE_SEM_AUDIO, parteTemAudioGuardado, partesParaBaixar } from "./audio-guardado-das-partes";
 import { linkMostraOsNomes } from "./autorizacao-do-link-aberto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, ehErroDoDriverDeBanco, MENSAGEM_ERRO_DE_CONSULTA } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { colunasDoPrimeiroResumo } from "./modelos-proprios";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
 import { invokeLLM } from "./_core/llm";
 import { raciocinioDaFuncao } from "./_core/raciocinio-de-ia";
@@ -35,21 +45,27 @@ import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import { GeminiIndisponivelError, transcribeWithGemini } from "./gemini";
 import {
   apagarPendenciasDaReuniao, emailEstaNaFonte, expressaoEstaNaFonte, gravarPendencias, pendenciasDaPessoaNaReuniao,
-  REGRAS_DAS_TRES_DIMENSOES, telefoneEstaNaFonte, type ItemProposto,
+  REGRAS_DAS_TRES_DIMENSOES, telefoneEstaNaFonte, type BancoOuTransacao, type ItemProposto,
 } from "./network-extracao";
 import { registrarConsumoDeMinutos } from "./minutos-de-reuniao";
 import { soltarGravacaoDaAgenda } from "./agenda-de-reunioes";
 import { apagarAvisosDaReuniao } from "./lembretes";
 import { medirDuracaoDoAudio } from "./duracao-do-audio";
 import { acoesComAVozRenomeada, soltarAcoesDaReuniao } from "./proximas-acoes";
+import { soltarContaDaVozNaTransacao, vozesParaQuemLe } from "./vozes-da-reuniao";
+import { etiquetasDaReuniao } from "@shared/detalhes-da-reuniao";
+import { nomesDosPonteiros } from "./detalhes-da-reuniao";
+import { edicaoDaTranscricao, transcricaoEstaEditada, type EdicaoDaTranscricao } from "./editar-transcricao";
+import { foraDaLixeira, reuniaoForaDeVista, reuniaoVisivel } from "./reuniao-visivel";
 
 /**
  * Os tetos do ENVIO ÚNICO (10 MB e 10 min), que moram em shared/const.ts porque
  * a tela confere os mesmos. Os nomes de sempre ficam aqui para os imports não
- * mudarem; quem os usa é o envio único e o reprocesso dele. A gravação em
- * partes não passa por eles: tem o teto próprio (GRAVACAO_EM_PARTES_SEGUNDOS_MAX,
- * em server/fatias-de-reuniao.ts), que desde a G13b é também o limite por
- * reunião do painel de minutos (server/minutos-de-reuniao.ts).
+ * mudarem; quem os usa é a leitura da gravação inteira das reuniões antigas, no reprocesso e na
+ * junção (server/juntar-reunioes.ts). A gravação em partes não passa por eles:
+ * tem o teto próprio (GRAVACAO_EM_PARTES_SEGUNDOS_MAX, em
+ * server/fatias-de-reuniao.ts), que desde a G13b é também o limite por reunião
+ * do painel de minutos (server/minutos-de-reuniao.ts).
  */
 export const MAX_MEETING_AUDIO_BYTES = ENVIO_UNICO_BYTES_MAX;
 export const MAX_MEETING_DURATION_SECONDS = ENVIO_UNICO_SEGUNDOS_MAX;
@@ -67,7 +83,13 @@ export const MAX_MEETING_DURATION_SECONDS = ENVIO_UNICO_SEGUNDOS_MAX;
  * antes de apagar a linha.
  */
 export const MEETING_AUDIO_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-export const MENSAGEM_REUNIAO_LONGA_DEMAIS = "No modo atual, cada reunião pode ter no máximo 10 minutos.";
+/**
+ * A recusa da duração no envio único. Dizia "No modo atual, cada reunião pode
+ * ter no máximo 10 minutos", o que deixou de valer na G13b (a reunião em partes
+ * vai até 12 h): o teto é só do envio de um arquivo só (processMeetingRecording),
+ * cuja rota (meetings.submitRecording) saiu na G14, parte 2 (25/11/2026).
+ */
+export const MENSAGEM_REUNIAO_LONGA_DEMAIS = "Este áudio passa dos 10 minutos que o envio de um arquivo só aceita.";
 export const MENSAGEM_DURACAO_ILEGIVEL = "Não foi possível ler a duração deste áudio. Envie o arquivo em MP3, M4A, WAV, OGG ou WebM.";
 /**
  * Folga sobre o limite medido: o gravador da tela para aos 600 s pelo relógio
@@ -577,14 +599,19 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
   if (!normalizedLanguage) throw new Error("Idioma de tradução não suportado.");
   const targetLanguage = nomeDoIdioma(normalizedLanguage);
   const db = await exigirDb();
-  const [transcript] = await db.select().from(meetingTranscripts)
+  // A versão que a dona vê, editada ou não (H18), com a revisão: a tradução de
+  // uma revisão anterior não fica guardada (traduzirEGuardar).
+  const [transcript] = await db.select({
+    id: meetingTranscripts.id, transcript: meetingTranscripts.transcript, language: meetingTranscripts.language, revision: meetingTranscripts.revision,
+  }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1);
   if (!transcript) throw new Error("Transcrição não encontrada.");
   // O original é o idioma em que a reunião foi transcrita, e não o pt-BR: uma
   // reunião em inglês "traduzida" para pt-BR voltava em inglês. Reunião antiga
   // guarda 'pt', e idioma gravado fora da lista conta como pt-BR, o padrão de
-  // quando ela foi gravada.
-  const idiomaOriginal = idiomaDaReuniao(transcript.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // quando ela foi gravada. A lista é a dos idiomas falados (G16): a reunião
+  // em italiano traduzida para pt-BR não volta em italiano.
+  const idiomaOriginal = idiomaFalado(transcript.language) ?? IDIOMA_DA_REUNIAO_PADRAO;
   if (normalizedLanguage === idiomaOriginal) {
     return { language: normalizedLanguage, text: transcript.transcript, cached: true };
   }
@@ -599,7 +626,9 @@ export async function translatePrivateMeetingTranscript(ownerId: string, meeting
   // Quem pede a mesma tradução enquanto a primeira ainda está na IA (duas
   // pessoas abrindo o link aberto em inglês, a mesma página recarregada) espera
   // por ela, sem pagar outra chamada nem gastar vaga do teto.
-  const chave = [ownerId, meetingId, normalizedLanguage, transcript.id].join("\u0000");
+  // A revisão entra na chave (H18): quem pede depois de uma edição não espera a
+  // tradução do texto de antes dela.
+  const chave = [ownerId, meetingId, normalizedLanguage, transcript.id, String(transcript.revision)].join("\u0000");
   const janelas = dividirEmJanelas(transcript.transcript, JANELA_DA_TRADUCAO);
   const longa = janelas.length > 1;
   const emAndamento: TraducaoEmAndamento = { language: normalizedLanguage, text: null, cached: false, emAndamento: true };
@@ -664,7 +693,7 @@ async function traduzirEGuardar(db: Banco, alvo: {
   meetingId: string;
   normalizedLanguage: string;
   targetLanguage: string;
-  transcript: { id: string; transcript: string };
+  transcript: { id: string; transcript: string; revision: number };
   janelas: string[];
 }): Promise<TraducaoPronta> {
   const { ownerId, meetingId, normalizedLanguage, targetLanguage, transcript, janelas } = alvo;
@@ -686,30 +715,36 @@ async function traduzirEGuardar(db: Banco, alvo: {
   }
   const translatedText = traduzidas.join("\n");
   // A tradução leva até 3 min, e nesse meio-tempo um reprocessamento pode ter
-  // trocado a transcrição (apaga a antiga e as traduções dela, grava a nova).
+  // trocado a transcrição (apaga a antiga e as traduções dela, grava a nova),
+  // ou a dona pode tê-la editado (H18: a revisão sobe e as traduções saem).
   // Gravar agora poria no cache a tradução do texto VELHO, e o UNIQUE
   // (owner, meeting, language) barraria para sempre a tradução certa. Se a
   // transcrição já não é a mesma, a resposta vai para quem pediu, sem cache.
-  const [aindaAMesma] = await db.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
-    .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1);
-  if (aindaAMesma?.id !== transcript.id) return { language: normalizedLanguage, text: translatedText, cached: false };
-  const timestamp = now();
-  try {
-    await db.insert(meetingTranscriptTranslations).values({
-      id: crypto.randomUUID(),
-      meetingId,
-      ownerId,
-      language: normalizedLanguage,
-      translatedText,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    });
-  } catch (erro) {
-    // Outro pedido guardou a mesma tradução primeiro (um que não passou pela
-    // espera acima, como o de antes de um deploy): o UNIQUE recusa a segunda
-    // cópia, e quem pediu recebe a que já foi paga, em vez de um erro.
-    if (!ehColisaoDeChave(erro)) throw erro;
-  }
+  // A conferência e a gravação vão numa transação, com a transcrição travada:
+  // a edição que chega no meio espera, e a que veio antes já mudou a revisão.
+  await db.transaction(async tx => {
+    const [aindaAMesma] = await tx.select({ id: meetingTranscripts.id, revision: meetingTranscripts.revision }).from(meetingTranscripts)
+      .where(and(eq(meetingTranscripts.ownerId, ownerId), eq(meetingTranscripts.meetingId, meetingId))).limit(1).for("update");
+    if (aindaAMesma?.id !== transcript.id || Number(aindaAMesma.revision) !== Number(transcript.revision)) return;
+    const timestamp = now();
+    try {
+      await tx.insert(meetingTranscriptTranslations).values({
+        id: crypto.randomUUID(),
+        meetingId,
+        ownerId,
+        language: normalizedLanguage,
+        translatedText,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+    } catch (erro) {
+      // Outro pedido guardou a mesma tradução primeiro (um que não passou pela
+      // espera acima, como o de antes de um deploy): o UNIQUE recusa a segunda
+      // cópia, e quem pediu recebe a que já foi paga, em vez de um erro. No
+      // MySQL, o comando recusado não desfaz a transação.
+      if (!ehColisaoDeChave(erro)) throw erro;
+    }
+  });
   return { language: normalizedLanguage, text: translatedText, cached: false };
 }
 
@@ -802,7 +837,8 @@ export class ReprocessamentoRecusado extends Error {
   }
 }
 
-export const MENSAGEM_REUNIAO_NAO_ENCONTRADA = "Reunião não encontrada.";
+// A frase mora em shared/const.ts (a tela a traduz); o nome de sempre fica aqui.
+export { MENSAGEM_REUNIAO_NAO_ENCONTRADA };
 export const MENSAGEM_REPROCESSO_EM_CONFLITO = "Esta reunião não está com falha ou já está sendo processada.";
 export const MENSAGEM_SEM_AUDIO_PARA_REPROCESSAR = "Não há áudio guardado desta reunião para reprocessar.";
 // A tela do site reconhece esta frase (shared/const.ts) para traduzi-la e para
@@ -1042,10 +1078,34 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   ficha: number;
   limparAntes: boolean;
   durationSeconds: number;
+  /**
+   * Conta no contador de minutos? Sim no áudio (o padrão); não na reunião que
+   * nasceu de um documento (server/documento-da-reuniao.ts), que não tem
+   * minutos de fala.
+   */
+  contarMinutos?: boolean;
   transcription: { text: string; segments: unknown; language: string };
   extraction: MeetingExtraction;
+  /**
+   * Zera os nomes das vozes (H3) ao promover? Por padrão, sempre que limpa o
+   * resultado anterior: a transcrição nova renumera as vozes, e o nome velho
+   * cairia na voz errada. A montagem da reunião em partes passa `false`: ela
+   * relê as falas que as partes já guardam, com os mesmos rótulos, e quem
+   * transcreve de novo zera os nomes antes (o reprocesso das partes, em
+   * reprocessarEmPartes, e a junção que retranscreve, server/juntar-reunioes.ts).
+   * A junção sem retranscrever leva os nomes das reuniões juntadas à reunião
+   * que fica, e a montagem os mantém.
+   */
+  zerarNomes?: boolean;
+  /**
+   * As vozes ligadas às contas (H3c) que a montagem grava ao promover: a voz
+   * da dona reconhecida pela amostra do perfil de voz (H3d), já somada às
+   * que havia. Ausente: a coluna fica como está (ou zerada, com zerarNomes).
+   */
+  contasDasVozes?: Record<string, string>;
 }) {
   const { meetingId, ownerId, ficha, transcription, extraction } = execucao;
+  const zerarNomes = execucao.zerarNomes ?? execucao.limparAntes;
 
   // Entre a tomada e aqui passaram 1–2 minutos de Gemini e LLM: tempo de sobra
   // para a dona ter clicado em Excluir, para um reprocessamento novo ou para a
@@ -1146,11 +1206,13 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   // o índice único (dona, origem, referência) impede contar duas vezes, e
   // exclusão no meio não apaga a linha, porque a IA já transcreveu. Outro erro
   // (o banco respondeu) não tira da dona a reunião pronta: fica no log.
-  try {
-    await registrarConsumoDeMinutos(db, { ownerId, origem: "reuniao", referencia: meetingId, segundos: execucao.durationSeconds });
-  } catch (erro) {
-    if (ehErroDeBancoIndisponivel(erro)) throw erro;
-    console.warn("[Reuniões] o contador de minutos não registrou esta reunião:", erro instanceof Error ? erro.message : erro);
+  if (execucao.contarMinutos !== false) {
+    try {
+      await registrarConsumoDeMinutos(db, { ownerId, origem: "reuniao", referencia: meetingId, segundos: execucao.durationSeconds });
+    } catch (erro) {
+      if (ehErroDeBancoIndisponivel(erro)) throw erro;
+      console.warn("[Reuniões] o contador de minutos não registrou esta reunião:", erro instanceof Error ? erro.message : erro);
+    }
   }
   // O resumo guardado (H4): toda reunião que fica pronta ganha o pedido, e a
   // fila do resumo (server/fila-do-resumo.ts) o gera em segundo plano. Serve ao
@@ -1162,8 +1224,11 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   // linha que já existir fica como está, e a reunião não falha por causa dela
   // (nenhum caminho de hoje a cria antes: pedir o resumo exige a reunião
   // 'ready', e esta execução ainda está em 'processing').
+  // O modelo, o estilo e as instruções (H4e): o pedido feito antes de gravar
+  // ou, sem ele, as preferências da dona (server/modelos-proprios.ts).
+  const pedidoDoResumo = await colunasDoPrimeiroResumo(db, ownerId, meetingId);
   await db.insert(meetingSummaries).values({
-    id: crypto.randomUUID(), meetingId, ownerId, transcriptId, status: "pending", createdAt: completedAt, updatedAt: completedAt,
+    id: crypto.randomUUID(), meetingId, ownerId, transcriptId, status: "pending", ...pedidoDoResumo, createdAt: completedAt, updatedAt: completedAt,
   }).onDuplicateKeyUpdate({ set: { meetingId: sql`${meetingSummaries.meetingId}` } });
   // A releitura acima e este UPDATE não são atômicos: exclusão, reprocessamento
   // novo ou varredura podem ter entrado entre os dois. O WHERE com a ficha faz
@@ -1172,7 +1237,10 @@ export async function gravarResultadoDaReuniao(db: Banco, execucao: {
   // a execução dona da reunião limpa antes de gravar o resultado dela.
   // Reprocessar zera os nomes das vozes (H3): a transcrição nova renumera as
   // vozes (a Ana de F1 pode virar F2), e o nome velho cairia na voz errada.
-  const promovida = await db.update(meetings).set({ status: "ready", processingError: null, updatedAt: completedAt, ...(execucao.limparAntes ? { speakerNames: null } : {}) })
+  const promovida = await db.update(meetings).set({
+    status: "ready", processingError: null, updatedAt: completedAt, ...(zerarNomes ? VOZES_ZERADAS : {}),
+    ...(execucao.contasDasVozes ? { speakerAccounts: execucao.contasDasVozes } : {}),
+  })
     .where(and(
       eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId),
       eq(meetings.status, "processing"), eq(meetings.updatedAt, ficha),
@@ -1252,8 +1320,12 @@ async function reprocessarEmPartes(db: Banco, ownerId: string, meetingId: string
   if (Number(partes!.prazo ?? 0) <= now() + margemDoReprocesso(esperadas ?? Number(partes!.maiorSeq) + 1)) {
     throw new ReprocessamentoRecusado("PRECONDITION_FAILED", MENSAGEM_SEM_AUDIO_PARA_REPROCESSAR);
   }
+  // Os nomes das vozes (H3) saem aqui, na tomada, e não na montagem: as partes
+  // que falharam são transcritas de novo e podem renumerar as vozes. A montagem
+  // mantém os nomes (gravarResultadoDaReuniao, zerarNomes), porque a junção de
+  // reuniões (server/juntar-reunioes.ts) também passa por ela.
   const tomada = await db.update(meetings).set({
-    status: "uploading", processingError: null, attempts: 0, lockToken: null, lockedUntil: null, updatedAt: now(),
+    status: "uploading", processingError: null, attempts: 0, lockToken: null, lockedUntil: null, updatedAt: now(), ...VOZES_ZERADAS,
     expectedSlices: sql`coalesce(${meetings.expectedSlices}, ${Number(partes!.maiorSeq) + 1})`,
   }).where(and(
     eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), eq(meetings.audioPipeline, "slices"),
@@ -1263,7 +1335,8 @@ async function reprocessarEmPartes(db: Banco, ownerId: string, meetingId: string
   await db.update(meetingAudioSlices).set({ status: "received", attempts: 0, lastError: null, lockToken: null, lockedUntil: null, updatedAt: now() })
     .where(and(
       eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId), eq(meetingAudioSlices.status, "failed"),
-      or(isNull(meetingAudioSlices.lastError), notInArray(meetingAudioSlices.lastError, ["AUDIO_AUSENTE", "NAO_RECEBIDA"])),
+      // A mesma regra do "Baixar o áudio" (audio-guardado-das-partes.ts): sem o áudio no bucket, a parte segue lacuna.
+      or(isNull(meetingAudioSlices.lastError), notInArray(meetingAudioSlices.lastError, [...CAUSAS_DA_PARTE_SEM_AUDIO])),
     ));
   return { trabalho: Promise.resolve() };
 }
@@ -1285,9 +1358,17 @@ export async function iniciarReprocessamento(ownerId: string, meetingId: string)
   const db = await exigirDb();
   const [meeting] = await db.select().from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-  if (!meeting || meeting.status === "deleted") throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  // A da lixeira (H7d) é "não encontrada", como a excluída.
+  if (!meeting || reuniaoForaDeVista(meeting)) throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   const recusa = recusaPeloStatus(meeting);
   if (recusa) throw recusa;
+  // A reunião que nasceu de um documento (H12) refaz a leitura pelo PDF
+  // guardado. Import tardio: o módulo do documento importa este, e o import no
+  // topo faria um ciclo.
+  if (ehReuniaoDeDocumento(meeting.origem)) {
+    const { iniciarReprocessamentoDoDocumento } = await import("./documento-da-reuniao");
+    return iniciarReprocessamentoDoDocumento(db, { id: meetingId, ownerId, updatedAt: meeting.updatedAt, language: meeting.language, processingError: meeting.processingError });
+  }
   if (meeting.audioPipeline === "slices") return reprocessarEmPartes(db, ownerId, meetingId, meeting.expectedSlices);
 
   // A mesma gravação que o player toca: a mais recente, porque não há
@@ -1306,12 +1387,12 @@ export async function iniciarReprocessamento(ownerId: string, meetingId: string)
   const tomada = await db.update(meetings).set({ status: "processing", processingError: null, updatedAt: ficha })
     .where(and(
       eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId),
-      eq(meetings.status, "failed"), eq(meetings.consentGranted, true),
+      eq(meetings.status, "failed"), eq(meetings.consentGranted, true), foraDaLixeira(),
     ));
   if (!linhasAfetadas(tomada)) {
     const [agora] = await db.select().from(meetings)
       .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-    if (!agora || agora.status === "deleted") throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+    if (!agora || reuniaoForaDeVista(agora)) throw new ReprocessamentoRecusado("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
     throw recusaPeloStatus(agora) ?? new ReprocessamentoRecusado("CONFLICT", MENSAGEM_REPROCESSO_EM_CONFLITO);
   }
 
@@ -1381,9 +1462,10 @@ async function executarReprocessamento(db: Banco, execucao: {
  *
  * Ficam no servidor as colunas de controle da fila de transcrição (attempts,
  * lockedUntil e lockToken): a reserva de quem está processando a reunião não é
- * dado da dona e não tem uso na tela. As outras colunas da migração 0014
- * (audioPipeline, origem, consentNoticeVersion e expectedSlices) entram aqui
- * quando uma tela precisar delas; até lá, a resposta é a mesma de antes dela.
+ * dado da dona e não tem uso na tela. A consentNoticeVersion, da migração
+ * 0014, entra aqui quando uma tela precisar dela. A origem entrou com a
+ * reunião de documento (H12), em que ela troca o player e a transcrição pelo
+ * texto do documento, e com o vídeo do YouTube (H13), que traz a sourceUrl.
  */
 const COLUNAS_DA_REUNIAO_NA_TELA = {
   id: meetings.id,
@@ -1406,7 +1488,28 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
   // aberto lê os nomes por outra consulta, e só quando foi ligado com a
   // confirmação que fala deles (H3b, server/link-aberto-da-reuniao.ts).
   speakerNames: meetings.speakerNames,
+  // De onde a reunião veio: 'pdf' e 'foto' são documento (H12 e H12b), e no
+  // vídeo do YouTube (H13) vem também a URL canônica dele: a tela mostra o
+  // vídeo no lugar da gravação, e o "▶" de cada fala abre o vídeo no segundo
+  // dela. O link aberto leva só o id do vídeo, por outra consulta
+  // (server/link-aberto-da-reuniao.ts).
+  origem: meetings.origem,
+  sourceUrl: meetings.sourceUrl,
+  // Os detalhes (H7c): as etiquetas e o "Onde foi", só da dona. O link aberto
+  // não os leva: ele escolhe as colunas dele (server/link-aberto-da-reuniao.ts).
+  etiquetas: meetings.etiquetas,
+  ondeFoi: meetings.ondeFoi,
+  // A pasta (H7d), só da dona: a lista filtra e agrupa por ela. O link aberto
+  // não a leva.
+  folderId: meetings.folderId,
 };
+
+/**
+ * As três colunas das vozes zeradas: a transcrição nova renumera as vozes (a
+ * Ana de F1 pode virar F2), e o nome, a conta (H3c) e a juntada (H3c) velhos
+ * cairiam na voz errada.
+ */
+export const VOZES_ZERADAS = { speakerNames: null, speakerAccounts: null, speakerMerges: null } as const;
 
 /**
  * Dá nome a uma voz da transcrição por falante (H3), ou o tira (nome vazio).
@@ -1415,30 +1518,71 @@ const COLUNAS_DA_REUNIAO_NA_TELA = {
  * transação com a linha travada: dois nomes salvos juntos não se apagam. O nome
  * que muda de fato muda também o texto das próximas ações que citam a voz, e o
  * evento delas na agenda fica para trás (acoesComAVozRenomeada, H5c).
+ *
+ * Só com a reunião 'ready' (fora disso, NomesSoComReuniaoPronta → CONFLICT),
+ * e sem tocar em `updated_at`: essa coluna é a FICHA de quem processa a
+ * reunião (`gravarResultadoDaReuniao`, a fila das partes) e o relógio da
+ * varredura de gravações abandonadas. Nomear durante o processamento roubava
+ * a ficha e o resultado da IA era descartado; nomear durante a gravação
+ * adiava a varredura. E o nome dado em 'processing' sumiria de todo jeito,
+ * porque o reprocesso zera os nomes ao promover.
  */
 export async function nomearFalante(ownerId: string, meetingId: string, falante: string, nome: string): Promise<Record<string, string> | null> {
   if (!FORMATO_DO_FALANTE.test(falante)) throw new Error("Falante inválido.");
   const limpo = nome.trim().slice(0, NOME_DO_FALANTE_MAX);
   const db = await exigirDb();
   return db.transaction(async tx => {
-    const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"));
-    const [reuniao] = await tx.select({ speakerNames: meetings.speakerNames }).from(meetings).where(daDona).limit(1).for("update");
+    const daDona = and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel());
+    const [reuniao] = await tx.select({ speakerNames: meetings.speakerNames, status: meetings.status, speakerAccounts: meetings.speakerAccounts }).from(meetings).where(daDona).limit(1).for("update");
     if (!reuniao) return null;
+    if (reuniao.status !== "ready") throw new NomesSoComReuniaoPronta();
     const nomes = nomesDosFalantes(reuniao.speakerNames);
     const antes = nomes[falante] ?? "";
     if (limpo) nomes[falante] = limpo;
     else delete nomes[falante];
     const agora = Date.now();
-    await tx.update(meetings).set({ speakerNames: Object.keys(nomes).length ? nomes : null, updatedAt: agora }).where(daDona);
+    await tx.update(meetings).set({ speakerNames: Object.keys(nomes).length ? nomes : null }).where(and(daDona, eq(meetings.status, "ready")));
     if (antes !== limpo) await acoesComAVozRenomeada(tx, ownerId, meetingId, falante, agora);
+    // O nome livre escolhido no seletor ("Outra pessoa", H3c) tira a ligação
+    // da voz à conta: o nome da conta venceria o nome digitado.
+    if (limpo) await soltarContaDaVozNaTransacao(tx, ownerId, meetingId, falante, reuniao.speakerAccounts);
     return nomes;
   });
 }
 
+/** A reunião ainda não está pronta (gravando, processando, falhou): sem transcrição final, sem nomes. */
+export class NomesSoComReuniaoPronta extends Error {
+  constructor() {
+    super("Os nomes das vozes só podem ser dados com a reunião pronta.");
+    this.name = "NomesSoComReuniaoPronta";
+  }
+}
+
+/**
+ * A lista da dona, com o nome do contato e o do contexto de cada reunião, que a
+ * busca e os filtros da tela leem (H7b). Os nomes vêm só da rede da dona (o
+ * contexto: dela ou do catálogo): o ponteiro para o contato ou o contexto de
+ * outra conta, que sobrou de antes da conferência de posse (H7c), sai sem nome.
+ */
 export async function listPrivateMeetings(ownerId: string) {
   const db = await exigirDb();
-  const lista = await db.select(COLUNAS_DA_REUNIAO_NA_TELA).from(meetings).where(eq(meetings.ownerId, ownerId)).orderBy(desc(meetings.createdAt));
-  return lista.map(meeting => ({ ...meeting, processingError: processingErrorSeguro(meeting.processingError) }));
+  // A transcrição editada pela dona (H18) entra só como sim ou não, sem ler o
+  // texto: a junção (H17) refaz a transcrição pelo áudio, e a tela avisa que as
+  // correções não passam para a reunião juntada.
+  const lista = await db.select({
+    ...COLUNAS_DA_REUNIAO_NA_TELA, contatoNome: privateContacts.fullName, contextoNome: contexts.name, transcricaoEditada: transcricaoEstaEditada,
+  })
+    .from(meetings)
+    .leftJoin(privateContacts, and(eq(privateContacts.id, meetings.contactId), eq(privateContacts.ownerId, meetings.ownerId)))
+    .leftJoin(contexts, and(eq(contexts.id, meetings.contextId), or(eq(contexts.ownerId, meetings.ownerId), isNull(contexts.ownerId))))
+    .leftJoin(meetingTranscripts, and(eq(meetingTranscripts.meetingId, meetings.id), eq(meetingTranscripts.ownerId, meetings.ownerId)))
+    // A reunião na lixeira (H7d) sai da lista: ela aparece só na lixeira da
+    // dona (listarLixeira, em server/lixeira-de-reunioes.ts).
+    .where(and(eq(meetings.ownerId, ownerId), foraDaLixeira())).orderBy(desc(meetings.createdAt));
+  return lista.map(meeting => ({
+    ...meeting, processingError: processingErrorSeguro(meeting.processingError), etiquetas: etiquetasDaReuniao(meeting.etiquetas),
+    transcricaoEditada: !!Number(meeting.transcricaoEditada),
+  }));
 }
 
 /**
@@ -1520,6 +1664,14 @@ export type AudioDaReuniao = {
   recordingExpired: boolean;
   /** O áudio passou do prazo e ainda NÃO saiu do bucket: não é servido, e a varredura o tira. */
   recordingDeletionPending: boolean;
+  /**
+   * O que a dona pode baixar (H8c): a duração do arquivo e o prazo mais curto
+   * das partes com o áudio no bucket (audio-guardado-das-partes.ts), que incluem
+   * as que falharam na IA, que o player não toca. Na reunião que falhou inteira
+   * na IA, `recording` é nulo e isto não: o botão "Baixar o áudio" segue isto.
+   * Só a tela da dona o usa; o link aberto não o repassa.
+   */
+  audioParaBaixar: { duracaoSegundos: number; expiresAt: number } | null;
 };
 
 /** O estado da reunião que decide o que a leitura faz com o áudio vencido. */
@@ -1553,7 +1705,8 @@ const STATUS_QUE_SEGURAM_AS_PARTES: Reuniao["status"][] = ["recording", "uploadi
  */
 export async function gravacaoParaOuvir(db: Banco, ownerId: string, meetingId: string, reuniao: ReuniaoDoAudio): Promise<AudioDaReuniao> {
   const agora = now();
-  const semAudio = (expirada: boolean, saindo = false): AudioDaReuniao => ({ recording: null, recordingExpired: expirada, recordingDeletionPending: saindo });
+  const semAudio = (expirada: boolean, saindo = false, audioParaBaixar: AudioDaReuniao["audioParaBaixar"] = null): AudioDaReuniao =>
+    ({ recording: null, recordingExpired: expirada, recordingDeletionPending: saindo, audioParaBaixar });
   // Sem linha: ou nunca houve áudio, ou ele já saiu pelo prazo. A data da
   // reunião distingue os dois casos sem guardar nada a mais (o prazo conta de um
   // instante posterior à criação); sem isto a tela passaria a dizer "nunca houve
@@ -1562,13 +1715,22 @@ export async function gravacaoParaOuvir(db: Banco, ownerId: string, meetingId: s
 
   if (reuniao.emPartes) {
     const linhas = await db.select({
-      id: meetingAudioSlices.id, seq: meetingAudioSlices.seq, status: meetingAudioSlices.status,
+      id: meetingAudioSlices.id, seq: meetingAudioSlices.seq, status: meetingAudioSlices.status, lastError: meetingAudioSlices.lastError,
       storageKey: meetingAudioSlices.storageKey, storageUrl: meetingAudioSlices.storageUrl, mimeType: meetingAudioSlices.mimeType,
       durationMs: meetingAudioSlices.durationMs, offsetMs: meetingAudioSlices.offsetMs, expiresAt: meetingAudioSlices.expiresAt,
     }).from(meetingAudioSlices)
       .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)))
       .orderBy(meetingAudioSlices.seq);
     if (!linhas.length) return semLinha();
+
+    // O que se baixa (H8c): as partes com o áudio no bucket, no prazo, também as
+    // que falharam na IA, no mesmo tempo do player; a regra é a da preparação.
+    const paraBaixar = partesParaBaixar(linhas, agora);
+    const ultimaParaBaixar = paraBaixar[paraBaixar.length - 1];
+    const prazosParaBaixar = linhas.filter(linha => parteTemAudioGuardado(linha) && linha.expiresAt > agora).map(linha => linha.expiresAt);
+    const audioParaBaixar = ultimaParaBaixar
+      ? { duracaoSegundos: Math.round((ultimaParaBaixar.inicioMs + ultimaParaBaixar.duracaoMs) / 1000), expiresAt: Math.min(...prazosParaBaixar) }
+      : null;
 
     const vencidas = linhas.filter(linha => linha.expiresAt <= agora);
     let ficaram = 0;
@@ -1609,13 +1771,14 @@ export async function gravacaoParaOuvir(db: Banco, ownerId: string, meetingId: s
         },
         recordingExpired: false,
         recordingDeletionPending: false,
+        audioParaBaixar,
       };
     }
-    if (ficaram) return semAudio(false, true);
+    if (ficaram) return semAudio(false, true, audioParaBaixar);
     // Nada para ouvir e nada saindo: se todas as partes tinham vencido (e
     // acabaram de sair), é a gravação que passou do prazo; senão, as que sobram
-    // nunca chegaram ao bucket ou falharam.
-    return semAudio(vencidas.length === linhas.length);
+    // nunca chegaram ao bucket ou falharam (e as que falharam na IA ainda se baixam).
+    return semAudio(vencidas.length === linhas.length, false, audioParaBaixar);
   }
 
   // Sem unicidade por reunião no banco: `orderBy` torna a escolha determinista
@@ -1654,6 +1817,50 @@ export async function gravacaoParaOuvir(db: Banco, ownerId: string, meetingId: s
     },
     recordingExpired: false,
     recordingDeletionPending: false,
+    audioParaBaixar: { duracaoSegundos: gravacao.durationSeconds, expiresAt: gravacao.expiresAt },
+  };
+}
+
+/** O que a tela da dona recebe sobre o arquivo da reunião de documento (H12). O link aberto não recebe nada disto. */
+export type DocumentoDaReuniao = {
+  documento: { url: string; mimeType: string; sizeBytes: number; expiresAt: number } | null;
+  /** O arquivo passou do prazo e SAIU do bucket (sem linha, vale para a reunião mais velha que o prazo, como no áudio). */
+  documentoExpirado: boolean;
+  /** O arquivo passou do prazo e ainda NÃO saiu do bucket: não é servido, e a varredura o tira. */
+  documentoSaindo: boolean;
+};
+
+/**
+ * O PDF da reunião de documento que a dona pode abrir agora, com a regra do
+ * áudio (gravacaoParaOuvir): vencido, deixa de ser servido e sai aqui mesmo,
+ * com todas as versões e só então a linha, menos na reunião em 'processing',
+ * em que a leitura pode estar usando o arquivo (a varredura o tira depois). Se
+ * o bucket recusar, a linha fica e a tela diz que o arquivo está saindo.
+ *
+ * Sai só o que a tela precisa: `storageKey` fica no servidor, e a `url` é o
+ * caminho do proxy autenticado (/manus-storage/...), que confere sessão e posse
+ * a cada pedido.
+ */
+export async function documentoParaVer(db: Banco, ownerId: string, meetingId: string, reuniao: { createdAt: number; status: Reuniao["status"] }): Promise<DocumentoDaReuniao> {
+  const agora = now();
+  const [linha] = await db.select({
+    id: meetingDocuments.id, storageKey: meetingDocuments.storageKey, storageUrl: meetingDocuments.storageUrl,
+    mimeType: meetingDocuments.mimeType, sizeBytes: meetingDocuments.sizeBytes, expiresAt: meetingDocuments.expiresAt,
+  }).from(meetingDocuments)
+    .where(and(eq(meetingDocuments.meetingId, meetingId), eq(meetingDocuments.ownerId, ownerId)))
+    .limit(1);
+  if (!linha) return { documento: null, documentoExpirado: reuniao.createdAt + MEETING_AUDIO_TTL_MS <= agora, documentoSaindo: false };
+  if (linha.expiresAt <= agora) {
+    if (reuniao.status !== "processing" && await apagarArquivoDaGravacao(linha.storageKey)) {
+      await db.delete(meetingDocuments).where(and(eq(meetingDocuments.id, linha.id), eq(meetingDocuments.ownerId, ownerId)));
+      return { documento: null, documentoExpirado: true, documentoSaindo: false };
+    }
+    return { documento: null, documentoExpirado: false, documentoSaindo: true };
+  }
+  return {
+    documento: { url: linha.storageUrl, mimeType: linha.mimeType, sizeBytes: linha.sizeBytes, expiresAt: linha.expiresAt },
+    documentoExpirado: false,
+    documentoSaindo: false,
   };
 }
 
@@ -1712,6 +1919,8 @@ const retomadaDaVarredura = new Map<string, string>();
 /** A reunião DO áudio: mesmo id E mesma dona. Sem esse par, o áudio é de reunião que já não existe. */
 const reuniaoDaGravacao = and(eq(meetings.id, meetingRecordings.meetingId), eq(meetings.ownerId, meetingRecordings.ownerId));
 const reuniaoDaParte = and(eq(meetings.id, meetingAudioSlices.meetingId), eq(meetings.ownerId, meetingAudioSlices.ownerId));
+const reuniaoDoDocumento = and(eq(meetings.id, meetingDocuments.meetingId), eq(meetings.ownerId, meetingDocuments.ownerId));
+const reuniaoDoAnexo = and(eq(meetings.id, meetingAttachments.meetingId), eq(meetings.ownerId, meetingAttachments.ownerId));
 
 /** Um trecho da volta da varredura por uma tabela: os ids depois de `depoisDe` e, se houver, até `ate` (inclusive). */
 type TrechoDaVarredura = { depoisDe: string; ate?: string };
@@ -1755,6 +1964,99 @@ function partesQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote
 }
 
 /**
+ * Os PDFs das reuniões de documento (H12) que saem nesta passada, pela regra da
+ * gravação do envio único: vencidos (menos na reunião em 'processing', em que a
+ * leitura ou o reprocesso pode estar usando o arquivo) e, na hora, o da reunião
+ * que não existe ou está sendo excluída.
+ */
+function documentosQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
+  return db.select({ id: meetingDocuments.id, storageKey: meetingDocuments.storageKey })
+    .from(meetingDocuments)
+    .leftJoin(meetings, reuniaoDoDocumento)
+    .where(and(
+      gt(meetingDocuments.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(meetingDocuments.id, trecho.ate) : undefined,
+      ownerId ? eq(meetingDocuments.ownerId, ownerId) : undefined,
+      or(
+        isNull(meetings.id),
+        eq(meetings.status, "deleted"),
+        and(lte(meetingDocuments.expiresAt, agora), ne(meetings.status, "processing")),
+      ),
+    ))
+    .orderBy(asc(meetingDocuments.id))
+    .limit(lote);
+}
+
+/**
+ * As fotos e os desenhos do resumo (H4g e H4h, server/anexos-do-resumo.ts) que
+ * saem nesta passada: vencidos (a reunião em 'processing' não os usa: a IA não
+ * lê imagem) e, na hora, os da reunião que não existe ou está sendo excluída.
+ */
+function anexosQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
+  return db.select({ id: meetingAttachments.id, storageKey: meetingAttachments.storageKey })
+    .from(meetingAttachments)
+    .leftJoin(meetings, reuniaoDoAnexo)
+    .where(and(
+      gt(meetingAttachments.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(meetingAttachments.id, trecho.ate) : undefined,
+      ownerId ? eq(meetingAttachments.ownerId, ownerId) : undefined,
+      or(
+        isNull(meetings.id),
+        eq(meetings.status, "deleted"),
+        lte(meetingAttachments.expiresAt, agora),
+      ),
+    ))
+    .orderBy(asc(meetingAttachments.id))
+    .limit(lote);
+}
+
+const reuniaoDoAudioDoResumo = and(eq(meetings.id, resumoEmAudio.meetingId), eq(meetings.ownerId, resumoEmAudio.ownerId));
+
+/**
+ * Os MP3 do resumo (H19b, resumo_em_audio) que saem nesta passada: só os da
+ * reunião que não existe mais ou está sendo excluída. É o que a junção (H17)
+ * deixa das reuniões que saem (ela não espera o bucket dentro da transação) e o
+ * que o bucket recusou na exclusão da reunião. O MP3 da reunião no ar não vence:
+ * ele sai quando o texto do resumo muda ou com a reunião.
+ */
+async function audiosDoResumoQueSaem(db: Banco, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
+  const linhas = await db.select({ id: resumoEmAudio.id, storageKey: resumoEmAudio.storageKey })
+    .from(resumoEmAudio)
+    .leftJoin(meetings, reuniaoDoAudioDoResumo)
+    .where(and(
+      gt(resumoEmAudio.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(resumoEmAudio.id, trecho.ate) : undefined,
+      ownerId ? eq(resumoEmAudio.ownerId, ownerId) : undefined,
+      isNotNull(resumoEmAudio.storageKey),
+      or(isNull(meetings.id), eq(meetings.status, "deleted")),
+    ))
+    .orderBy(asc(resumoEmAudio.id))
+    .limit(lote);
+  // A chave não é nula pelo filtro; o tipo da coluna não sabe disso.
+  return linhas.map(linha => ({ id: linha.id, storageKey: linha.storageKey ?? "" }));
+}
+
+/**
+ * O perfil de voz (H3d) cuja conta não existe mais: é o ponteiro que a exclusão
+ * da conta deixou quando o bucket recusou a amostra, ou o perfil gravado depois
+ * de a exclusão ler as chaves (regra 7 de server/exclusao-de-conta.ts). A conta
+ * é a linha de users com o mesmo openId.
+ */
+async function perfisDeVozSemConta(db: Banco, trecho: TrechoDaVarredura, lote: number, ownerId?: string) {
+  return db.select({ id: voiceProfiles.id, storageKey: voiceProfiles.storageKey })
+    .from(voiceProfiles)
+    .leftJoin(users, eq(users.openId, voiceProfiles.ownerId))
+    .where(and(
+      gt(voiceProfiles.id, trecho.depoisDe),
+      trecho.ate !== undefined ? lte(voiceProfiles.id, trecho.ate) : undefined,
+      ownerId ? eq(voiceProfiles.ownerId, ownerId) : undefined,
+      isNull(users.id),
+    ))
+    .orderBy(asc(voiceProfiles.id))
+    .limit(lote);
+}
+
+/**
  * A varredura que faz os 30 dias valerem para TODO áudio de reunião, não só para
  * o que alguém reabre: sem ela, o áudio de uma reunião que ninguém visita mais
  * (o caso comum) ficaria no bucket para sempre. A voz das outras participantes
@@ -1770,7 +2072,16 @@ function partesQueSaem(db: Banco, agora: number, trecho: TrechoDaVarredura, lote
  * - na hora, o áudio cuja reunião já não existe ou está sendo excluída
  *   ('deleted'): é o ponteiro que a exclusão da reunião ou da conta deixou
  *   quando o bucket recusou, ou a gravação de uma execução que terminou depois
- *   da exclusão.
+ *   da exclusão;
+ * - pela mesma regra da gravação do envio único, o PDF da reunião de documento
+ *   (H12, meeting_documents), que guarda a mesma promessa dos 30 dias;
+ * - as fotos e os desenhos do resumo (H4g e H4h, meeting_attachments), com o
+ *   mesmo prazo, em qualquer estado da reunião;
+ * - o MP3 do resumo (H19b, resumo_em_audio) da reunião que não existe mais ou
+ *   está sendo excluída (a junção e a recusa do bucket na exclusão): sai o
+ *   objeto, e a linha fica sem a chave, para o teto;
+ * - a amostra do perfil de voz (H3d, voice_profiles) cuja conta não existe
+ *   mais (o ponteiro que a exclusão da conta deixou): sai o objeto e a linha.
  *
  * Pagina cada tabela pelo id, em lotes de LOTE_DA_VARREDURA, até
  * MAXIMO_DE_LOTES_DA_VARREDURA por tabela; a linha que fica (o bucket recusou)
@@ -1816,6 +2127,29 @@ export async function limparGravacoesVencidas(opcoes: {
       nome: "partes",
       ler: (trecho: TrechoDaVarredura) => partesQueSaem(db, agora, trecho, lote, opcoes.ownerId),
       apagarLinha: (id: string) => db.delete(meetingAudioSlices).where(eq(meetingAudioSlices.id, id)),
+    },
+    {
+      nome: "documentos",
+      ler: (trecho: TrechoDaVarredura) => documentosQueSaem(db, agora, trecho, lote, opcoes.ownerId),
+      apagarLinha: (id: string) => db.delete(meetingDocuments).where(eq(meetingDocuments.id, id)),
+    },
+    {
+      nome: "anexos",
+      ler: (trecho: TrechoDaVarredura) => anexosQueSaem(db, agora, trecho, lote, opcoes.ownerId),
+      apagarLinha: (id: string) => db.delete(meetingAttachments).where(eq(meetingAttachments.id, id)),
+    },
+    {
+      // A linha do MP3 do resumo fica, sem a chave, para o teto de 24 h da dona
+      // (como na exclusão da reunião): aqui só a chave sai.
+      nome: "audiosDoResumo",
+      ler: (trecho: TrechoDaVarredura) => audiosDoResumoQueSaem(db, trecho, lote, opcoes.ownerId),
+      apagarLinha: (id: string) => db.update(resumoEmAudio).set({ storageKey: null, updatedAt: now() }).where(eq(resumoEmAudio.id, id)),
+    },
+    {
+      // O perfil de voz sem a conta (H3d): o objeto sai com todas as versões e só então a linha.
+      nome: "perfisDeVoz",
+      ler: (trecho: TrechoDaVarredura) => perfisDeVozSemConta(db, trecho, lote, opcoes.ownerId),
+      apagarLinha: (id: string) => db.delete(voiceProfiles).where(eq(voiceProfiles.id, id)),
     },
   ];
 
@@ -1880,9 +2214,33 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   const db = await exigirDb();
   // O token do link aberto vai só para a dona, aqui no detalhe: é com ele que a
   // tela monta o endereço para copiar e mandar (server/link-aberto-da-reuniao.ts).
-  const [meeting] = await db.select({ ...COLUNAS_DA_REUNIAO_NA_TELA, shareToken: meetings.shareToken }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-  if (!meeting) return null;
-  const [transcript] = await db.select().from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
+  // Da senha do link (H23) sai só se ela existe: o hash fica no servidor.
+  const [linha] = await db.select({
+    ...COLUNAS_DA_REUNIAO_NA_TELA, shareToken: meetings.shareToken, sharePasswordHash: meetings.sharePasswordHash, shareAudio: meetings.shareAudio,
+    speakerAccounts: meetings.speakerAccounts, speakerMerges: meetings.speakerMerges,
+  }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), foraDaLixeira())).limit(1);
+  // A reunião na lixeira (H7d) é "não encontrada", como a de outra conta.
+  if (!linha) return null;
+  const { sharePasswordHash, shareAudio, speakerAccounts, speakerMerges, ...meeting } = linha;
+  // A transcrição como a dona a vê (editada ou não) e o que a tela precisa para
+  // editá-la (H18): a revisão e, dos trechos que a dona mudou, o que a IA tinha
+  // escrito. O texto original inteiro não vem: só as falas originais, e só
+  // quando a transcrição está editada.
+  const [linhaDaTranscricao] = await db.select({
+    id: meetingTranscripts.id, meetingId: meetingTranscripts.meetingId, ownerId: meetingTranscripts.ownerId,
+    transcript: meetingTranscripts.transcript, segments: meetingTranscripts.segments, language: meetingTranscripts.language,
+    durationSeconds: meetingTranscripts.durationSeconds, createdAt: meetingTranscripts.createdAt, updatedAt: meetingTranscripts.updatedAt,
+    editedAt: meetingTranscripts.editedAt, revision: meetingTranscripts.revision, editada: transcricaoEstaEditada,
+  }).from(meetingTranscripts).where(and(eq(meetingTranscripts.meetingId, meetingId), eq(meetingTranscripts.ownerId, ownerId))).limit(1);
+  let transcript: (Omit<typeof linhaDaTranscricao, "editada" | "editedAt" | "revision"> & { edicao: EdicaoDaTranscricao }) | undefined;
+  if (linhaDaTranscricao) {
+    const { editada, editedAt, revision, ...resto } = linhaDaTranscricao;
+    const [original] = Number(editada)
+      ? await db.select({ segments: meetingTranscripts.originalSegments }).from(meetingTranscripts)
+        .where(and(eq(meetingTranscripts.id, resto.id), eq(meetingTranscripts.ownerId, ownerId))).limit(1)
+      : [];
+    transcript = { ...resto, edicao: edicaoDaTranscricao({ segments: resto.segments, originalSegments: original?.segments ?? null, editada: !!Number(editada), editedAt, revision }) };
+  }
   const entities = await db.select().from(meetingEntities).where(and(eq(meetingEntities.meetingId, meetingId), eq(meetingEntities.ownerId, ownerId))).orderBy(desc(meetingEntities.createdAt));
   const sugestoesGravadas = await db.select().from(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId))).orderBy(desc(meetingContactSuggestions.createdAt));
   // N5: o nome do contato a que a pessoa foi vinculada ("Vinculada a…"), só da
@@ -1900,18 +2258,43 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
     pareceSerADona: conta !== null && s.status === "pending" && pareceSerADona({ fullName: s.fullName, email: s.email }, conta),
   }));
   const emPartes = meeting.audioPipeline === "slices";
-  const { recording, recordingExpired, recordingDeletionPending } = await gravacaoParaOuvir(db, ownerId, meetingId, {
-    createdAt: meeting.createdAt, status: meeting.status, emPartes,
-  });
+  // A reunião de documento (H12) não tem áudio: no lugar da gravação, o PDF,
+  // com a mesma regra dos 30 dias. Sem isto, a reunião de documento com mais
+  // de 30 dias diria que "a gravação foi apagada".
+  // O audioParaBaixar é só da dona (H8c): o link aberto não o repassa. A
+  // reunião de documento não tem áudio, e nada para baixar.
+  const ehDocumento = ehReuniaoDeDocumento(meeting.origem);
+  const { recording, recordingExpired, recordingDeletionPending, audioParaBaixar }: AudioDaReuniao = ehDocumento
+    ? { recording: null, recordingExpired: false, recordingDeletionPending: false, audioParaBaixar: null }
+    : await gravacaoParaOuvir(db, ownerId, meetingId, { createdAt: meeting.createdAt, status: meeting.status, emPartes });
+  const { documento, documentoExpirado, documentoSaindo }: DocumentoDaReuniao = ehDocumento
+    ? await documentoParaVer(db, ownerId, meetingId, { createdAt: meeting.createdAt, status: meeting.status })
+    : { documento: null, documentoExpirado: false, documentoSaindo: false };
   const andamento = emPartes ? await andamentoDaReuniao(db, ownerId, meetingId, meeting.expectedSlices) : null;
   // Se quem tem o link vê os nomes das vozes (H3b): só com o link ligado com a
   // confirmação que fala deles. O painel de compartilhar avisa a dona quando há
   // nomes e o link é da confirmação antiga, e o campo do nome, quando o nome
   // sai também pelo link. Sem link, falso, sem consultar a auditoria.
   const linkMostraNomes = meeting.shareToken ? await linkMostraOsNomes(db, meetingId) : false;
+  // O contato e o contexto com o nome, só da rede da dona (H7c).
+  const { contato, contexto } = await nomesDosPonteiros(db, ownerId, {
+    contactId: meeting.contactId === null ? null : Number(meeting.contactId), contextId: meeting.contextId,
+  });
+  // Como está o link ligado (H23): se pede a senha e se leva o áudio, com a
+  // mesma leitura do link (reuniaoDoLink): só o `true` do banco leva o áudio.
+  // Sem link, sem senha.
+  const linkComSenha = !!meeting.shareToken && sharePasswordHash !== null;
+  const linkComAudio = shareAudio === true;
+  // As vozes como a dona as vê (H3c): os nomes já com as contas ligadas e as
+  // juntadas, e a ligação de cada voz (para o seletor "Quem é cada voz").
+  const vozes = await vozesParaQuemLe(db, { id: meeting.id, ownerId, speakerNames: meeting.speakerNames, speakerAccounts, speakerMerges }, { comNomes: true });
   return {
-    meeting: { ...meeting, processingError: processingErrorSeguro(meeting.processingError), linkMostraNomes },
-    transcript: transcript ?? null, entities, suggestions, recording, recordingExpired, recordingDeletionPending, andamento,
+    meeting: {
+      ...meeting, vozes, contasDasVozes: contasDasVozes(speakerAccounts), processingError: processingErrorSeguro(meeting.processingError), linkMostraNomes, linkComSenha, linkComAudio,
+      etiquetas: etiquetasDaReuniao(meeting.etiquetas), contato, contexto,
+    },
+    transcript: transcript ?? null, entities, suggestions, recording, recordingExpired, recordingDeletionPending, audioParaBaixar, andamento,
+    documento, documentoExpirado, documentoSaindo,
   };
 }
 
@@ -1920,7 +2303,8 @@ export const MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA = "reunião excluída; o áudio
 
 /**
  * Tudo que uma reunião gera fora da própria linha: sugestões, entidades,
- * transcrição, traduções e gravações (linha E objeto no bucket), e também os
+ * transcrição, traduções e gravações (linha E objeto no bucket; o PDF da reunião
+ * de documento, H12, entra junto com a mesma regra), e também os
  * avisos dela no sino (H15) e o ponteiro da agenda (H16a). Serve à
  * exclusão pela dona e à COMPENSAÇÃO de processMeetingRecording, que usa a
  * mesma lista quando descobre que a reunião foi excluída no meio — duas
@@ -1954,8 +2338,34 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
   const partes = await db.select({ id: meetingAudioSlices.id, storageKey: meetingAudioSlices.storageKey, status: meetingAudioSlices.status })
     .from(meetingAudioSlices)
     .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId)));
+  // E o PDF da reunião de documento (H12), com a mesma regra do áudio.
+  const documentos = await db.select({ id: meetingDocuments.id, storageKey: meetingDocuments.storageKey })
+    .from(meetingDocuments)
+    .where(and(eq(meetingDocuments.meetingId, meetingId), eq(meetingDocuments.ownerId, ownerId)));
+  // E as fotos e os desenhos do resumo (H4g e H4h), pela mesma regra: são da
+  // dona, e saem só com a reunião (o reprocesso não os toca).
+  const anexos = await db.select({ id: meetingAttachments.id, storageKey: meetingAttachments.storageKey })
+    .from(meetingAttachments)
+    .where(and(eq(meetingAttachments.meetingId, meetingId), eq(meetingAttachments.ownerId, ownerId)));
+
+  // O áudio do resumo com a voz do Gemini (H19b): voz sintética, sem fala de
+  // ninguém, mas lê o resumo da reunião, e sai com ela (só as linhas com o MP3 no bucket).
+  const audiosDoResumo = (await db.select({ id: resumoEmAudio.id, storageKey: resumoEmAudio.storageKey })
+    .from(resumoEmAudio)
+    .where(and(eq(resumoEmAudio.meetingId, meetingId), eq(resumoEmAudio.ownerId, ownerId), isNotNull(resumoEmAudio.storageKey))))
+    .filter((linha): linha is LinhaDeAudio => !!linha.storageKey);
 
   await apagarDerivadosSemGravacao(db, ownerId, meetingId, true);
+  // As participantes (R1b): a reunião que sai leva as participações e os
+  // convites pendentes. Não entram em apagarDerivadosSemGravacao: reprocessar
+  // não tira ninguém.
+  await db.delete(meetingParticipants).where(and(eq(meetingParticipants.meetingId, meetingId), eq(meetingParticipants.ownerId, ownerId)));
+  // O resumo por e-mail (H22): o endereço de quem recebeu, dado de terceiros,
+  // sai com a reunião, também antes do bucket. A linha fica, sem ele, para o
+  // teto da dona (server/resumo-por-email.ts): excluir a reunião não devolve
+  // e-mails ao teto.
+  await db.update(resumoPorEmail).set({ destinatario: null, updatedAt: now() })
+    .where(and(eq(resumoPorEmail.ownerId, ownerId), eq(resumoPorEmail.meetingId, meetingId)));
   // Os avisos da reunião no sino (H15: o de pronta, com o título) e o ponteiro
   // da agenda (H16a) saem antes do bucket, pelo mesmo motivo: um deploy no meio
   // do expurgo deixava no sino o aviso da reunião excluída, que leva a "Reunião
@@ -1971,8 +2381,20 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
   // Para de começar outros na primeira recusa (tirarDoBucket): com o bucket
   // fora, a dona não espera um prazo inteiro por parte, e o resto fica como
   // ponteiro para a varredura.
-  const { sairam } = await tirarDoBucket([...gravacoes, ...partes]);
+  const { sairam } = await tirarDoBucket([...gravacoes, ...partes, ...documentos, ...anexos, ...audiosDoResumo]);
   const saiu = new Set(sairam);
+  // O MP3 do resumo que saiu perde a chave; a linha fica para o teto de 24 h da
+  // dona (como a do resumo por e-mail). O que o bucket recusou fica com a chave,
+  // aparece no log de tirarDoBucket e a varredura tenta de novo.
+  const audiosDoResumoQueSairam = audiosDoResumo.filter(audio => saiu.has(audio.id)).map(audio => audio.id);
+  if (audiosDoResumoQueSairam.length) {
+    await db.update(resumoEmAudio).set({ storageKey: null, updatedAt: now() })
+      .where(and(eq(resumoEmAudio.ownerId, ownerId), inArray(resumoEmAudio.id, audiosDoResumoQueSairam)));
+  }
+  const documentosQueSairam = documentos.filter(documento => saiu.has(documento.id)).map(documento => documento.id);
+  const documentosQueFicam = documentos.filter(documento => !saiu.has(documento.id)).map(documento => documento.id);
+  const anexosQueSairam = anexos.filter(anexo => saiu.has(anexo.id)).map(anexo => anexo.id);
+  const anexosQueFicam = anexos.filter(anexo => !saiu.has(anexo.id)).map(anexo => anexo.id);
 
   const gravacoesQueSairam = gravacoes.filter(gravacao => saiu.has(gravacao.id)).map(gravacao => gravacao.id);
   const gravacoesQueFicam = gravacoes.filter(gravacao => !saiu.has(gravacao.id)).map(gravacao => gravacao.id);
@@ -1998,10 +2420,26 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
       eq(meetingAudioSlices.ownerId, ownerId), inArray(meetingAudioSlices.id, partesSubindoQueSairam), eq(meetingAudioSlices.status, "uploading"),
     ));
   }
+  if (documentosQueSairam.length) {
+    await db.delete(meetingDocuments).where(and(eq(meetingDocuments.ownerId, ownerId), inArray(meetingDocuments.id, documentosQueSairam)));
+  }
+  if (anexosQueSairam.length) {
+    await db.delete(meetingAttachments).where(and(eq(meetingAttachments.ownerId, ownerId), inArray(meetingAttachments.id, anexosQueSairam)));
+  }
   const agora = now();
+  // A imagem que o bucket recusou fica como ponteiro, vencida, para a varredura.
+  if (anexosQueFicam.length) {
+    await db.update(meetingAttachments).set({ expiresAt: agora })
+      .where(and(eq(meetingAttachments.ownerId, ownerId), inArray(meetingAttachments.id, anexosQueFicam)));
+  }
   if (gravacoesQueFicam.length) {
     await db.update(meetingRecordings).set({ expiresAt: agora })
       .where(and(eq(meetingRecordings.ownerId, ownerId), inArray(meetingRecordings.id, gravacoesQueFicam)));
+  }
+  // O PDF que o bucket recusou fica como ponteiro, vencido, para a varredura.
+  if (documentosQueFicam.length) {
+    await db.update(meetingDocuments).set({ expiresAt: agora })
+      .where(and(eq(meetingDocuments.ownerId, ownerId), inArray(meetingDocuments.id, documentosQueFicam)));
   }
   if (partesQueFicam.length) {
     await db.update(meetingAudioSlices).set({
@@ -2021,7 +2459,7 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
  * enquanto a reunião e os nomes das vozes ainda existem (`reuniaoSai` é a
  * exclusão; sem ele, o reprocesso, que zera os nomes e refaz os itens).
  */
-async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId: string, reuniaoSai: boolean) {
+async function apagarDerivadosSemGravacao(db: BancoOuTransacao, ownerId: string, meetingId: string, reuniaoSai: boolean) {
   await soltarAcoesDaReuniao(db, ownerId, meetingId, reuniaoSai);
   await db.delete(meetingContactSuggestions).where(and(eq(meetingContactSuggestions.meetingId, meetingId), eq(meetingContactSuggestions.ownerId, ownerId)));
   // As pendências de Quem Sou / Tenho / Preciso tiradas desta reunião carregam
@@ -2040,16 +2478,61 @@ async function apagarDerivadosSemGravacao(db: Banco, ownerId: string, meetingId:
   await db.delete(meetingSummaries).where(and(eq(meetingSummaries.meetingId, meetingId), eq(meetingSummaries.ownerId, ownerId)));
 }
 
-export async function deletePrivateMeeting(ownerId: string, meetingId: string) {
+/**
+ * Os derivados de uma reunião que foi JUNTADA a outra (H17,
+ * server/juntar-reunioes.ts), dentro da transação da junção: tudo o que a IA
+ * gerou dela (a mesma lista de apagarDerivadosSemGravacao, como na exclusão:
+ * as próximas ações se soltam com os nomes resolvidos), os avisos dela no sino
+ * e o ponteiro da agenda. O áudio NÃO sai: as partes e a gravação foram para a
+ * reunião que fica, na mesma transação, antes desta chamada. Sem bucket aqui:
+ * a transação não espera o expurgo. O MP3 do resumo dela (H19b) fica com a chave, e a
+ * varredura (limparGravacoesVencidas) o tira, porque a reunião não existe mais.
+ */
+export async function apagarDerivadosDaReuniaoJuntada(tx: BancoOuTransacao, ownerId: string, meetingId: string) {
+  await apagarDerivadosSemGravacao(tx, ownerId, meetingId, true);
+  // A reunião juntada à outra deixa de existir: as participantes dela saem (R1b).
+  await tx.delete(meetingParticipants).where(and(eq(meetingParticipants.meetingId, meetingId), eq(meetingParticipants.ownerId, ownerId)));
+  await apagarAvisosDaReuniao(tx, ownerId, meetingId);
+  await soltarGravacaoDaAgenda(tx, ownerId, meetingId);
+}
+
+/**
+ * O que a IA gerou da reunião que FICA na junção (H17), dentro da transação
+ * dela: a transcrição, as traduções, o resumo (com o mapa mental), os itens, as
+ * sugestões e as entidades eram só da primeira reunião, e a montagem os refaz
+ * com todas. É a mesma limpeza da montagem (limparAntes) e do reprocesso: as
+ * próximas ações ficam com a dona, soltas dos itens e com os nomes das vozes
+ * de antes (por isso roda antes de a junção trocar os nomes). Feita aqui, e
+ * não só na montagem, a tela da reunião juntada mostra o andamento das partes
+ * (G15a) em vez do conteúdo antigo, e nada do que a montagem apagaria (confirmar
+ * um item, traduzir, perguntar) fica à mão no meio.
+ */
+export async function apagarDerivadosDoAlvoDaJuncao(tx: BancoOuTransacao, ownerId: string, meetingId: string) {
+  await apagarDerivadosSemGravacao(tx, ownerId, meetingId, false);
+}
+
+/**
+ * Quando a exclusão vem da lixeira (H7d, server/lixeira-de-reunioes.ts): o
+ * "Apagar de vez" só toma a reunião que continua na lixeira (`soDaLixeira`), e
+ * a varredura do fim dos 30 dias, só a que está lá desde antes do corte
+ * (`naLixeiraAte`). A reunião restaurada no meio fica, e a resposta é false.
+ */
+export type CondicaoDaExclusao = { soDaLixeira?: boolean; naLixeiraAte?: number };
+
+export async function deletePrivateMeeting(ownerId: string, meetingId: string, condicao: CondicaoDaExclusao = {}) {
   const db = await exigirDb();
   // 'deleted' ANTES de apagar, e não um SELECT de existência: é o sinal que
   // um processMeetingRecording em curso (1–2 min de Gemini e LLM) lê antes de
   // gravar, e que barra o UPDATE final dele para 'ready' — sem isto, a
   // transcrição e os contatos entravam depois da exclusão e ficavam órfãos,
   // com a voz e os dados das pessoas que a dona mandou apagar. Zero linhas:
-  // não existe ou não é dela.
+  // não existe, não é dela ou (vinda da lixeira) já não está lá.
   const marcada = await db.update(meetings).set({ status: "deleted", updatedAt: now() })
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId)));
+    .where(and(
+      eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId),
+      condicao.soDaLixeira ? isNotNull(meetings.trashedAt) : undefined,
+      condicao.naLixeiraAte !== undefined ? lte(meetings.trashedAt, condicao.naLixeiraAte) : undefined,
+    ));
   if (!linhasAfetadas(marcada)) return false;
   // Os avisos da reunião no sino (H15) e o ponteiro da agenda (H16a) saem lá
   // dentro, antes do expurgo do bucket.

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import * as jose from "jose";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => {
   process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
@@ -243,16 +244,16 @@ describe.skipIf(!temBanco)("Chaves de acesso no banco (integração)", () => {
     const ids = contas.map(conta => conta.id);
     const emails = contas.map(conta => conta.email!.toLowerCase());
     if (ids.length) {
-      await banco.delete(chavesDeAcesso).where(inArray(chavesDeAcesso.userId, ids));
-      await banco.delete(desafiosDeChaveDeAcesso).where(inArray(desafiosDeChaveDeAcesso.userId, ids));
-      await banco.delete(sessions).where(inArray(sessions.userId, ids));
-      await banco.delete(auditLogs).where(inArray(auditLogs.userId, ids));
-      await banco.delete(passwordResetTokens).where(inArray(passwordResetTokens.userId, ids));
-      await banco.delete(loginAttempts).where(inArray(loginAttempts.identifier, emails));
+      await apagarPelaChave(banco, chavesDeAcesso, inArray(chavesDeAcesso.userId, ids));
+      await apagarPelaChave(banco, desafiosDeChaveDeAcesso, inArray(desafiosDeChaveDeAcesso.userId, ids));
+      await apagarPelaChave(banco, sessions, inArray(sessions.userId, ids));
+      await apagarPelaChave(banco, auditLogs, inArray(auditLogs.userId, ids));
+      await apagarPelaChave(banco, passwordResetTokens, inArray(passwordResetTokens.userId, ids));
+      await apagarPelaChave(banco, loginAttempts, inArray(loginAttempts.identifier, emails));
       await banco.delete(users).where(inArray(users.id, ids));
     }
     if (desafiosDeEntrada.length) {
-      await banco.delete(desafiosDeChaveDeAcesso).where(inArray(desafiosDeChaveDeAcesso.desafio, desafiosDeEntrada));
+      await apagarPelaChave(banco, desafiosDeChaveDeAcesso, inArray(desafiosDeChaveDeAcesso.desafio, desafiosDeEntrada));
     }
   });
 
@@ -290,8 +291,12 @@ describe.skipIf(!temBanco)("Chaves de acesso no banco (integração)", () => {
       identificadorDaUsuaria: autenticador.identificadorDaConta,
     });
     expect(gravada.chavePublica.length).toBeGreaterThan(50);
-    // O identificador da conta no aparelho não é o id nem o e-mail.
-    expect(gravada.identificadorDaUsuaria).not.toContain(String(conta.id));
+    // O identificador da conta no aparelho não é o id nem o e-mail: é o HMAC do id
+    // (32 bytes em base64url). Um dígito do id pode aparecer nele por acaso (com o
+    // id 8, o banco do zero do CI dá "…cm8g…"), então a prova é o formato e a
+    // igualdade, e não a substring.
+    expect(gravada.identificadorDaUsuaria).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(gravada.identificadorDaUsuaria).not.toBe(String(conta.id));
     expect(gravada.identificadorDaUsuaria).not.toContain(conta.email!);
     expect(await auditoriaDe(conta.id, "PASSKEY_REGISTERED")).toMatchObject([{
       resource: "auth",
@@ -349,7 +354,7 @@ describe.skipIf(!temBanco)("Chaves de acesso no banco (integração)", () => {
     const opcoes = await chamar.opcoesDeCadastro();
     expect(opcoes.excludeCredentials?.map(c => c.id)).toEqual([autenticador.credencialId]);
     expect(opcoes.user.id).toBe(autenticador.identificadorDaConta);
-    expect(opcoes.rp).toEqual({ name: "WRW", id: RP_ID });
+    expect(opcoes.rp).toEqual({ name: "Marquesa Global Match", id: RP_ID });
     expect(opcoes.authenticatorSelection).toMatchObject({ residentKey: "required", userVerification: "required" });
 
     await expect(chamar.cadastrar({ resposta: autenticador.criar(opcoes) })).rejects.toMatchObject({
@@ -775,7 +780,7 @@ describe.skipIf(!temBanco)("Chaves de acesso no banco (integração)", () => {
 
       expect(dubles.sendEmail).toHaveBeenCalledTimes(1);
       const [aviso] = dubles.sendEmail.mock.calls[0];
-      expect(aviso).toMatchObject({ to: conta.email, subject: "Nova chave de acesso na sua conta WRW" });
+      expect(aviso).toMatchObject({ to: conta.email, subject: "Nova chave de acesso na sua conta Marquesa Global Match" });
       expect(aviso.text).toContain(`Olá, ${conta.name}.`);
       expect(aviso.text).toContain('com o nome "iPhone da dona"');
       expect(aviso.text).toContain("redefina a sua senha");

@@ -72,7 +72,7 @@ describe("revokeGold fala de Status Ouro, como a concessão", () => {
     const [n] = estado.notificacoes;
     expect(n.type).toBe("gold_revoked");
     expect(n.title).toBe("Status Ouro revogado");
-    expect(n.body).toContain("Seu Status Ouro, a categoria premium da WRW, foi revogado por um Presidente da WRW.");
+    expect(n.body).toContain("Seu Status Ouro, a categoria premium da Marquesa Global Match, foi revogado por um Presidente da Marquesa Global Match.");
     expect(n.body).not.toMatch(/\bMMM\b/);
     expect(n.body).toContain("Sua conta continua ativa como Prata.");
     expect(n.body).toContain("Motivo: Mensalidade não renovada");
@@ -99,8 +99,8 @@ describe("grantGold continua no vocabulário de categoria premium", () => {
     expect(n.body).toContain("Olá, Ana!");
     expect(`${n.title} ${n.body}`).not.toMatch(SELO);
     expect(estado.mensagens).toHaveLength(1);
-    expect(estado.mensagens[0].encryptedContent).toContain("categoria premium da WRW");
-    expect(estado.mensagens[0].encryptedContent).toContain("Observação: Promovido pelo Presidente da WRW");
+    expect(estado.mensagens[0].encryptedContent).toContain("categoria premium da Marquesa Global Match");
+    expect(estado.mensagens[0].encryptedContent).toContain("Observação: Promovido pelo Presidente da Marquesa Global Match");
     expect(estado.mensagens[0].encryptedContent).not.toMatch(/\bMMM\b/);
     expect(estado.mensagens[0].encryptedContent).not.toMatch(SELO);
   });

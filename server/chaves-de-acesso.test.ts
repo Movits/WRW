@@ -211,8 +211,9 @@ describe("chavesDeAcesso — a função some sem a configuração ou fora das or
     const estado = (headers: Record<string, string>) => chavesDeAcessoRouter.createCaller(contexto(headers)).estado();
     expect(await estado({ host: "wrwglobal.org" })).toEqual({ disponivel: false });
     definirAmbiente(PRODUCAO);
-    expect(await estado({ host: "wrwglobal.org" })).toEqual({ disponivel: true });
-    expect(await estado({ host: "www.wrwglobal.org" })).toEqual({ disponivel: true });
+    // Disponível, leva o RP ID: a tela (A7) o usa na Signal API do WebAuthn.
+    expect(await estado({ host: "wrwglobal.org" })).toEqual({ disponivel: true, rpId: "wrwglobal.org" });
+    expect(await estado({ host: "www.wrwglobal.org" })).toEqual({ disponivel: true, rpId: "wrwglobal.org" });
     expect(await estado({ host: "mmm-gud5.onrender.com" })).toEqual({ disponivel: false });
     expect(await estado({ origin: "https://mmm-gud5.onrender.com", host: "wrwglobal.org" })).toEqual({ disponivel: false });
     expect(banco.exigirDb).not.toHaveBeenCalled();
@@ -364,7 +365,7 @@ describe("montarAvisoDeChaveCadastrada — o e-mail à dona a cada chave cadastr
   it("diz quando (no horário de Brasília), o apelido e o que fazer, com o link do \"Esqueci minha senha\"", () => {
     const { assunto, text, html } = montarAvisoDeChaveCadastrada({ nome: "Beatriz", apelido: "iPhone", quando: QUANDO, site: "https://wrwglobal.org/" });
 
-    expect(assunto).toBe("Nova chave de acesso na sua conta WRW");
+    expect(assunto).toBe("Nova chave de acesso na sua conta Marquesa Global Match");
     expect(text).toContain("Olá, Beatriz.");
     expect(text).toContain("16/11/2026");
     expect(text).toContain("10:05");

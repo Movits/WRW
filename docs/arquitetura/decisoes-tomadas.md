@@ -77,7 +77,8 @@ Codex/OpenAI e do SDK da Anthropic"), `server/_core/trpc.ts` deixou de exportar 
      `server/CLAUDE.md`.
   3. O motor de perfis (`server/matching.ts`) não aplica a regra dos concorrentes:
      `satisfaz` devolve `true` no `have === need` sem passar por `saoConcorrentes`.
-     Uniformizar com o motor privado é decisão de produto.
+     Uniformizar com o motor privado é decisão de produto. (Decidido em 11/11, N6:
+     ver a entrada de 11/11/2026 abaixo.)
 
 ## 12/09/2026 — regra da demanda expressa
 
@@ -525,6 +526,369 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `server/routers/meetings.ts` e `shared/exportar-reuniao.ts`; na tela,
   `ExportarReuniao.tsx`, `ImpressaoDaReuniao.tsx` e o trecho "Exportar a reunião em PDF"
   de `client/src/index.css`. Sem migração.
+
+## 16/11/2026 — a reunião volta a ter participantes e a consulta da administração (R1a e R1b)
+
+- **Quem:** Roberto, 16/11, no chat: de início, só as participantes e a administração
+  (quem quiser revisar uma reunião) acessam, e quem tem acesso pode mandar o link aberto.
+  Na mesma conversa: "o chat que a adm vê inclui tudo". Em 22/11 ele tirou o convite por
+  e-mail digitado. O jeito de fazer (os pontos abaixo marcados "do desenho") foi proposto
+  no desenho de 16/11 e vale enquanto o Roberto não o vetar.
+- **O quê:** é a R1, adiada em 12/11, de volta, sem tirar o link aberto. Em duas partes:
+  - **consulta da administração (R1a):** "a administração" é a admin e a presidência
+    (decisão de 30/10): é a 5ª exceção ao "Ouro = Presidente", e a conta Ouro sem cargo
+    não consulta. A consulta é só leitura (não pergunta à IA nem muda nada) e pede um
+    motivo antes de ler: um dos cinco da frase da Cris de 23/11 (apuração de denúncia,
+    segurança, suporte pedido pela usuária, obrigação legal, ordem judicial) e um texto
+    de 10 a 500 caracteres. A auditoria `MEETING_ADMIN_READ` é gravada na transação,
+    antes da leitura, e sem ela nada sai. A dona vê a data de cada consulta, sem o motivo
+    e sem quem consultou (do desenho);
+  - **participantes (R1b):** a dona convida quem tem conta, por um link de uso único
+    (`/convite/{token}`, vale 7 dias, só o hash no banco) ou entre as conexões aceitas
+    dela. A participante ouve, lê e pergunta, sem mudar nada, e sai quando quiser. O
+    primeiro convite de cada reunião pede a confirmação de que as pessoas que falaram
+    autorizaram, como o link (do desenho); juntar reuniões tira as participantes e pede a
+    confirmação de novo. Até 50 participantes por reunião (do desenho).
+- **Sem convite por e-mail digitado (22/11):** ele revelaria quem é membra, e o e-mail das
+  contas não é verificado.
+- **Reunião antiga:** a administração só consulta a reunião gravada com o aviso que prevê a
+  consulta (`2026-11-23` em diante, com o texto da Cris de 23/11). A gravada antes, quando
+  o aviso dizia "Só você acessa", fica fechada (`CONSULTA_REUNIAO_ANTERIOR_AO_AVISO`).
+- **Antes:** 10/11, "sem link público e sem senha", com a R1; 12/11, o link aberto no lugar
+  dela, "por enquanto". Agora as duas coisas valem juntas.
+- **Ainda não implementado:** a participante mandar o link aberto. Ela lê pela credencial
+  dela e não recebe o endereço `/r/{token}`; ligar o link continua só com a dona. A
+  pergunta (a participante pode também LIGAR o link?) está no desenho de 16/11, com a
+  recomendação de que não.
+- **Implementado em:** Pacote 6 (#247). `server/consulta-da-administracao.ts`, o router
+  `consultaDeReunioes` e `plataformaProcedure` em `server/routers/_procedures.ts`;
+  `server/participantes-da-reuniao.ts`; `VERSOES_QUE_PREVEEM_O_ACESSO` em
+  `shared/aviso-de-gravacao.ts` (o aviso `2026-11-23` veio na #240); na tela,
+  `ConsultaDeReunioesDaPlataforma.tsx`, `ConsultasDaAdministracao.tsx`,
+  `ParticipantesDaReuniao.tsx`, `ConviteDaReuniao.tsx` e `ReuniaoCompartilhada.tsx`. Migração
+  `0029_pacote-6` (`meeting_participants`).
+
+## 16/11/2026 — cada voz pode virar a conta de quem falou, e vozes se juntam (H3c)
+
+- **Quem:** Roberto, 16/11, no chat: um botão mostra as participantes da reunião (contas
+  da WRW), e para cada voz `{Fn}` a dona escolhe a conta de quem falou; o nome da conta
+  vira o nome da voz. Junto, um "juntar vozes" (F3 é a mesma pessoa que F1), porque na
+  gravação em partes cada parte é transcrita sozinha e a mesma pessoa pode virar F1 numa e
+  F3 na outra.
+- **O quê:** a dona liga a voz à própria conta ou à de uma participante ativa, digita um
+  nome livre (o da H3) ou junta vozes, com "Separar". A voz guarda `"owner"` ou o id da
+  participação, nunca o `users.id`, e o nome é lido na hora: a participante que sai, ou a
+  conta excluída, some da voz. O tempo de fala e o "ouvir só esta voz" somam as vozes
+  juntadas. Os nomes não vão à IA.
+- **Quem vê os nomes:** a dona, as participantes, a administração e o link aberto ligado
+  com a confirmação nova (H3b, acima). O nome da conta também sai pelo link, e o aviso do
+  convite diz isso à participante (do desenho, P12). A membra de um espaço de equipe (R2)
+  vê "Falante n" na voz ligada a uma participante, porque a participante não aceitou
+  aparecer para a equipe.
+- **Fica de fora:** a participante marcar "sou eu" na própria voz (do desenho, P13): a dona
+  escolhe, e a participante tira o nome dela saindo da reunião.
+- **Antes:** 14/11, "só a dona vê os nomes" (#204).
+- **Implementado em:** Pacote 6 (#247). `server/vozes-da-reuniao.ts` (`vozesParaQuemLe`),
+  `server/participantes-da-reuniao.ts` e `ParticipantesDaReuniao.tsx`; migração
+  `0029_pacote-6` (`meetings.speaker_accounts` e `meetings.speaker_merges`).
+
+## 16/11/2026 — as perguntas à IA ficam guardadas, e a administração vê todas (H6b)
+
+- **Quem:** Roberto, 16/11, no chat: "o chat que a adm vê inclui tudo".
+- **O quê, pelo desenho de 16/11:** o "Pergunte à reunião" passa a guardar a pergunta e a
+  resposta de quem quer que pergunte: a dona, a participante e a visitante do link (esta
+  sem nada que a identifique). A dona vê todas, com quem perguntou; a participante, só as
+  dela; a administração, todas; o link não tem histórico, só a resposta da hora, com uma
+  frase sob a caixa dizendo que a pergunta fica guardada. A resposta é guardada com os
+  rótulos `{Fn}`, nunca com nomes.
+- **Ainda não implementada:** não há tabela das perguntas (`meeting_questions`) na `main`,
+  e a tela ainda diz "Nada disto foi gravado". Do pacote da H6b, só entraram as cinco
+  sugestões prontas no Pergunte (decisões-chave, ações, revisão rápida, rascunho de e-mail
+  e conceitos), no Pacote 5a (#234). Por isso, hoje a consulta da administração (#247) não
+  mostra perguntas.
+- **Com a Cris:** a frase da visitante sob a caixa de pergunta e a menção às perguntas
+  guardadas no aviso de gravação. Os textos de 23/11 não falam delas.
+- **Em aberto, no desenho (P9 e P10):** a dona ver as perguntas das participantes e do link
+  (recomendação: sim) e as perguntas ficarem enquanto a reunião existir (recomendação: sim).
+
+## 16/11/2026 — os modelos de resumo entram sem esperar a Glenda (H4d)
+
+- **Quem:** Roberto, 16/11, no chat: a Glenda pediu tudo o que o HiNoter oferece, então os
+  modelos de resumo (H4d) e a exportação (H8, acima) entram sem esperar a resposta dela.
+- **O quê:** a dona escolhe o modelo ao pedir o resumo (Geral, Networking, Mentoria, Vendas
+  ou 1:1) e pode "Refazer como…" outro. As seções são as mesmas; muda a instrução à IA. Os
+  itens que ela confirmou e as ações feitas ficam, e os pendentes e os ignorados são
+  trocados.
+- **Antes:** 15/11, a H4d esperava a Glenda (ver "o resumo guardado", acima).
+- **Implementado em:** Pacote 2 do gravador (#217). `shared/modelos-de-resumo.ts`,
+  `server/modelos-de-resumo.ts` e `ModeloDoResumo.tsx`; o código fica em
+  `meeting_summaries.template`. Os modelos da própria dona (H4e) vieram depois, em
+  `server/modelos-proprios.ts` e `MeusModelosDeResumo.tsx`.
+
+## 16/11/2026 — o áudio da reunião fica 30 dias, e a #134 fecha
+
+- **Quem:** Roberto, 16/11.
+- **O quê:** o áudio das reuniões fica 30 dias, e não 24 h. Com 24 h, não dá tempo de
+  mandar o link aberto às participantes nem de a administração revisar a reunião, e os
+  textos do app já prometiam 30 dias. O áudio sai de verdade do bucket: uma varredura
+  agendada (no boot e a cada 5 minutos) apaga todas as versões no Backblaze B2, e a linha
+  só sai do banco depois que o objeto saiu.
+- **O destino da #134** (do Nicolas, "áudio apagado 24 h depois da transcrição"): fechada em
+  16/11, substituída pela #214. Da #134 vieram o agendador, o expurgo de todas as versões
+  (`storageApagarTodasAsVersoes`) e a regra da linha que só sai depois do objeto; a regra
+  das 24 h ficou de fora.
+- **Em aberto:** a pergunta "30 dias está bom?" foi para a Glenda.
+- **Implementado em:** #214, dentro do Pacote 1 do gravador (#216).
+  `server/varredura-de-gravacoes.ts` e `storageApagarTodasAsVersoes` em `server/storage.ts`.
+
+## 21/11/2026 — o gravador sem o envio único, com o recuo do corte (G14, parte 1)
+
+- **Quem:** o Claude, no pacote 5b do gravador, pelo pedido de fazer a G14 "pelo caminho
+  mais seguro e vetável". Decisão vetável pelo Roberto.
+- **O quê:** o gravador grava sempre em partes. Saíram o `?envioUnico=1` (a URL antiga
+  grava em partes, como o `?emPartes=1` da G9), a revisão antes de enviar ("Transcrever
+  áudio", "Descartar e gravar novamente") e os textos dos 10 minutos e 10 MB onde as
+  partes já cobrem o caso (a dica sob o relógio, o FAQ da Home e a ajuda do painel de
+  minutos). A gravação ganha em todas as URLs o que era só das partes: a cópia no
+  aparelho, a retomada, o aviso de hora, a entrega ao sair da tela e o Descartar com
+  confirmação.
+- **O que ficou, e por quê:**
+  - `meetings.submitRecording`, com os 10 minutos e 10 MB: é o recuo do corte do pacote
+    4b (o arquivo curto de um formato que o corte reconhece mas não lê, como o ALAC do
+    Gravador do iPhone, o AC-3 e o Vorbis no WebM). Sem ele, esse arquivo só receberia o
+    aviso de converter. A tela o marca com `recuoDoCorte: true`;
+  - a rota também fica para um cliente de fora do repositório, se houver (a pergunta ao
+    Roberto sobre o "app Expo" segue sem resposta, e o log de produção não foi lido):
+    cada chamada deixa uma linha `[Reuniões] envio único (submitRecording)`, com a marca
+    do recuo ou sem ela;
+  - os tetos do envio único seguem no servidor também porque o reprocesso e a junção
+    (H17) leem a gravação inteira das reuniões antigas com eles;
+  - o ditado e a voz do contato não usam o envio único da reunião: têm rotas próprias
+    (`assistenteTexto.transcrever`, 2 minutos e 3 MB, e
+    `networkInteligente.complementarPorVoz`) e não mudaram.
+- **Antes:** a G13b (15/11) fez das partes o padrão e deixou o `?envioUnico=1` como saída
+  de suporte até a G14. O desenho pedia, para tirar o envio único, uma semana de logs sem
+  `submitRecording`, nenhum cliente externo e a H9b pronta (pronta desde o pacote 4b).
+- **Por fazer (parte 2):** tirar a rota, ou levar o recuo do corte às partes (o arquivo
+  inteiro como uma parte só), depois de uma semana de log sem chamada sem a marca do
+  recuo e com o aval do Roberto.
+- **Onde:** `client/src/pages/Meetings.tsx` (`enviarPeloEnvioUnico` e `importarArquivo`),
+  `client/src/hooks/useGravacaoEmPartes.ts` (sem o modo inativo), `meetings.submitRecording`
+  em `server/routers/meetings.ts`, o FAQ em `server/routers/faq.ts` e
+  `networkPanel.minutesLimitHelp` nos 10 JSONs. Sem migração.
+
+## 22/11/2026 — a dona edita a transcrição, e o que a IA escreveu fica guardado (H18)
+
+- **Quem:** o Claude, no pacote 5b do gravador, pela auditoria de 16/11 (HN-23 e HN-27 do
+  app de referência da cliente, que entram pela regra da paridade). Decisões vetáveis pelo
+  Roberto.
+- **O quê:** no detalhe da reunião pronta, "Editar a transcrição": o texto e a voz de um
+  trecho (com "Nova voz", o primeiro rótulo livre), localizar e substituir em todos os
+  trechos (o texto literal, com a contagem antes de trocar e a opção de diferenciar
+  maiúsculas) e voltar um trecho, ou tudo, ao que a IA escreveu. A transcrição sem falas
+  (a do envio único) se edita como um texto só; a do documento (PDF ou fotos), não.
+- **Como fica guardado:** `transcript` e `segments` passam a guardar a versão que a dona
+  vê, editada ou não, e todo leitor lê essa: o resumo refeito, o mapa, o Pergunte, a
+  busca, a Memória, a exportação, a tradução, o "ouvir só esta voz" e o link aberto. O que
+  a IA escreveu é copiado, na primeira edição, para `original_transcript` e
+  `original_segments`, e sai quando tudo volta ao original. `edited_at` e `revision` dizem
+  quando e quantas vezes a transcrição mudou: a tela manda a revisão que leu, e a edição
+  feita em outra aba é recusada, em vez de desfeita em silêncio.
+- **Regras:** só a dona, só a reunião pronta e fora da lixeira (H7d). Cada mudança é uma
+  transação que trava a reunião antes da transcrição (a ordem da fila do resumo), apaga as
+  traduções da transcrição e grava `MEETING_TRANSCRIPT_EDITED` com o tipo, as contagens e a
+  revisão, nunca a fala nem o termo procurado. Teto de 200 edições a cada 10 minutos por
+  dona.
+- **O resumo:** não se refaz sozinho (cada vez custa ~US$ 0,05 a 0,10 por hora de
+  reunião). A tela avisa que o resumo, o mapa e o que o link mostra deles são da versão
+  anterior e oferece "Refazer o resumo", que refaz também o mapa. O resumo e o mapa que a
+  IA escreveu sobre uma revisão anterior (a dona editou durante a geração) são gravados
+  assim mesmo, com a hora de antes da edição, e a tela os mostra como de outra versão. Na
+  primeira versão a fila os descartava e refazia; a revisão do pacote mostrou que cada
+  edição durante a geração jogava fora uma chamada paga e começava outra, sem gastar
+  tentativa nem vaga do teto de IA, sem limite. As pendências de cargo e empresa da
+  extração conferem nas duas versões: o que a IA ouviu e o que a dona corrigiu.
+- **O link aberto:** mostra a versão editada, com a frase "Transcrição revisada por quem
+  gravou a reunião", e nunca o texto da IA. O trecho de um item do resumo que não está mais
+  na transcrição editada vai vazio, com um aviso no item, também na tradução do resumo.
+- **Vetáveis:**
+  1. o resumo não se refaz sozinho depois da edição;
+  2. o link diz que a transcrição foi revisada e, no item, que o trecho foi corrigido;
+  3. o texto dos itens e o mapa seguem os de antes, também no link, até a dona refazer o
+     resumo (a tela avisa);
+  4. a junção (H17) remonta a transcrição pelo que a IA transcreveu de cada parte: as
+     correções não passam para a reunião juntada, e a tela avisa antes de juntar;
+  5. o teto de 200 edições a cada 10 minutos;
+  6. o trecho não fica vazio: para tirar uma fala inteira, a dona escreve, por exemplo,
+     "[removido]";
+  7. o resumo e o mapa escritos durante uma edição ficam como de outra versão, e não são
+     refeitos sozinhos: o primeiro resumo pode sair com o nome antes da correção, e a dona
+     toca "Refazer o resumo" quando terminar de corrigir. O envio automático do resumo por
+     e-mail (H22), se ligado, sai com essa versão.
+- **Conferência de tela (22/11):**
+  - "Voltar tudo ao original" (ou o único trecho mudado de volta) deixava o aviso
+    "Refazer o resumo" diante de um resumo escrito antes da edição, convidando a gastar
+    uma chamada à IA por nada: o aviso só comparava a hora da edição com a do resumo.
+    Agora o resumo grava se a transcrição que leu estava editada
+    (`meeting_summaries.transcript_edited`; nulo nos resumos de antes da H18, que leram a
+    da IA), e o aviso sai só quando a transcrição mudou depois dele e uma das duas (a que
+    ele leu ou a de agora) não é a da IA. O resumo que leu uma versão editada continua de
+    outra versão diante da volta ao original;
+  - na tradução, que é a vista padrão da reunião em outro idioma, "Editar a transcrição"
+    aparece, com a frase "A edição abre a transcrição no idioma original": o botão volta
+    ao original e abre a edição (antes, sumia sem dica);
+  - o trecho apagado inteiro mostra, sob o campo, a frase da recusa (o jeito de tirar uma
+    fala inteira), em vez de só deixar o "Salvar" cinza.
+- **Onde:** `server/editar-transcricao.ts`, `shared/editar-transcricao.ts` e
+  `meetings.editarTranscricao` em `server/routers/meetings.ts`; na tela,
+  `EditarTranscricao.tsx`, `FormularioDoTrecho.tsx` e `TranscricaoPorFalante.tsx`.
+  Migração só aditiva: quatro colunas novas em `meeting_transcripts` (na 0025 do pacote) e
+  `meeting_summaries.transcript_edited` (na 0026, à parte: as regras do repositório
+  recusam apagar ou editar à mão os arquivos de `drizzle/`, então a 0025 não foi refeita;
+  juntar as duas numa só pede quem tenha essa permissão, antes do merge).
+
+## 22/11/2026 — pastas e lixeira das reuniões, com exclusão adiada (H7d)
+
+- **Quem:** o Claude, no pacote 5b do gravador, pela auditoria de 16/11 (HN-67 do app de
+  referência da cliente: "Excluídas recentemente", com restaurar). Decisões vetáveis pelo
+  Roberto.
+- **O quê:** pastas com nome, ícone e cor (listas fechadas), filtros por origem (Todas,
+  Gravadas, Importadas, YouTube e Pastas), seleção de várias reuniões para mover,
+  juntar (H17) e mandar para a lixeira. O "Excluir" da reunião manda para a lixeira; dentro
+  de 30 dias a dona restaura, e depois disso, ou no "Apagar de vez" e no "Esvaziar a
+  lixeira", a reunião sai pelo caminho de exclusão de sempre, com o áudio e os derivados.
+- **Regras:** a reunião na lixeira sai de toda consulta (a lista, a busca, a Memória, o
+  link aberto, as filas, as pendências, a agenda, o perfil do contato e cada procedimento
+  pelo id) e só aparece na lixeira da própria dona. Mandar para a lixeira desliga o link
+  aberto, com a senha, tira os avisos da reunião do sino e grava `MEETINGS_TRASHED`, na
+  mesma transação. A lixeira não muda o prazo do áudio (30 dias desde o envio). A gravação
+  em partes ainda no ar não vai para a lixeira.
+- **Revisão do pacote (22/11):** a parte da gravação que ficou no aparelho (o fim já
+  declarado, a reunião em `uploading`) era recusada com a reunião na lixeira, e a tela
+  apagava a única cópia: a reunião restaurada voltava com lacuna. Agora a rota das partes a
+  aceita, e ela espera com a reunião (a fila não a transcreve na lixeira). E o Excluir
+  imediato (`meetings.delete`, o do descarte da gravação) tira a reunião de vez também da
+  lixeira: o descarte pendente lia o "não encontrada" da lixeira como "já saiu", e a
+  gravação descartada ficava 30 dias restaurável.
+- **Vetáveis:**
+  1. o prazo de 30 dias na lixeira;
+  2. restaurar (e o "Desfazer" do aviso) não religa o link aberto: a dona liga de novo, e o
+     endereço é outro, então o link dos e-mails de resumo já mandados (H22) não volta a
+     abrir;
+  3. os avisos do sino que saíram não voltam ao restaurar;
+  4. a pendência, a gravação na agenda e o atalho da próxima ação somem enquanto a reunião
+     está na lixeira e voltam ao restaurar; a próxima ação fica, sem o atalho;
+  5. a reunião em processamento ou em `uploading` pode ir para a lixeira: o trabalho da
+     fila espera e volta ao restaurar; o que já estava na IA termina e fica guardado nela;
+  6. a parte atrasada da gravação já encerrada entra na reunião da lixeira (acima);
+  7. o Excluir imediato apaga também da lixeira, sem passar por ela;
+  8. até 50 pastas por dona, e uma pasta por reunião;
+  9. a reunião da dona que está na lixeira, pedida pelo id, é NOT_FOUND com o código
+     `REUNIAO_NA_LIXEIRA`, e não com a frase da reunião de outra conta: o detalhe aberto por
+     um favorito ou pelo histórico diz "Esta reunião está na lixeira", com Restaurar e o
+     caminho da lixeira (conferência de tela de 22/11). Não abre enumeração: a guarda lê
+     só as reuniões da própria dona, e o id de outra conta segue "não encontrada".
+- **Conferência de tela (22/11):** a fileira das vistas quebra em linhas no celular (a
+  375 px, "Pastas" ficava fora da tela, e com ela ativa nenhuma vista visível aparecia
+  marcada), e os títulos das janelas novas (lixeira, pastas, mover) e das antigas do mesmo
+  molde (o Excluir da gravação em partes no ar e o Juntar) ficam pequenos, como o
+  "Descartar esta gravação?": sem classe, o h3 herdava 30 px no celular e 36 px no
+  computador.
+- **Onde:** `server/lixeira-de-reunioes.ts`, `server/guarda-da-lixeira.ts`,
+  `server/reuniao-visivel.ts`, `server/pastas-de-reunioes.ts`, `shared/lixeira-de-reunioes.ts`
+  e `shared/pastas-de-reunioes.ts`; na tela, `ListaDeReunioes.tsx`, `PastasDeReunioes.tsx` e
+  `LixeiraDeReunioes.tsx`. Migração só aditiva (`meeting_folders`, `meetings.folder_id` e
+  `meetings.trashed_at`, na 0025 do pacote).
+
+## 24/11/2026 — a sala de vídeo dentro do app, pelo Daily em São Paulo
+
+- **Quem:** o Roberto, no grupo "Projetos IA" (24/11, 21:38), respondendo às perguntas do
+  estudo [sala-de-video.md](./sala-de-video.md) (PR #243). O motivo é da Glenda: manter as
+  reuniões online dentro do app, por causa da taxa da plataforma em cada negócio fechado.
+- **O quê:**
+  - serviço pronto com a tela nossa: o Daily, com o vídeo passando pelo servidor de São
+    Paulo;
+  - a sala entra depois da R1b (participantes da reunião, no Pacote 6, PR #247);
+  - tetos para começar: até 8 pessoas e 2 horas por sala, abre sala quem é Prata ou
+    acima, e orçamento de US$ 50 por mês;
+  - quem não tem conta entra só com o nome, como no link aberto;
+  - só a dona aperta "Gravar", e grava só o áudio, na mesma fila de partes do gravador;
+  - o aviso de gravação da sala é texto da Cris.
+- **O que sai da fila:** a gravação da aba (H14) continua fora, porque é tudo dentro do
+  app, e o robô de reunião (H21) segue parado.
+- **Onde:** ainda em nenhum código. O desenho e as PRs (V1 a V5 e a da casca) estão em
+  `sala-de-video.md`, com o que ainda falta decidir: compartilhar a tela, a conta no
+  Daily, a senha do link de visitante e o que acontece no teto do orçamento.
+
+## 25/11/2026 — o fim do envio único: o recuo do corte vai pelas partes (G14, parte 2)
+
+- **Decisão:** sai a rota `meetings.submitRecording` (o áudio inteiro, em base64, até 10
+  min e 10 MB), com a linha `[Reuniões] envio único` do log, o recorte de 15 MB do body
+  parser e a entrada em `corpoGrandeParaUploads`. Os procedimentos de upload em base64
+  passam de sete a seis. Todo áudio novo de reunião chega pela rota das partes.
+- **Quem e por quê:** o Roberto autorizou em 25/11: ninguém além dos programadores usa o
+  app, e ele quer a estrutura limpa antes da importação de uma base grande de usuárias.
+  A espera de uma semana de log sem chamada sem a marca, que a parte 1 deixou como
+  condição, foi dispensada por essa decisão.
+- **O recuo do corte:** o arquivo curto de um formato que o corte do navegador reconhece
+  mas não lê (o ALAC do Gravador do iPhone, o AC-3, o Vorbis no WebM, o ADPCM no WAV) vai
+  inteiro, como uma parte só, pela importação em partes, quando cabe numa: até 16 MB e,
+  quando o navegador lê a duração, até 12 min. Sem a duração legível (o Chrome não toca o
+  ALAC), ele vai, e o servidor mede nos bytes. Antes eram 10 MB e 10 min, e o arquivo sem
+  a duração legível recebia o aviso de converter.
+- **O que o Gemini aceita:** a página de áudio da documentação (lida em 25/11/2026) lista
+  TIPOS (WAV, MP3, AIFF, AAC, OGG, FLAC, MPEG, M4A, Opus, WebM e alguns crus), e não diz
+  que codec cabe em cada contêiner; o ALAC e o AC-3 não aparecem. Por isso a rota das
+  partes converte em MP3, com o ffmpeg contido do "Baixar o áudio", a parte de um codec
+  fora dos que o app sempre mandou (o Opus no WebM e no Ogg, o AAC no MP4, o Vorbis no
+  Ogg, o MP3, o AAC em ADTS, o FLAC e o WAV em PCM), antes da linha e do bucket. A fila,
+  o player, o "Baixar o áudio" e o reprocesso leem o MP3. A parte que o ffmpeg não
+  converte é recusada com `FORMATO`, que a tela já traduz nos 10 idiomas. A instância tem 1
+  CPU: a conversão toma uma vaga do mesmo balcão dos ffmpeg do "Baixar o áudio" (2 ao
+  mesmo tempo, somando os dois usos), com uma fila curta de até 10 s; sem vaga, a recusa é
+  passageira e a tela manda a parte de novo (ressalva da validação da #262). Nenhuma chamada
+  real ao Gemini foi feita para conferir: a decisão vem da documentação.
+- **O que fica:** a leitura da gravação inteira das reuniões antigas (`meeting_recordings`),
+  pelo reprocesso e pela junção, com os tetos do envio único; o serviço
+  `processMeetingRecording`, sem rota, que os testes usam para montar essas reuniões; e o
+  `meetings.create`, que a tela não chama mais (os testes de detalhes e de idioma ainda o
+  usam; tirá-lo é o passo seguinte).
+- **Onde:** `server/fatias-de-reuniao.ts` (`precisaConverterParaOGemini` e
+  `receberParte`), `server/conversao-do-audio.ts` (`converterParteEmMp3`),
+  `server/duracao-do-audio.ts` (`analisarAudio`), `shared/const.ts`
+  (`PARTE_NO_SERVIDOR_BYTES_MAX` e `PARTE_NO_SERVIDOR_SEGUNDOS_MAX`),
+  `client/src/hooks/useImportacaoEmPartes.ts` (o `recuo` do `importar`) e
+  `client/src/pages/Meetings.tsx` (`recuoDoCorte`). Sem migração.
+
+## 11/11/2026 — o motor de perfis aplica a regra dos concorrentes (N6)
+
+- **Quem:** o Roberto, em 11/11, confirmado depois (item N6 do plano).
+- **O quê:** o motor de PERFIS (`server/matching.ts`, que cruza usuárias entre si) passa a
+  aplicar as duas regras que o motor privado já aplicava no cruzamento de "o que tenho" com
+  "o que preciso": concorrentes não se atendem (`saoConcorrentes`, antes de qualquer outro
+  critério) e nada casa por palavra solta. "exportar vinho" × "importar vinho" casa;
+  "exportar" × "exportar" não. Fecha a lição 3 da lista de 28/08 a 02/09, acima.
+- **O que não muda:** as outras dimensões do motor de perfis não leem termo (a
+  especialidade igual vale 60, o setor igual 70), e o portão da IA
+  (`server/portao-da-demanda-expressa.ts`) não entrou nesta decisão.
+- **Onde:** `satisfaz` em `server/matching.ts`, com o teste
+  `server/motor-de-perfis-concorrentes.test.ts`.
+
+## 24 e 25/11/2026 — o perfil de voz da dona (H3d)
+
+- **Quem:** o Roberto aprovou em 24/11 o item HN-24 da auditoria; a Cris (advogada) deu em
+  25/11 o texto da caixa, o texto de apoio e os pontos técnicos.
+- **O quê:** a dona grava cerca de 30 s da própria voz, e as reuniões gravadas depois a
+  reconhecem: a amostra vai com cada parte ao Gemini, a voz dela sai no rótulo F1, ligado à
+  conta dela (H3c). Consentimento próprio, desmarcado e separado dos Termos; registro de cada
+  consentimento e revogação com a versão do texto, sem a voz, que sobrevive à exclusão;
+  exclusão definitiva (bucket com todas as versões e a linha), também na exclusão da conta.
+- **Escolhas desta PR, a confirmar:** o registro dos consentimentos fica depois da exclusão
+  da conta (como prova, sem a voz); a amostra do perfil gravado no meio de uma reunião não
+  entra nas partes seguintes dela; o rótulo fixo é F1; desligar o perfil não muda as
+  reuniões já transcritas.
+- **Onde:** `server/perfil-de-voz.ts`, `server/fila-de-transcricao.ts`, migração
+  `0031_perfil-de-voz`, `client/src/components/PerfilDeVoz.tsx`.
 
 ---
 

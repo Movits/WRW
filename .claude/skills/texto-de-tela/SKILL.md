@@ -17,7 +17,7 @@ allowed-tools:
 3. **Tradução de verdade** em cada idioma, não cópia do pt-BR. Texto jurídico ou comercial leva "revisar tradução" na PR, com a lista das chaves.
 4. **Remover ou renomear** uma chave: nos 10 arquivos, no mesmo commit, e procure os usos dela em `client/src` com Grep antes.
 5. **Vocabulário que os testes cobram:**
-   - a marca é WRW; há testes que barram o nome antigo (a chave `contextoCatalogoMmm` fica como está: o nome é interno);
+   - a marca é Marquesa Global Match (desde 24/11/2026, por pedido da Cris; em 23/11 foi MarquesaMatch, e antes WRW e MMM), escrita assim, em caracteres latinos, nos 10 idiomas; há testes que barram o nome antigo (a chave `contextoCatalogoMmm` fica como está: o nome é interno) e a varredura de "match" aceita a marca como nome próprio;
    - "conexão", não "match", fora dos nomes próprios "Business Match" e "Smart Match";
    - "palavra-chave", não "tag".
    `client/src/i18n/palavras-da-tela.test.ts` varre os 10 JSONs inteiros só atrás de "match"; "tag" ele confere apenas no campo da Nova Oportunidade (`newOpportunity.tagInputPlaceholder`), então nos outros textos quem garante é você.

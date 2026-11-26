@@ -5,6 +5,7 @@ import type { ParticipanteDaAgenda } from "@shared/agenda";
 import { estadoNaGoogle, type EstadoNaGoogle } from "@shared/google-agenda-eventos";
 import { agendaReunioes, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { reuniaoVisivel } from "./reuniao-visivel";
 import { agendarLembreteDaAgenda, esquecerLembrete } from "./lembretes";
 import { ehColisaoDeChave } from "./network-codigo-anonimo";
 
@@ -55,14 +56,16 @@ export type DadosDaAgendada = {
 export type OpcoesDaGoogle = { naGoogle: boolean };
 
 /**
- * A gravação ligada, só quando ainda é da dona e não foi excluída. A exclusão
- * volta o ponteiro a nulo (soltarGravacaoDaAgenda); a junção cobre a corrida
- * entre as duas, e o ponteiro solto aparece como "sem gravação".
+ * A gravação ligada, só quando ainda é da dona, não foi excluída e não está na
+ * lixeira (H7d). A exclusão volta o ponteiro a nulo (soltarGravacaoDaAgenda); a
+ * junção cobre a corrida entre as duas, e o ponteiro solto aparece como "sem
+ * gravação". A gravação na lixeira também aparece como "sem gravação": o
+ * "Gravar agora" volta, e gravar de novo troca o ponteiro, como sempre.
  */
 const JUNCAO_DA_GRAVACAO = and(
   eq(meetings.id, agendaReunioes.meetingId),
   eq(meetings.ownerId, agendaReunioes.ownerId),
-  ne(meetings.status, "deleted"),
+  reuniaoVisivel(),
 );
 
 const COLUNAS = {
@@ -76,6 +79,8 @@ const COLUNAS = {
   lembreteMinutos: agendaReunioes.lembreteMinutos,
   google: agendaReunioes.google,
   googleConvites: agendaReunioes.googleConvites,
+  // A equipe (R2) em que a dona pôs a reunião, ou nula.
+  folderId: agendaReunioes.folderId,
   createdAt: agendaReunioes.createdAt,
   updatedAt: agendaReunioes.updatedAt,
   gravacaoId: meetings.id,
@@ -93,6 +98,7 @@ type Linha = {
   lembreteMinutos: number | null;
   google: string | null;
   googleConvites: unknown;
+  folderId: string | null;
   createdAt: number;
   updatedAt: number;
   gravacaoId: string | null;
@@ -256,7 +262,7 @@ export async function excluirDaAgenda(ownerId: string, id: string): Promise<{ go
 export async function ligarGravacaoNaAgenda(ownerId: string, id: string, meetingId: string): Promise<void> {
   const db = await exigirDb();
   const [gravacao] = await db.select({ id: meetings.id }).from(meetings)
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted")))
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel()))
     .limit(1);
   if (!gravacao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_GRAVACAO_NAO_ENCONTRADA });
   let resultado: unknown;
@@ -274,9 +280,11 @@ export async function ligarGravacaoNaAgenda(ownerId: string, id: string, meeting
  * A gravação excluída deixa a agenda: o ponteiro volta a nulo, e a reunião
  * marcada continua na agenda, pronta para outro "Gravar agora". Chamada pela
  * exclusão da reunião (apagarDerivadosDaReuniao, em server/meeting-service.ts),
- * antes do expurgo do bucket, com a dona no WHERE.
+ * antes do expurgo do bucket, com a dona no WHERE, e pela junção de reuniões
+ * (server/juntar-reunioes.ts), dentro da transação dela: por isso só pede o
+ * `update`.
  */
-export async function soltarGravacaoDaAgenda(db: Banco, ownerId: string, meetingId: string): Promise<void> {
+export async function soltarGravacaoDaAgenda(db: Pick<Banco, "update">, ownerId: string, meetingId: string): Promise<void> {
   await db.update(agendaReunioes).set({ meetingId: null, updatedAt: Date.now() })
     .where(and(eq(agendaReunioes.ownerId, ownerId), eq(agendaReunioes.meetingId, meetingId)));
 }

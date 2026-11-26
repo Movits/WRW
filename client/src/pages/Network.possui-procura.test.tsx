@@ -87,6 +87,8 @@ vi.mock("@/lib/trpc", async () => {
         },
         removeAsset: duble.registrar("removeAsset"),
         removeNeed: duble.registrar("removeNeed"),
+        addItem: duble.registrar("addItem"),
+        editItem: duble.registrar("editItem"),
       },
       enrichment: {
         startSession: duble.registrar("startSession"),
@@ -195,5 +197,62 @@ describe("Network — seção Possui / Procura no detalhe do contato", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /tentar novamente/i }));
     expect(duble.possuiProcura.refetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Network — acrescentar e corrigir o possui e o procura na ficha (T45, 24/11)", () => {
+  type OpcoesComFim = Opcoes & { onSettled?: () => void };
+  const opcoesDe = (nome: string) => duble.mutacoes[nome].opcoes as OpcoesComFim;
+
+  it("acrescentar no possui manda o texto da dona, limpa o campo quando o servidor aceita e relê a lista", () => {
+    abrirDetalhe({ data: registrado });
+    const campo = screen.getByRole("textbox", { name: "Novo item do que possui" });
+    fireEvent.change(campo, { target: { value: "  Exportação de café  " } });
+    fireEvent.click(screen.getAllByRole("button", { name: /Acrescentar/ })[0]);
+    expect(duble.mutacoes.addItem.mutate).toHaveBeenCalledWith({ contactId: 42, tipo: "possui", rotulo: "Exportação de café" });
+
+    act(() => { opcoesDe("addItem").onSuccess?.({ id: 7 }, {}); opcoesDe("addItem").onSettled?.(); });
+    expect(toast.success).toHaveBeenCalledWith("Item acrescentado.");
+    expect(duble.invalidate).toHaveBeenCalledWith({ contactId: 42 });
+    expect(screen.getByRole("textbox", { name: "Novo item do que possui" })).toHaveValue("");
+  });
+
+  it("o campo vazio não manda nada (o botão fica desligado)", () => {
+    abrirDetalhe({ data: registrado });
+    const botao = screen.getAllByRole("button", { name: /Acrescentar/ })[1];
+    expect(botao).toBeDisabled();
+    fireEvent.click(botao);
+    expect(duble.mutacoes.addItem.mutate).not.toHaveBeenCalled();
+  });
+
+  it("corrigir um item do procura abre o campo com o texto de agora e manda o texto novo com o id e o tipo", () => {
+    abrirDetalhe({ data: registrado });
+    fireEvent.click(screen.getByRole("button", { name: "Corrigir Distribuidora na Ásia" }));
+    const campo = screen.getByRole("textbox", { name: "Texto do item" });
+    expect(campo).toHaveValue("Distribuidora na Ásia");
+    fireEvent.change(campo, { target: { value: "Distribuidora no Japão" } });
+    fireEvent.click(screen.getByRole("button", { name: /Salvar/ }));
+    expect(duble.mutacoes.editItem.mutate).toHaveBeenCalledWith({ id: 2, tipo: "procura", rotulo: "Distribuidora no Japão" });
+
+    act(() => { opcoesDe("editItem").onSuccess?.({ id: 2 }, {}); });
+    expect(toast.success).toHaveBeenCalledWith("Item corrigido.");
+    expect(screen.queryByRole("textbox", { name: "Texto do item" })).not.toBeInTheDocument();
+  });
+
+  it("a recusa do servidor sai traduzida, nunca como o código", () => {
+    abrirDetalhe({ data: registrado });
+    act(() => { opcoesDe("addItem").onError?.({ message: "ITEM_DA_FICHA_REPETIDO" }, {}); });
+    expect(toast.error).toHaveBeenLastCalledWith("Este contato já tem esse item.");
+    act(() => { opcoesDe("addItem").onError?.({ message: "ITEM_DA_FICHA_SEM_TEXTO" }, {}); });
+    expect(toast.error).toHaveBeenLastCalledWith("Escreva o item com letras ou números.");
+    act(() => { opcoesDe("editItem").onError?.({ message: "Banco de dados indisponível" }, {}); });
+    expect(toast.error).toHaveBeenLastCalledWith("Não foi possível salvar o item. Tente de novo.");
+  });
+
+  it("a ficha sem nada mostra os campos para acrescentar e a nota de que o texto não passa pela IA", () => {
+    abrirDetalhe({ data: { possui: [], procura: [] } });
+    expect(screen.getByRole("textbox", { name: "Novo item do que possui" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Novo item do que procura" })).toBeInTheDocument();
+    expect(screen.getByText(/sem passar pela IA/)).toBeInTheDocument();
   });
 });

@@ -10,8 +10,8 @@ describe("Política de microfone para reuniões", () => {
     expect(serverSource).not.toContain("microphone=*");
   });
 
-  it("preserva o limite ampliado somente no upload de reuniões", () => {
-    expect(serverSource).toContain('app.use("/api/trpc/meetings.submitRecording", express.json({ limit: "15mb" }))');
+  it("o envio único saiu (G14, parte 2): o áudio de reunião não tem mais o limite ampliado do JSON, e o global segue em 5 MB", () => {
+    expect(serverSource).not.toContain("meetings.submitRecording");
     expect(serverSource).toContain('app.use(express.json({ limit: "5mb" }))');
   });
 });

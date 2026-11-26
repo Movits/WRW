@@ -6,12 +6,20 @@ import { aoTerminarUmDescarte, apagarGravacaoDescartada, guardarDescarte, retoma
 import { declararFim, fimRecusadoDeVez, guardarFim, retomarPartesEFins, type ServidorDaGravacao } from "@/lib/retomada-das-partes";
 import { ocupar, useOcupacao } from "@/lib/sessao-ocupada";
 import type { AudioGravado } from "./useGravadorDeAudio";
+import type { TipoDaParte } from "@/lib/corte-comum";
 import type { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
 
 /** De quanto em quanto tempo o gravador fecha uma parte (o desenho: ~10 min). */
 export const PARTE_SEGUNDOS = 600;
 /** De quanto em quanto tempo a tela tenta de novo o que ficou no aparelho. */
 const NOVA_TENTATIVA_MS = 30_000;
+/**
+ * As esperas entre as tentativas de envio da parte que NÃO tem cópia no
+ * aparelho (a última se repete): ela só existe na memória da aba, e a
+ * retomada, que lê o aparelho, nunca a acharia. Ver `subir`.
+ */
+export const ESPERAS_DA_PARTE_SEM_COPIA_MS = [2_000, 5_000, 10_000, 30_000] as const;
+
 
 /**
  * O que o Descartar fez (G13b). "descartada": o servidor excluiu a reunião (a
@@ -31,13 +39,14 @@ export type ResultadoDoDescarte = "descartada" | "pendente" | "nada";
 type Inicio = { title: string; language: string; consentNoticeVersion: typeof VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO; contactId?: number | null; contextId?: string | null; origem?: "gravacao" | "arquivo" };
 
 /**
- * Uma parte a enviar: a que o gravador fecha (AudioGravado) ou a de um MP3
- * importado em partes (H9a), que sobe como audio/mpeg.
+ * Uma parte a enviar: a que o gravador fecha (AudioGravado) ou a de um
+ * arquivo importado em partes (H9a, H9b e H9c), que sobe no tipo que o corte
+ * diz (audio/mpeg, audio/mp4, audio/ogg, audio/flac...: TipoDaParte).
  */
-export type ParteParaEnviar = Omit<AudioGravado, "mimeType"> & { mimeType: AudioGravado["mimeType"] | "audio/mpeg"; seq: number; ultima: boolean };
+export type ParteParaEnviar = Omit<AudioGravado, "mimeType"> & { mimeType: AudioGravado["mimeType"] | TipoDaParte; seq: number; ultima: boolean };
 
 /**
- * Uma parte do MP3 importado em partes (H9a): sem o `ultima`, porque o fim do
+ * Uma parte do arquivo importado em partes (H9a): sem o `ultima`, porque o fim do
  * arquivo vem à parte (encerrarArquivo), depois de todas as partes recebidas.
  */
 export type ParteDoArquivo = Omit<ParteParaEnviar, "ultima">;
@@ -90,7 +99,8 @@ export type FimDoArquivo = "declarado" | "pendente" | "recusado" | "descartada";
  * Os avisos que a tela mostra saem por aqui (G13b): a parte que o servidor
  * recusou de vez (`aoRecusarParte`, com o código, que a tela traduz), a cópia
  * no aparelho que não pôde ser guardada (`aoFicarSemCopia`, uma vez por
- * gravação: sem a cópia, uma queda de rede perde o trecho que estava subindo)
+ * gravação: sem a cópia, o trecho que não subiu depende da aba aberta, que
+ * insiste no envio até o servidor confirmar)
  * e o descarte guardado cuja exclusão uma retomada concluiu
  * (`aoConcluirDescarte`, para a tela fechar o aviso de que ele não terminou).
  *
@@ -98,22 +108,32 @@ export type FimDoArquivo = "declarado" | "pendente" | "recusado" | "descartada";
  * a tela sair (o desmonte gravando para e entrega, G13b) sobe e encerra a
  * gravação do mesmo jeito.
  *
- * O MP3 importado em partes (H9a, hooks/useImportacaoEmPartes.ts) passa por
+ * O arquivo importado em partes (H9a, hooks/useImportacaoEmPartes.ts) passa por
  * aqui também: a reunião nasce com a origem "arquivo", cada parte cortada sobe
- * pela mesma fila, como audio/mpeg (subirParteDoArquivo, que responde o que
+ * pela mesma fila, no tipo da parte (subirParteDoArquivo, que responde o que
  * houve com ela: a importação só manda a seguinte quando esta chegou), e o fim
  * vem depois de todas (encerrarArquivo).
- *
- * Com `ativo` falso (o envio único, ?envioUnico=1), nada aqui toca o servidor.
  */
 export function useGravacaoEmPartes(opcoes: {
-  ativo: boolean;
   aoEncerrar: (meetingId: string) => void;
+  /**
+   * O fim sem nenhuma parte com áudio (G17: o microfone caiu antes de 1 s de
+   * gravação, e a parte curta demais saiu): a reunião vazia foi excluída
+   * (declararFim), e não há detalhe para abrir. Sem isto, a tela ia ao
+   * detalhe de uma reunião que não existe mais.
+   */
+  aoEncerrarSemAudio?: (meetingId: string) => void;
   aoFalhar: (erro: unknown) => void;
   /** O servidor recusou uma parte de vez: o código da recusa, que a tela traduz. */
   aoRecusarParte?: (codigo: string | undefined) => void;
   /** A cópia de uma parte no aparelho falhou: uma vez por gravação. */
   aoFicarSemCopia?: () => void;
+  /**
+   * Uma parte sem cópia no aparelho que não subiu e não vai mais subir: a
+   * sessão acabou (401/403, o Sair) ou a tela saiu sem conseguir guardar a
+   * cópia. O trecho fica de fora da gravação, e a dona precisa saber.
+   */
+  aoPerderParte?: (meetingId: string, seq: number) => void;
   /** A exclusão no servidor de um descarte guardado terminou numa retomada (desta tela ou de toda a sessão). */
   aoConcluirDescarte?: (meetingId: string) => void;
 }) {
@@ -136,9 +156,14 @@ export function useGravacaoEmPartes(opcoes: {
   // fim de uma reunião alheia (revisão da G13c). A cópia das partes, não:
   // depois do Sair nenhuma voz fica no aparelho.
   const donas = useRef(new Map<string, string>());
+  // As esperas das partes sem cópia que esta aba ainda insiste em enviar, por
+  // gravação: o descarte as acorda, para a insistência parar já (e a sessão
+  // desocupar) em vez de na próxima volta.
+  const esperasSemCopia = useRef(new Map<string, Set<() => void>>());
+  const montada = useRef(true);
   const [pendentes, setPendentes] = useState(0);
   const [noAparelho, setNoAparelho] = useState(0);
-  useOcupacao("audio-nao-enviado", opcoes.ativo && noAparelho > 0);
+  useOcupacao("audio-nao-enviado", noAparelho > 0);
 
   // A conta: do cache do React Query ou, se ele ainda não a tem, do servidor.
   const dona = useCallback(async () => utils.auth.me.getData()?.openId ?? (await utils.auth.me.fetch().catch(() => null))?.openId ?? null, [utils]);
@@ -178,6 +203,7 @@ export function useGravacaoEmPartes(opcoes: {
   const cancelar = useCallback(async (id: string): Promise<Exclude<ResultadoDoDescarte, "nada">> => {
     if (meetingId.current === id) meetingId.current = null;
     descartadas.current.add(id);
+    esperasSemCopia.current.get(id)?.forEach(acordar => acordar());
     // A conta vem do cache da sessão, sem esperar a rede, para o descarte ficar
     // guardado já no clique (a aba pode fechar logo depois). Sem ela no cache,
     // a que começou a gravação, e só então do servidor; sem conta nenhuma, não
@@ -200,25 +226,111 @@ export function useGravacaoEmPartes(opcoes: {
     return id ? cancelar(id) : "nada";
   }, [cancelar]);
 
-  // Uma parte vai primeiro ao aparelho (a cópia) e depois ao servidor, com a
-  // trava entre abas, e só sai do aparelho quando o servidor a confirma ou a
-  // recusa de vez. Roda dentro da fila; a gravação e o arquivo importado
-  // passam por aqui.
-  const subir = useCallback(async (id: string, parte: ParteDoArquivo, quem: string | null): Promise<DesfechoDaParte> => {
-    // A cópia no aparelho: se o IndexedDB faltar (ou a conta não vier), segue
-    // da memória, e a dona fica sabendo, uma vez por gravação, que uma queda
-    // de rede agora perde o trecho que estava subindo.
-    const copiada = quem !== null && await guardarParte({ meetingId: id, seq: parte.seq, blob: parte.blob, mimeType: parte.mimeType, duracaoMs: parte.duracaoMs, dona: quem, guardadaEm: Date.now() }).then(() => true, () => false);
+  // A cópia da parte no aparelho (IndexedDB), com a conta. Sem a conta ou sem
+  // o IndexedDB, não há cópia: responde false.
+  const copiar = useCallback((id: string, parte: ParteDoArquivo, quem: string | null) =>
+    quem === null
+      ? Promise.resolve(false)
+      : guardarParte({ meetingId: id, seq: parte.seq, blob: parte.blob, mimeType: parte.mimeType, duracaoMs: parte.duracaoMs, dona: quem, guardadaEm: Date.now() }).then(() => true, () => false),
+  []);
+
+  // Um envio da parte ao servidor, com a trava entre abas. A confirmada ou
+  // recusada de vez sai do aparelho; a recusa avisa a dona, menos na gravação
+  // que ela mesma descartou.
+  const enviar = useCallback(async (id: string, parte: ParteDoArquivo): Promise<DesfechoDaParte> => {
+    const resultado: DesfechoDaParte = (await travaDoNavegador(`wrw-envio-${id}`, () => enviarParte(id, parte.seq, parte.blob, parte.mimeType))) ?? { tipo: "ocupada" };
+    if (resultado.tipo === "recebida" || resultado.tipo === "recusada") await apagarParte(id, parte.seq).catch(() => {});
+    if (resultado.tipo === "recusada" && !descartadas.current.has(id)) atuais.current.aoRecusarParte?.(resultado.codigo);
+    return resultado;
+  }, []);
+
+  // Uma parte vai primeiro ao aparelho (a cópia) e depois ao servidor, e só
+  // sai do aparelho quando o servidor a confirma ou a recusa de vez. Roda
+  // dentro da fila; a gravação e o arquivo importado passam por aqui.
+  const subir = useCallback(async (id: string, parte: ParteDoArquivo, quem: string | null): Promise<{ desfecho: DesfechoDaParte; copiada: boolean }> => {
+    // Se o IndexedDB faltar (ou a conta não vier), segue da memória, e a dona
+    // fica sabendo, uma vez por gravação, que o trecho depende desta aba
+    // aberta até subir.
+    const copiada = await copiar(id, parte, quem);
     if (!copiada && semCopiaAvisada.current !== id) {
       semCopiaAvisada.current = id;
       atuais.current.aoFicarSemCopia?.();
     }
-    const resultado = await travaDoNavegador(`wrw-envio-${id}`, () => enviarParte(id, parte.seq, parte.blob, parte.mimeType));
-    if (resultado?.tipo === "recebida" || resultado?.tipo === "recusada") await apagarParte(id, parte.seq).catch(() => {});
-    // A recusa é definitiva: o trecho fica de fora da transcrição, e a dona
-    // precisa saber. Não na gravação que ela mesma descartou.
-    if (resultado?.tipo === "recusada" && !descartadas.current.has(id)) atuais.current.aoRecusarParte?.(resultado.codigo);
-    return resultado ?? { tipo: "ocupada" };
+    // Uma falha inesperada (a trava do navegador, por exemplo) é passageira:
+    // a parte não pode sumir por uma exceção.
+    const desfecho = await enviar(id, parte).catch((): DesfechoDaParte => ({ tipo: "passageira" }));
+    return { desfecho, copiada };
+  }, [copiar, enviar]);
+
+  /**
+   * A parte da gravação que não tem cópia no aparelho e cujo envio falhou
+   * (rede, deploy, outra aba com a trava). Ela só existe na memória desta aba:
+   * a retomada, que lê o aparelho, nunca a acharia, e o trecho sumia da
+   * gravação (o defeito achado na validação da #202). Aqui ela é tentada de
+   * novo, com espera crescente, até o servidor a confirmar ou recusar de vez.
+   * A cada volta a cópia é tentada de novo: a que der certo devolve a parte ao
+   * caminho de sempre (a retomada da G13c a manda depois).
+   *
+   * Corre por fora da fila: as partes seguintes e o fim da gravação não
+   * esperam por ela (o servidor aceita, depois do fim, as partes que faltavam
+   * até o total). Enquanto ela não sobe, a sessão fica ocupada: fechar a aba
+   * pergunta. A insistência para (revisão da #260):
+   * - no descarte da gravação: a dona mandou, nada a avisar;
+   * - no desmonte da tela: os relógios saem, e a parte tem uma última chance
+   *   de ir ao aparelho, para a retomada de toda tela logada seguir por ela;
+   * - na sessão encerrada (401/403, o Sair): nada mais sobe por esta aba, e a
+   *   cópia não é tentada, porque depois do Sair nenhuma voz fica no aparelho.
+   * Sem cópia no fim, a parte se perdeu, e a tela avisa (aoPerderParte). O
+   * aviso da cópia indisponível já pede que a dona fique na tela até o envio
+   * terminar.
+   */
+  const insistirSemCopia = useCallback((id: string, parte: ParteDoArquivo, quemNoInicio: string | null, desfechoDoEnvio: DesfechoDaParte) => {
+    // Sem a cópia, a parte se perdeu: avisa, menos na gravação descartada.
+    const perder = () => {
+      if (!descartadas.current.has(id)) atuais.current.aoPerderParte?.(id, parte.seq);
+    };
+    if (desfechoDoEnvio.tipo === "sem-sessao") return perder();
+    const liberar = ocupar("enviando");
+    const esperar = (ms: number) => new Promise<void>(resolve => {
+      const esperas = esperasSemCopia.current.get(id) ?? new Set<() => void>();
+      esperasSemCopia.current.set(id, esperas);
+      const acordar = () => {
+        clearTimeout(relogio);
+        esperas.delete(acordar);
+        if (!esperas.size) esperasSemCopia.current.delete(id);
+        resolve();
+      };
+      const relogio = setTimeout(acordar, ms);
+      esperas.add(acordar);
+    });
+    void (async () => {
+      let quem = quemNoInicio ?? donas.current.get(id) ?? null;
+      for (let tentativa = 0; ; tentativa += 1) {
+        // A tela já saiu (ou saiu durante a espera): uma última chance de cópia, sem relógio.
+        if (montada.current) await esperar(ESPERAS_DA_PARTE_SEM_COPIA_MS[Math.min(tentativa, ESPERAS_DA_PARTE_SEM_COPIA_MS.length - 1)]);
+        if (descartadas.current.has(id)) return;
+        quem = quem ?? await dona();
+        if (await copiar(id, parte, quem)) {
+          // Agora no aparelho: a retomada a manda, e ela conta como áudio por enviar.
+          if (montada.current) setNoAparelho(n => n + 1);
+          return;
+        }
+        if (!montada.current) return perder();
+        const resultado = await enviar(id, parte).catch((): DesfechoDaParte => ({ tipo: "passageira" }));
+        if (resultado.tipo === "recebida" || resultado.tipo === "recusada") return;
+        if (resultado.tipo === "sem-sessao") return perder();
+      }
+    })().finally(liberar);
+  }, [dona, copiar, enviar]);
+
+  // A tela montada: o desmonte acorda as esperas das partes sem cópia, para a
+  // insistência parar já, sem relógio pendurado (revisão da #260).
+  useEffect(() => {
+    montada.current = true;
+    return () => {
+      montada.current = false;
+      esperasSemCopia.current.forEach(esperas => esperas.forEach(acordar => acordar()));
+    };
   }, []);
 
   // O fim de `id`, com `total` partes: o servidor o confirma, e a tela vai ao
@@ -240,7 +352,8 @@ export function useGravacaoEmPartes(opcoes: {
       throw erro;
     }
     if (descartadas.current.has(id)) return "descartada";
-    atuais.current.aoEncerrar(id);
+    if (total <= 0) atuais.current.aoEncerrarSemAudio?.(id);
+    else atuais.current.aoEncerrar(id);
     return "declarado";
   }, [encerrar]);
 
@@ -261,9 +374,13 @@ export function useGravacaoEmPartes(opcoes: {
       const quem = await dona();
       // A parte vazia (Parar logo depois de uma troca) não vai: não é áudio.
       if (parte.blob.size > 0) {
-        const resultado = await subir(id, parte, quem);
-        // A que não chegou fica no aparelho, e a retomada a manda depois.
-        if (resultado.tipo !== "recebida" && resultado.tipo !== "recusada") setNoAparelho(n => n + 1);
+        const { desfecho, copiada } = await subir(id, parte, quem);
+        if (desfecho.tipo !== "recebida" && desfecho.tipo !== "recusada") {
+          // A que não chegou fica no aparelho, e a retomada a manda depois. Sem
+          // a cópia, ela só existe na memória: esta aba insiste até subir.
+          if (copiada) setNoAparelho(n => n + 1);
+          else insistirSemCopia(id, parte, quem, desfecho);
+        }
       }
       // A última declara o fim: sem áudio nela, o total conta só as partes que têm.
       if (parte.ultima) await declararOFim(id, parte.blob.size > 0 ? parte.seq + 1 : parte.seq, quem);
@@ -271,7 +388,7 @@ export function useGravacaoEmPartes(opcoes: {
       setPendentes(n => n - 1);
       liberar();
     });
-  }, [dona, subir, declararOFim]);
+  }, [dona, subir, declararOFim, insistirSemCopia]);
 
   /**
    * Uma parte do MP3 importado em partes (H9a): vai ao aparelho e ao servidor
@@ -289,7 +406,7 @@ export function useGravacaoEmPartes(opcoes: {
     const liberar = ocupar("enviando");
     const desfecho = fila.current.then(async (): Promise<DesfechoDaParte> => {
       if (descartadas.current.has(id)) return { tipo: "descartada" };
-      return subir(id, parte, await dona());
+      return (await subir(id, parte, await dona())).desfecho;
     });
     fila.current = desfecho.then(() => undefined, () => undefined);
     return desfecho.catch((): DesfechoDaParte => ({ tipo: "passageira" })).finally(() => {
@@ -299,7 +416,7 @@ export function useGravacaoEmPartes(opcoes: {
   }, [dona, subir]);
 
   /**
-   * O fim do MP3 importado em partes (H9a), depois de todas as partes: pela
+   * O fim do arquivo importado em partes (H9a), depois de todas as partes: pela
    * mesma fila, atrás da última (ver FimDoArquivo). A falha que não é recusa
    * (rede, deploy) não vira o aviso de envio que falhou: as partes já estão no
    * servidor, o fim fica guardado para a retomada, e a tela diz que o envio
@@ -330,7 +447,6 @@ export function useGravacaoEmPartes(opcoes: {
   // conta cuja exclusão falhou, as partes que ficaram no aparelho e os fins que
   // o servidor não confirmou.
   useEffect(() => {
-    if (!opcoes.ativo) return;
     let ativo = true;
     let relogio = 0;
     const tentar = async () => {
@@ -363,15 +479,12 @@ export function useGravacaoEmPartes(opcoes: {
       ativo = false;
       window.clearTimeout(relogio);
     };
-  }, [opcoes.ativo, dona, servidorDaGravacao, excluirNoServidor]);
+  }, [dona, servidorDaGravacao, excluirNoServidor]);
 
   // O descarte guardado que uma retomada terminou de excluir no servidor (a
   // desta tela ou a de toda a sessão): a tela fecha o aviso de que ele não
   // tinha terminado.
-  useEffect(() => {
-    if (!opcoes.ativo) return;
-    return aoTerminarUmDescarte(id => atuais.current.aoConcluirDescarte?.(id));
-  }, [opcoes.ativo]);
+  useEffect(() => aoTerminarUmDescarte(id => atuais.current.aoConcluirDescarte?.(id)), []);
 
   return { iniciar, cancelar, descartar, receberParte, subirParteDoArquivo, encerrarArquivo, enviando: pendentes > 0 };
 }

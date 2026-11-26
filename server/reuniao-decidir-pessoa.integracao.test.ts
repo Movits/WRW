@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -97,14 +98,14 @@ describe.skipIf(!temBanco)("Criar contato na pessoa da reunião (integração)",
   afterAll(async () => {
     const db = await getDb();
     if (!db) return;
-    await db.delete(networkSugestoes).where(eq(networkSugestoes.ownerId, DONA));
-    await db.delete(privateContacts).where(eq(privateContacts.ownerId, DONA));
-    await db.delete(meetingContactSuggestions).where(eq(meetingContactSuggestions.ownerId, DONA));
-    await db.delete(meetingEntities).where(eq(meetingEntities.ownerId, DONA));
-    await db.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, DONA));
-    await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-    await db.delete(consumoDeMinutos).where(eq(consumoDeMinutos.ownerId, DONA));
-    await db.delete(meetings).where(eq(meetings.ownerId, DONA));
+    await apagarPelaChave(db, networkSugestoes, eq(networkSugestoes.ownerId, DONA));
+    await apagarPelaChave(db, privateContacts, eq(privateContacts.ownerId, DONA));
+    await apagarPelaChave(db, meetingContactSuggestions, eq(meetingContactSuggestions.ownerId, DONA));
+    await apagarPelaChave(db, meetingEntities, eq(meetingEntities.ownerId, DONA));
+    await apagarPelaChave(db, meetingSummaries, eq(meetingSummaries.ownerId, DONA));
+    await apagarPelaChave(db, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+    await apagarPelaChave(db, consumoDeMinutos, eq(consumoDeMinutos.ownerId, DONA));
+    await apagarPelaChave(db, meetings, eq(meetings.ownerId, DONA));
     await db.delete(users).where(eq(users.openId, DONA));
   });
 

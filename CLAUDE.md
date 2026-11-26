@@ -6,10 +6,13 @@ para docs/arquitetura/decisoes-tomadas.md. Teto: 170 linhas. -->
 
 ## O projeto
 
-**WRW — Women Rocking the World**: CRM de networking em que cada usuária mantém uma base
+**Marquesa Global Match**: CRM de networking em que cada usuária mantém uma base
 privada de contatos e a IA cruza o que cada contato **possui** com o que cada contato
-**procura** para gerar oportunidades. Produção em wrwglobal.org. O nome anterior, MMM
-(Mulheres que Movem o Mundo), segue em nomes de infraestrutura e em dados gravados. Todo o
+**procura** para gerar oportunidades. Produção em wrwglobal.org. O nome mais antigo, MMM
+(Mulheres que Movem o Mundo), segue em nomes de infraestrutura e em dados gravados.
+Desde 24/11/2026 o nome visível é Marquesa Global Match (nome fantasia, pedido da Cris pela
+cliente; em 23/11 foi MarquesaMatch); o anterior, WRW (Women Rocking the World), segue com o
+MMM em infraestrutura, domínio, artes da logo e dados gravados. Todo o
 texto do repositório (docs, commits, PRs, comentários) é em português do Brasil. Commit e
 PR dizem o que mudou, por quê e como verificar, em português claro.
 
@@ -118,7 +121,7 @@ faz parte do trabalho.
   `corrigir-colunas-json.mjs`, `normalizar-buscas-antigas.mjs`, `recuperar-enriquecimento.ts`,
   `demonstrar-etapa-11.ts`, `limpar-contextos-how-met.ts` e `reavaliar-prata-antiga.ts`. O
   exame `checar-producao.mjs` cria e apaga contas QA no banco do `--env`. Só
-  `definir-senha-local.mjs` recusa banco remoto; `publicar-documento.mjs` exige
+  `definir-senha-local.mjs` e `semear-rede-com-armadilhas.mjs` recusam banco remoto; `publicar-documento.mjs` exige
   `--confirmo-producao`.
 - **O repositório é PÚBLICO.** Nunca commitar `.env*`, chave de API, senha de banco, dump do
   banco (tem e-mails e senhas de usuárias reais; vive só no repositório privado de backup)
@@ -135,15 +138,15 @@ faz parte do trabalho.
   "não fazemos match porque alguém poderia precisar; fazemos match porque alguém declarou
   que precisa". Setor, porte, cargo ou obrigação legal não são necessidade.
 - **Match nunca cruza por palavra solta, e concorrentes zeram** ("exportar vinho" ×
-  "importar vinho" casam; "exportar" × "exportar" não). Hoje só o motor privado aplica;
-  uniformizar com o de perfis é decisão de produto. Os três motores: `server/CLAUDE.md`.
+  "importar vinho" casam; "exportar" × "exportar" não). Valem no motor privado e, desde o
+  N6 (decisão do Roberto de 11/11), no de perfis. Os três motores: `server/CLAUDE.md`.
 - **Banco fora do ar é ERRO, nunca "sem dados".** Não crie `catch` que devolva vazio; se
   precisar de um, relance quando `ehErroDeBancoIndisponivel`.
 - **A suíte NUNCA lê `DATABASE_URL`** (só `DATABASE_URL_TESTES`, banco descartável): o
   `.env` de trabalho já apontou para produção e `pnpm test` chegou a promover uma usuária
   real. Falha na suíte é regressão, sem exceções toleradas.
 - **Ouro = Presidente = administradora** (pedido da cliente): as procedures de acesso aceitam
-  os três papéis, com QUATRO exceções em `server/CLAUDE.md` (rode o `grep` de lá antes de
+  os três papéis, com CINCO exceções em `server/CLAUDE.md` (rode o `grep` de lá antes de
   citar contagem). Distribuidor do Smart Match é um PODER, não um nível. Contas Ouro
   criadas só para teste voltam a Prata antes da entrega. `grantGoldAccess` grava `gold` por
   cima do papel e REBAIXA presidente ou admin (`server/CLAUDE.md`).

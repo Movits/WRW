@@ -29,7 +29,7 @@ const invokeLLM = vi.fn();
 vi.mock("./_core/llm", () => ({ invokeLLM: (...args: unknown[]) => invokeLLM(...args) }));
 vi.mock("./db", () => ({ getDb: async () => null, exigirDb: async () => { throw new Error("o resumo não lê o banco"); } }));
 
-const { gerarResumoDaReuniao, entradaDoResumo } = await import("./resumo-da-reuniao");
+const { gerarResumoDaReuniao, entradaDoResumo, separadorDaReuniao } = await import("./resumo-da-reuniao");
 const { FalhaDaIA } = await import("./ia-em-json");
 
 const FALAS: Segmento[] = [
@@ -69,7 +69,7 @@ describe("o que vai à IA", () => {
   });
 
   it("sem falas (envio único), o texto corrido, sem rótulo e sem vozes", () => {
-    expect(entradaDoResumo("Bom dia a todos.", [])).toEqual({ texto: "Bom dia a todos.", rotulada: false, vozes: new Set() });
+    expect(entradaDoResumo("Bom dia a todos.", [])).toEqual({ texto: "Bom dia a todos.", rotulada: false, vozes: new Set(), reunioes: 1 });
   });
 
   it("as vozes da entrada são as que ela rotulou: a voz que só tem fala vazia fica de fora", () => {
@@ -97,7 +97,7 @@ describe("o que vai à IA", () => {
   });
 
   it("transcrição vazia não chama a IA", async () => {
-    expect(await gerarResumoDaReuniao({ transcricao: "  ", segmentos: [], idioma: "pt-BR" })).toEqual({ emoji: null, modelo: null, itens: [], recebidos: 0 });
+    expect(await gerarResumoDaReuniao({ transcricao: "  ", segmentos: [], idioma: "pt-BR" })).toEqual({ emoji: null, titulo: null, modelo: null, itens: [], recebidos: 0 });
     expect(invokeLLM).not.toHaveBeenCalled();
   });
 });
@@ -189,6 +189,33 @@ describe("a conferência de cada item", () => {
     invokeLLM.mockResolvedValue(resposta({ ...VAZIO, acoes: [acao(1), acao(1), ...[2, 3, 4, 5, 6, 7, 8, 9].map(acao)] }));
     const { itens } = await gerarResumoDaReuniao(ENTRADA);
     expect(itens.map(i => i.text)).toEqual(["Ação 1", "Ação 2", "Ação 3", "Ação 4", "Ação 5", "Ação 6", "Ação 7"]);
+  });
+
+  it("título sugerido: o prompt o pede no idioma, sem emoji, data nem nomes, e o esquema strict exige o campo (null quando não há assunto)", async () => {
+    invokeLLM.mockResolvedValue(resposta({ ...VAZIO, titulo: "Preparação e validação do aplicativo" }));
+    const resumo = await gerarResumoDaReuniao(ENTRADA);
+    expect(resumo.titulo).toBe("Preparação e validação do aplicativo");
+    const [sistema] = pedido().messages;
+    expect(sistema.content).toContain("- titulo: um título curto para a reunião, de até 80 caracteres, no mesmo idioma do resto");
+    expect(sistema.content).toContain("Sem emoji, sem data, sem aspas e sem nomes de pessoas ou rótulos de voz.");
+    const esquema = (pedido() as unknown as { response_format: { json_schema: { schema: { required: string[]; properties: Record<string, unknown> } } } }).response_format.json_schema.schema;
+    expect(esquema.required).toContain("titulo");
+    expect(esquema.properties.titulo).toMatchObject({ type: ["string", "null"], maxLength: 80 });
+  });
+
+  it("título sugerido vem conferido: sai o emoji do começo e as aspas; com rótulo de voz ou vazio, null", async () => {
+    invokeLLM.mockResolvedValue(resposta({ ...VAZIO, titulo: "📱 “Lançamento do app nas lojas.”" }));
+    expect((await gerarResumoDaReuniao(ENTRADA)).titulo).toBe("Lançamento do app nas lojas");
+    invokeLLM.mockResolvedValue(resposta({ ...VAZIO, titulo: "Combinados de {F2} e da Carla" }));
+    expect((await gerarResumoDaReuniao(ENTRADA)).titulo).toBeNull();
+    invokeLLM.mockResolvedValue(resposta({ ...VAZIO, titulo: null }));
+    expect((await gerarResumoDaReuniao(ENTRADA)).titulo).toBeNull();
+  });
+
+  it("G16: o resumo de uma reunião num idioma fora dos 10 da tela é escrito nele", async () => {
+    invokeLLM.mockResolvedValue(resposta(VAZIO));
+    await gerarResumoDaReuniao({ ...ENTRADA, idioma: "it" });
+    expect(pedido().messages[0].content).toContain("Escreva todo o texto em italiano.");
   });
 
   it("emoji que não é um emoji sai", async () => {
@@ -743,5 +770,39 @@ describe("a conferência com a reunião sintética da bancada (16/11)", () => {
       await resumir({});
       expect(pedido().messages[0].content).toContain("não emenda com reticências (\"[...]\") partes distantes da reunião");
     });
+  });
+});
+
+// Defeito 2 do teste manual T50 (23/11): o resumo da reunião juntada parecia
+// usar só o conteúdo da segunda reunião. A entrada separa as reuniões, e o
+// pedido manda cobrir todas.
+describe("a reunião juntada (H17): cada reunião separada na entrada do resumo", () => {
+  const falas: Segmento[] = [
+    { inicio: 5, fim: 9, falante: "F1", texto: "Ana abre a reunião do frete." },
+    { inicio: 300, fim: 304, falante: "F2", texto: "Bia aprova o orçamento." },
+    { inicio: 603, fim: 607, falante: "F3", texto: "Caio apresenta a feira." },
+    { inicio: 650, fim: 654, falante: "F3", texto: "E fecha o estande." },
+  ];
+
+  it("uma linha antes da primeira fala de cada reunião; a divisa fora das falas não conta", () => {
+    const { texto, reunioes } = entradaDoResumo("", falas, [600, 99_999, Number.NaN, 600]);
+    expect(reunioes).toBe(2);
+    expect(texto.split("\n")).toEqual([
+      separadorDaReuniao(1, 2), "{F1}: Ana abre a reunião do frete.", "{F2}: Bia aprova o orçamento.",
+      separadorDaReuniao(2, 2), "{F3}: Caio apresenta a feira. E fecha o estande.",
+    ]);
+    expect(entradaDoResumo("", falas).texto).not.toContain("===");
+  });
+
+  it("o pedido à IA leva a instrução de cobrir todas as reuniões, e a transcrição das duas", async () => {
+    invokeLLM.mockResolvedValue(resposta(VAZIO));
+    await gerarResumoDaReuniao({ transcricao: "", segmentos: falas, idioma: "pt-BR", iniciosDeReuniao: [600] });
+    const [sistema, usuario] = pedido().messages;
+    expect(sistema.content).toContain("Esta transcrição junta 2 reuniões gravadas em separado");
+    expect(usuario.content).toContain("Ana abre a reunião do frete.");
+    expect(usuario.content).toContain("Caio apresenta a feira.");
+    invokeLLM.mockClear();
+    await gerarResumoDaReuniao({ transcricao: "", segmentos: falas, idioma: "pt-BR" });
+    expect(pedido().messages[0].content).not.toContain("reuniões gravadas em separado");
   });
 });

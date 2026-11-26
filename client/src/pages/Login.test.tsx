@@ -36,12 +36,23 @@ vi.mock("@/lib/trpc", () => ({
         },
       },
     },
+    // As chaves de acesso (A7) ficam desligadas aqui: os casos delas estão em
+    // Login.chaves-de-acesso.test.tsx.
+    chavesDeAcesso: {
+      estado: { useQuery: () => ({ data: { disponivel: false } }) },
+      opcoesDeEntrada: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      entrar: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      opcoesDeCadastro: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+      cadastrar: { useMutation: () => ({ mutateAsync: vi.fn() }) },
+    },
   },
 }));
 vi.mock("wouter", () => ({
   Link: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useLocation: () => ["/login", duble.navigate],
 }));
+// "Continuar com Google" (A8) tem o teste dele (components/ContinuarComGoogle.test.tsx).
+vi.mock("@/components/ContinuarComGoogle", () => ({ ContinuarComGoogle: () => null }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 // O hook de verdade fala com o tRPC (auth.me); aqui ele devolve a sessão que cada caso pede.
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => duble.sessao }));

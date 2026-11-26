@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import i18n from "@/i18n";
 import { CLASSE_DA_IMPRESSAO, DocumentoDaReuniao, ImpressaoDaReuniao, type ReuniaoExportada } from "./ImpressaoDaReuniao";
@@ -28,6 +28,7 @@ const REUNIAO: ReuniaoExportada = {
     { secao: "decision", assunto: null, texto: "A entrega fica para dezembro", responsavel: null, prazo: null, feita: false },
   ],
   transcricao: {
+    editada: false,
     texto: null,
     falas: [
       { inicio: 0, fim: 4, falante: "F1", texto: "Bom dia." },
@@ -87,13 +88,21 @@ describe("O PDF da reunião em pt-BR", () => {
   });
 
   it("o rodapé diz de onde e quando o PDF saiu", () => {
-    expect(documento()).toHaveTextContent("Exportado da WRW em 16 de novembro de 2026");
+    expect(documento()).toHaveTextContent("Exportado da Marquesa Global Match em 16 de novembro de 2026");
   });
 
   it("sem item confirmado, o resumo não aparece; a transcrição sem falas sai como texto corrido", () => {
     const artigo = documento({ ...REUNIAO, itens: [], transcricao: { texto: "Linha um.\nLinha dois.", falas: [] } });
     expect(titulos(2)).toEqual(["Transcrição"]);
     expect(artigo.querySelector(".documento-da-reuniao__texto-corrido")?.textContent).toBe("Linha um.\nLinha dois.");
+  });
+
+  it("a transcrição que a dona editou (H18) sai com a marca de revisada; a que não foi editada, sem ela", () => {
+    const editada = documento({ ...REUNIAO, transcricao: { ...REUNIAO.transcricao!, editada: true } });
+    expect(editada).toHaveTextContent("Transcrição revisada por quem gravou a reunião.");
+    cleanup();
+    const daIA = documento({ ...REUNIAO, transcricao: { ...REUNIAO.transcricao!, editada: false } });
+    expect(daIA).not.toHaveTextContent("revisada");
   });
 
   it("sem transcrição, o aviso de que ela não está disponível; sem emoji e sem duração, só o título e a data", () => {
@@ -129,7 +138,7 @@ describe("O PDF da reunião em árabe, com a tela em pt-BR", () => {
     expect(within(falas[0]).getByText("00:00")).toHaveAttribute("dir", "ltr");
     expect(falas[1]).toHaveTextContent("مقطع لم يُستلم");
     expect(artigo.querySelector("header")).toHaveTextContent("نوفمبر");
-    expect(artigo.querySelector("footer")).toHaveTextContent(/^تم التصدير من WRW في .*نوفمبر/);
+    expect(artigo.querySelector("footer")).toHaveTextContent(/^تم التصدير من Marquesa Global Match في .*نوفمبر/);
   });
 });
 

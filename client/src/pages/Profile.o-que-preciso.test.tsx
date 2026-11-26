@@ -34,6 +34,9 @@ vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ user: { name: "Ana",
 vi.mock("@/components/ExcluirMinhaConta", () => ({ ExcluirMinhaConta: () => null }));
 // A seção da Google Agenda (H16b) tem o teste dela (ConexaoGoogleAgenda.test.tsx).
 vi.mock("@/components/ConexaoGoogleAgenda", () => ({ ConexaoGoogleAgenda: () => null }));
+vi.mock("@/components/PerfilDeVoz", () => ({ PerfilDeVoz: () => null }));
+vi.mock("@/components/ChavesDeAcesso", () => ({ ChavesDeAcesso: () => null }));
+vi.mock("@/components/ContaGoogleNoPerfil", () => ({ ContaGoogleNoPerfil: () => null }));
 vi.mock("@/components/TravaDoApp", () => ({ TravaDoApp: () => null }));
 vi.mock("@/components/QualificacaoDoPerfil", () => ({ QualificacaoDoPerfil: () => null }));
 vi.mock("wouter", () => ({ Link: ({ children }: { children: React.ReactNode }) => <>{children}</> }));

@@ -1,5 +1,6 @@
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { limparGravacoesVencidas, VarreduraInterrompida, type ResultadoDaVarredura } from "./meeting-service";
+import { esvaziarLixeiraVencida } from "./lixeira-de-reunioes";
 import { createAuditLog } from "./security";
 
 /**
@@ -30,6 +31,13 @@ import { createAuditLog } from "./security";
  *   falha durar, para um bucket fora do ar não encher audit_logs a cada 5 min.
  * - Desligamento (SIGTERM do Render): pararVarreduraDeGravacoes, chamado no
  *   desligar de server/_core/index.ts junto com as filas.
+ * - A lixeira das reuniões (H7d) vence no mesmo laço: depois do áudio, cada
+ *   passada exclui de vez as reuniões que estão na lixeira há mais de 30 dias
+ *   (esvaziarLixeiraVencida, em server/lixeira-de-reunioes.ts), com ou sem
+ *   bucket (sem ele, o áudio delas fica como ponteiro vencido, como na
+ *   exclusão de sempre). A que excluiu algo vai para a auditoria
+ *   (CRON_TRASH_PURGED, só as contagens). O erro dela é log e não segura a do
+ *   áudio, nem a do áudio segura a dela.
  */
 
 /** Intervalo entre o fim de uma passada e o começo da seguinte. */
@@ -68,7 +76,32 @@ async function auditarApagadas(origem: Origem, resultado: ResultadoDaVarredura) 
   }).catch(() => {});
 }
 
+/** A lixeira vencida (H7d): nunca lança; o erro (o banco fora do ar, por exemplo) vai para o log. */
+async function passadaDaLixeira(origem: Origem): Promise<void> {
+  try {
+    const resultado = await esvaziarLixeiraVencida({ deveParar: () => parada });
+    if (resultado.apagadas > 0) {
+      console.warn(`[${origem}] Reuniões da lixeira vencida: ${resultado.apagadas} de ${resultado.encontradas} excluídas de vez.`);
+      // createAuditLog não lança: a falha da auditoria vai para o log dele.
+      await createAuditLog({
+        userId: null, action: "CRON_TRASH_PURGED", resource: "meetings", status: "success", riskLevel: "low",
+        details: { ...resultado, origem },
+      });
+    }
+  } catch (erro) {
+    console.error(`[${origem}] Não foi possível excluir as reuniões da lixeira vencida:`, descreverErroDeBanco(erro));
+  }
+}
+
 async function umaPassada(origem: Origem): Promise<ResultadoDaVarredura | null> {
+  try {
+    return await passadaDoAudio(origem);
+  } finally {
+    await passadaDaLixeira(origem);
+  }
+}
+
+async function passadaDoAudio(origem: Origem): Promise<ResultadoDaVarredura | null> {
   if (!process.env.STORAGE_BUCKET) return null;
   let resultado: ResultadoDaVarredura;
   try {

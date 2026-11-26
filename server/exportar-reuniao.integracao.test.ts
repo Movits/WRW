@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 import { auditLogs, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } from "../drizzle/schema";
 import { exportarReuniao, type ReuniaoExportada } from "./exportar-reuniao";
 import { ACAO_REUNIAO_EXPORTADA, MENSAGEM_EXPORTAR_SO_PRONTA } from "@shared/exportar-reuniao";
@@ -99,12 +100,15 @@ describe.skipIf(!temBanco)("Exportar a reunião no banco (integração)", () => 
   afterAll(async () => {
     const db = await getDb();
     if (!db) return;
-    await db.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, DONA));
-    await db.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, DONA));
-    await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-    await db.delete(meetings).where(eq(meetings.ownerId, DONA));
+    // Pela chave, uma linha por vez (server/test/apagar-pela-chave.ts): o DELETE
+    // pela dona varre a tabela quando ela tem a maior parte das linhas, e trava
+    // o INSERT de várias linhas de outro arquivo (ER_LOCK_DEADLOCK).
+    await apagarPelaChave(db, meetingSummaryItems, eq(meetingSummaryItems.ownerId, DONA));
+    await apagarPelaChave(db, meetingSummaries, eq(meetingSummaries.ownerId, DONA));
+    await apagarPelaChave(db, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+    await apagarPelaChave(db, meetings, eq(meetings.ownerId, DONA));
     await db.delete(users).where(inArray(users.openId, [DONA, OUTRA]));
-    await db.delete(auditLogs).where(inArray(auditLogs.userId, [CONTA, OUTRA_CONTA]));
+    await apagarPelaChave(db, auditLogs, inArray(auditLogs.userId, [CONTA, OUTRA_CONTA]));
   });
 
   it("só os itens confirmados saem, na ordem do resumo, com o emoji, as falas, os tempos e os nomes válidos", async () => {
@@ -123,6 +127,7 @@ describe.skipIf(!temBanco)("Exportar a reunião no banco (integração)", () => 
       ],
       transcricao: {
         texto: null,
+        editada: false,
         falas: [
           { inicio: 0, fim: 4, falante: "F1", texto: "Bom dia." },
           { inicio: 4, fim: 60, falante: "", texto: "", lacuna: true },
@@ -137,7 +142,7 @@ describe.skipIf(!temBanco)("Exportar a reunião no banco (integração)", () => 
 
   it("a reunião de antes das falas sai com o texto corrido, no idioma dela, e sem os itens de outra reunião", async () => {
     const exportada = await exportarReuniao(DONA, ANTIGA, PEDIDO);
-    expect(exportada.transcricao).toEqual({ texto: "Texto corrido da reunião antiga.", falas: [] });
+    expect(exportada.transcricao).toEqual({ texto: "Texto corrido da reunião antiga.", falas: [], editada: false });
     expect(exportada.idioma).toBe("ar");
     expect(exportada.itens).toEqual([{ secao: "action", assunto: null, texto: "Item confirmado de outra reunião", responsavel: null, prazo: null, feita: false }]);
   });

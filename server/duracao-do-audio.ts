@@ -14,7 +14,9 @@
  * - MP3/MP2 e AAC em ADTS: quadro a quadro;
  * - Opus em Ogg e em WebM (o que o MediaRecorder grava): pelo byte TOC de cada pacote;
  * - AAC em MP4/M4A, inclusive fragmentado (o que o Safari grava): nº de
- *   quadros da tabela × 1024 ÷ a taxa do AudioSpecificConfig.
+ *   quadros da tabela × 1024 ÷ a taxa do AudioSpecificConfig;
+ * - FLAC: quadro a quadro, pelo tamanho do bloco de cada cabeçalho (H9b, a
+ *   importação em partes; o envio único não recebe FLAC).
  * Forjar esses campos não ajuda a passar do limite: taxa ou alinhamento falsos
  * fazem o decodificador tocar outro áudio (acelerado, ruído), e a contagem de
  * quadros é a própria lista que o decodificador lê.
@@ -32,18 +34,34 @@ const u32 = (b: Buffer, pos: number) => (pos + 4 <= b.length ? b.readUInt32BE(po
 
 /** Segundos de áudio, ou null quando o formato não é reconhecido ou não tem áudio mensurável. */
 export function medirDuracaoDoAudio(audio: Buffer): number | null {
+  return analisarAudio(audio).segundos;
+}
+
+/**
+ * A duração (como medirDuracaoDoAudio) e os codecs das faixas de áudio que a
+ * medida achou, pelo nome que o contêiner dá: no MP4, o código da entrada
+ * (`mp4a` é o AAC, `alac`, `ac-3`, `Opus`...); no Matroska e no WebM, o
+ * CodecID (`A_OPUS`, `A_VORBIS`, `A_AC3`...); no Ogg, `opus` ou `vorbis`;
+ * no WAV, `wav:` e o código do formato (1 é o PCM; 2, o ADPCM...); no FLAC,
+ * `flac`; e o resto, `mpeg`. Serve à rota das partes (G14, parte 2), que
+ * converte em MP3 a parte de um codec que o Gemini não lista
+ * (precisaConverterParaOGemini, em server/fatias-de-reuniao.ts).
+ */
+export function analisarAudio(audio: Buffer): { segundos: number | null; codecs: string[] } {
   let segundos: number | null;
+  const codecs: string[] = [];
   try {
     const b = audio.subarray(inicioDepoisDoId3(audio));
-    if (ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 4) === "WAVE") segundos = duracaoWav(b);
-    else if (ascii(b, 0, 4) === "OggS") segundos = duracaoOgg(b);
-    else if (u32(b, 0) === 0x1a45dfa3) segundos = duracaoMatroska(b);
-    else if (CAIXAS_INICIAIS_MP4.has(ascii(b, 4, 4))) segundos = duracaoMp4(b);
-    else segundos = duracaoMpeg(b);
+    if (ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 4) === "WAVE") segundos = duracaoWav(b, codecs);
+    else if (ascii(b, 0, 4) === "OggS") segundos = duracaoOgg(b, codecs);
+    else if (ascii(b, 0, 4) === "fLaC") { codecs.push("flac"); segundos = duracaoFlac(b); }
+    else if (u32(b, 0) === 0x1a45dfa3) segundos = duracaoMatroska(b, codecs);
+    else if (CAIXAS_INICIAIS_MP4.has(ascii(b, 4, 4))) segundos = duracaoMp4(b, codecs);
+    else { codecs.push("mpeg"); segundos = duracaoMpeg(b); }
   } catch {
     segundos = null;
   }
-  return segundos !== null && Number.isFinite(segundos) && segundos > 0 ? segundos : null;
+  return { segundos: segundos !== null && Number.isFinite(segundos) && segundos > 0 ? segundos : null, codecs };
 }
 
 /** Etiquetas ID3v2 antes do áudio (MP3 e, às vezes, outros formatos). */
@@ -61,7 +79,7 @@ function inicioDepoisDoId3(b: Buffer): number {
 /** PCM, ponto flutuante, A-law e µ-law: o decodificador lê taxa × alinhamento. */
 const FORMATOS_PCM = new Set([1, 3, 6, 7]);
 
-function duracaoWav(b: Buffer): number | null {
+function duracaoWav(b: Buffer, codecs: string[] = []): number | null {
   let bytesPorSegundo = 0;
   let bytesDeDados = 0;
   let pos = 12;
@@ -76,6 +94,7 @@ function duracaoWav(b: Buffer): number | null {
       const alinhamento = b.readUInt16LE(dados + 12);
       const subformato = formato === 0xfffe && tamanho >= 26 && dados + 26 <= b.length ? b.readUInt16LE(dados + 24) : formato;
       bytesPorSegundo = FORMATOS_PCM.has(subformato) && alinhamento > 0 ? taxa * alinhamento : declarado;
+      codecs.push(`wav:${subformato}`);
     } else if (id === "data") {
       // Gravação em fluxo deixa o tamanho em 0 ou maior que o arquivo: vale o que chegou.
       const disponiveis = b.length - dados;
@@ -121,7 +140,7 @@ type FluxoOgg = {
   tamanhoPendente: number;
 };
 
-function duracaoOgg(b: Buffer): number | null {
+function duracaoOgg(b: Buffer, codecs: string[] = []): number | null {
   const fluxos: Record<number, FluxoOgg> = {};
   const seriais: number[] = [];
 
@@ -193,6 +212,7 @@ function duracaoOgg(b: Buffer): number | null {
   for (const serial of seriais) {
     const fluxo = fluxos[serial];
     if (fluxo.codec === "ignorado") continue;
+    codecs.push(fluxo.codec ?? "desconhecido");
     if (fluxo.codec === "opus") maior = Math.max(maior, fluxo.amostrasOpus / 48000);
     else if (fluxo.codec === "vorbis" && fluxo.taxaVorbis > 0) {
       // Todo pacote de áudio Vorbis rende ao menos meio bloco curto: o piso
@@ -243,7 +263,7 @@ const lerInteiro = (b: Buffer, inicio: number, fim: number) => {
   return valor;
 };
 
-function duracaoMatroska(b: Buffer): number | null {
+function duracaoMatroska(b: Buffer, codecs: string[] = []): number | null {
   type Faixa = { numero: number; tipo: number; codec: string };
   const faixas: Faixa[] = [];
   const amostrasOpusPorFaixa: Record<number, number> = {};
@@ -343,6 +363,7 @@ function duracaoMatroska(b: Buffer): number | null {
   const audios = faixas.filter(f => f.tipo === 2 || (f.tipo === 0 && f.codec.startsWith("A_")));
   let maior = 0;
   for (const f of audios) {
+    codecs.push(f.codec);
     const segundos = f.codec === "A_OPUS"
       ? (amostrasOpusPorFaixa[f.numero] ?? 0) / 48000
       : (ultimoInicioNsPorFaixa[f.numero] ?? 0) / 1e9;
@@ -375,7 +396,7 @@ type FaixaMp4 = {
   amostrasTabela: number; amostrasFragmentos: number; unidades: number;
 };
 
-function duracaoMp4(b: Buffer): number | null {
+function duracaoMp4(b: Buffer, codecs: string[] = []): number | null {
   const faixas: FaixaMp4[] = [];
   const duracaoPadraoPorFaixa: Record<number, number> = {};
   let faixa: FaixaMp4 | null = null;
@@ -553,11 +574,116 @@ function duracaoMp4(b: Buffer): number | null {
   let maior = 0;
   for (const f of faixas) {
     if (f.manipulador !== "soun") continue;
+    codecs.push(f.codec);
     const amostras = f.amostrasTabela + f.amostrasFragmentos;
     const segundos = f.taxaAac > 0 ? (amostras * f.quadroAac) / f.taxaAac : f.escala > 0 ? f.unidades / f.escala : 0;
     maior = Math.max(maior, segundos);
   }
   return maior || null;
+}
+
+// ─── FLAC ────────────────────────────────────────────────────────────────────
+
+/** As taxas dos códigos 1 a 11 do cabeçalho do quadro FLAC (RFC 9639, §9.1.2). */
+const TAXAS_FLAC = [0, 88200, 176400, 192000, 8000, 16000, 22050, 24000, 32000, 44100, 48000, 96000];
+/**
+ * O piso da taxa de cada quadro na conta. O quadro com a taxa escrita no
+ * próprio cabeçalho pode dizer 1 Hz, e um falso começo de quadro no meio do
+ * áudio com 1 Hz faria a medida explodir (4.096 amostras viram 68 min). Áudio
+ * de verdade não tem menos de 8 kHz, e o quadro forjado abaixo disso toca
+ * desacelerado, um ruído que não se transcreve.
+ */
+const TAXA_FLAC_MINIMA = 8000;
+const CRC8_FLAC = (() => {
+  const tabela = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = c & 0x80 ? ((c << 1) ^ 0x07) & 0xff : (c << 1) & 0xff;
+    tabela[i] = c;
+  }
+  return tabela;
+})();
+
+/**
+ * O quadro FLAC que começa em `p`, ou null: o sincronismo, os campos sem os
+ * valores reservados, o número (do quadro ou da amostra) em UTF-8, o CRC-8 do
+ * cabeçalho e um cabeçalho de subquadro válido logo depois, como o
+ * decodificador exige para tocar o quadro.
+ */
+function quadroFlacEm(b: Buffer, p: number, taxaDoStreaminfo: number): { amostras: number; taxa: number; cabecalho: number } | null {
+  if (p + 6 > b.length || b[p] !== 0xff || (b[p + 1] & 0xfe) !== 0xf8) return null;
+  const codigoDoBloco = b[p + 2] >> 4;
+  const codigoDaTaxa = b[p + 2] & 0x0f;
+  const canais = b[p + 3] >> 4;
+  const bitsPorAmostra = (b[p + 3] >> 1) & 7;
+  if (codigoDoBloco === 0 || codigoDaTaxa === 15 || canais > 10 || bitsPorAmostra === 3 || (b[p + 3] & 1)) return null;
+  let i = p + 4;
+  const primeiro = b[i++];
+  const extras = primeiro < 0x80 ? 0 : (primeiro & 0xe0) === 0xc0 ? 1 : (primeiro & 0xf0) === 0xe0 ? 2 : (primeiro & 0xf8) === 0xf0 ? 3
+    : (primeiro & 0xfc) === 0xf8 ? 4 : (primeiro & 0xfe) === 0xfc ? 5 : primeiro === 0xfe ? 6 : -1;
+  if (extras < 0) return null;
+  for (let k = 0; k < extras; k++, i++) if (i >= b.length || (b[i] & 0xc0) !== 0x80) return null;
+  let amostras: number;
+  if (codigoDoBloco === 1) amostras = 192;
+  else if (codigoDoBloco <= 5) amostras = 576 << (codigoDoBloco - 2);
+  else if (codigoDoBloco === 6) amostras = b[i++] + 1;
+  else if (codigoDoBloco === 7) { amostras = ((b[i] << 8) | b[i + 1]) + 1; i += 2; }
+  else amostras = 256 << (codigoDoBloco - 8);
+  let taxa: number;
+  if (codigoDaTaxa === 0) taxa = taxaDoStreaminfo;
+  else if (codigoDaTaxa <= 11) taxa = TAXAS_FLAC[codigoDaTaxa];
+  else if (codigoDaTaxa === 12) taxa = b[i++] * 1000;
+  else if (codigoDaTaxa === 13) { taxa = (b[i] << 8) | b[i + 1]; i += 2; }
+  else { taxa = ((b[i] << 8) | b[i + 1]) * 10; i += 2; }
+  // O CRC-8 e o primeiro byte do subquadro precisam estar no buffer.
+  if (i + 1 >= b.length || !(taxa > 0) || !(amostras > 0)) return null;
+  let crc = 0;
+  for (let k = p; k < i; k++) crc = CRC8_FLAC[crc ^ b[k]];
+  if (crc !== b[i]) return null;
+  // Subquadro: o bit de enchimento é zero, e o tipo não é reservado
+  // (000000 constante, 000001 literal, 001000 a 001100 fixo, 1xxxxx LPC).
+  const subquadro = b[i + 1];
+  const tipo = (subquadro >> 1) & 0x3f;
+  if (subquadro & 0x80 || !(tipo <= 1 || (tipo >= 8 && tipo <= 12) || tipo >= 32)) return null;
+  return { amostras, taxa: Math.max(taxa, TAXA_FLAC_MINIMA), cabecalho: i + 1 - p };
+}
+
+/**
+ * FLAC: soma o bloco de cada quadro, à taxa que o quadro usa (a do STREAMINFO
+ * quando ele não escreve a dele). O total de amostras do STREAMINFO não conta:
+ * é um campo, e forjá-lo não muda o que o decodificador entrega. Os quadros não
+ * dizem o próprio tamanho; a busca acha cada cabeçalho que confere (o mesmo que
+ * o decodificador exige para tocar o quadro, inclusive com o CRC-16 do fim
+ * estragado, que ele não confere por padrão). Um falso começo de quadro no meio
+ * do áudio, que passa por tudo isso, é raro e só aumenta a medida.
+ */
+function duracaoFlac(b: Buffer): number | null {
+  let pos = 4;
+  let taxaDoStreaminfo = 0;
+  for (let ultimo = false; !ultimo;) {
+    if (pos + 4 > b.length) return null;
+    ultimo = (b[pos] & 0x80) !== 0;
+    const tipo = b[pos] & 0x7f;
+    const tamanho = (b[pos + 1] << 16) | (b[pos + 2] << 8) | b[pos + 3];
+    if (tipo === 127) return null;
+    if (tipo === 0 && tamanho >= 34 && pos + 4 + 34 <= b.length) taxaDoStreaminfo = (b[pos + 14] << 12) | (b[pos + 15] << 4) | (b[pos + 16] >> 4);
+    pos += 4 + tamanho;
+  }
+  let segundos = 0;
+  let quadros = 0;
+  while (pos < b.length) {
+    const candidato = b.indexOf(0xff, pos);
+    if (candidato < 0) break;
+    const quadro = quadroFlacEm(b, candidato, taxaDoStreaminfo);
+    if (!quadro) {
+      pos = candidato + 1;
+      continue;
+    }
+    segundos += quadro.amostras / quadro.taxa;
+    quadros++;
+    pos = candidato + quadro.cabecalho;
+  }
+  return quadros ? segundos : null;
 }
 
 // ─── MP3 / MP2 / AAC em ADTS ─────────────────────────────────────────────────

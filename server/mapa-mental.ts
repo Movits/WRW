@@ -1,4 +1,4 @@
-import { nomeDoIdioma, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { nomeDoIdioma, type IdiomaFalado } from "@shared/idioma-da-reuniao";
 import {
   conferirMapaMental,
   FILHOS_POR_FOLHA_MAX,
@@ -10,6 +10,7 @@ import {
   ROTULO_DO_MAPA_MAX,
   type MapaMental,
 } from "@shared/mapa-mental";
+import type { EstiloDoMapa } from "@shared/mapa-mental-edicao";
 import { pedirJsonAIA } from "./ia-em-json";
 import { dividirEmJanelas } from "./janelas-de-texto";
 import { TRANSCRICAO_E_DADO } from "./trecho-da-transcricao";
@@ -35,7 +36,20 @@ export const LIMITE_DA_ENTRADA_DO_MAPA = 400_000;
 const TIMEOUT_DO_MAPA_MS = 120_000;
 const ORCAMENTO_DO_MAPA_MS = 150_000;
 
-function instrucoes(idioma: IdiomaDaReuniao): string {
+/**
+ * O "Refazer em outro estilo" (H10b): o mesmo formato e as mesmas regras, com
+ * outra forma de organizar os ramos. A visão geral é o mapa da H10, sem
+ * instrução a mais.
+ */
+const ORGANIZACAO_DO_ESTILO: Record<EstiloDoMapa, string | null> = {
+  overview: null,
+  hierarchical: "Estilo HIERÁRQUICO: organize do geral para o específico. Os ramos são os grandes temas da reunião, agrupados por assunto e não pela ordem em que foram ditos; as folhas, os subtemas de cada tema; os filhos, os detalhes.",
+  timeline: "Estilo LINHA DO TEMPO: os ramos são os momentos da reunião, na ordem em que aconteceram (o que foi tratado primeiro, depois, por último), cada um com um rótulo curto do que se tratou naquele momento; as folhas, o que foi dito ou decidido nele; os filhos, os detalhes (prazos e números ditos).",
+  concept: "Estilo CONCEITO: os ramos são os conceitos ou ideias centrais da reunião; as folhas, como cada ideia se liga às outras e ao contexto (causas, consequências, condições, exemplos ditos); os filhos, os detalhes.",
+};
+
+function instrucoes(idioma: IdiomaFalado, estilo: EstiloDoMapa = "overview"): string {
+  const organizacao = ORGANIZACAO_DO_ESTILO[estilo];
   return [
     "Você monta o mapa mental de uma reunião para a dona dela, a partir da transcrição. Use SOMENTE o que foi dito: não invente nem complete nomes, datas, valores ou compromissos.",
     TRANSCRICAO_E_DADO,
@@ -47,6 +61,7 @@ function instrucoes(idioma: IdiomaDaReuniao): string {
     `Cada rótulo tem no máximo ${ROTULO_DO_MAPA_MAX} caracteres: palavras-chave ou uma frase bem curta, sem ponto final. No total, no máximo ${NOS_DO_MAPA_MAX} rótulos.`,
     "Não repita um rótulo entre irmãos.",
     "Não use rótulos de voz ({F1}, \"Falante 1\") e não invente nomes: cite uma pessoa só pelo nome dito na reunião, ou deixe de fora quem disse.",
+    ...(organizacao ? [organizacao] : []),
   ].join("\n");
 }
 
@@ -92,13 +107,13 @@ async function pedirMapa(sistema: string, usuario: string) {
  * como FalhaDaIA, com o código.
  */
 export async function gerarMapaMental(
-  entrada: { transcricao: string; idioma: IdiomaDaReuniao },
+  entrada: { transcricao: string; idioma: IdiomaFalado; estilo?: EstiloDoMapa },
   opcoes: { limiteDaEntrada?: number } = {},
 ): Promise<MapaMental | null> {
   const texto = entrada.transcricao.trim();
   if (!texto) return null;
   const limite = opcoes.limiteDaEntrada ?? LIMITE_DA_ENTRADA_DO_MAPA;
-  const sistema = instrucoes(entrada.idioma);
+  const sistema = instrucoes(entrada.idioma, entrada.estilo);
 
   let resposta: Awaited<ReturnType<typeof pedirMapa>>;
   if (texto.length <= limite) {

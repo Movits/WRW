@@ -6,9 +6,14 @@ import helmet from "helmet";
 import compression from "compression";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import { CHAMADAS_POR_LOTE_MAX } from "@shared/lote-do-trpc";
 import { registerStorageProxy } from "./storageProxy";
 import { registrarRotasDoLinkAberto } from "../link-aberto-da-reuniao";
+import { registrarRotaDoAudioDaConsulta } from "../consulta-da-administracao";
+import { registrarRotaDoAnexoDoLink } from "../anexos-do-resumo";
 import { registrarRotasDaGoogleAgenda } from "../rotas-da-google-agenda";
+import { registrarRotasDeEntrarComGoogle } from "../rotas-de-entrar-com-google";
+import { registrarAssetLinks } from "../assetlinks";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -17,6 +22,9 @@ import { autenticarCron } from "./cron";
 import { cleanupExpiredSessions, createAuditLog } from "../security";
 import { corpoGrandeParaUploads } from "./corpo-grande-para-uploads";
 import { registrarRotaDasPartes, tratarCorpoGrandeDasPartes } from "./rota-das-partes";
+import { registrarRotaDoAudioBaixado } from "./rota-do-audio-baixado";
+import { registrarRotaDoDocumento } from "./rota-do-documento";
+import { registrarArquivosDoLeitorDePdf } from "./arquivos-do-leitor-de-pdf";
 import { criarDiagnosticoDoIp, criarLimiteDaApi, criarLimiteGeral } from "./limite-de-requisicoes";
 import { linhaDosModelosDeIa } from "./modelos-de-ia";
 import { linhaDoRaciocinioDeIa } from "./raciocinio-de-ia";
@@ -204,6 +212,14 @@ async function startServer() {
   // próprio leitor de corpo (express.raw, até 16 MB) e PRECISA vir antes do
   // express.json e do urlencoded, que senão leriam o corpo primeiro. Guarda:
   // server/agendados-autenticacao.test.ts confere a ordem no index.ts real.
+  // O documento da reunião (H12: o PDF, ou as fotos de um texto juntas num PDF)
+  // chega do mesmo jeito, cru, até 15 MB; vem antes do tratador do corpo
+  // grande, que responde o 413 em JSON às duas rotas de /api/reunioes/. O GET
+  // do mesmo endereço devolve o PDF guardado à dona, para a tela mostrar as
+  // páginas, e os decodificadores de imagem do leitor de PDF (H12b) saem por
+  // /pdfjs/<versão>/, sem sessão (server/_core/arquivos-do-leitor-de-pdf.ts).
+  registrarRotaDoDocumento(app);
+  registrarArquivosDoLeitorDePdf(app);
   registrarRotaDasPartes(app);
   app.use(tratarCorpoGrandeDasPartes);
 
@@ -212,14 +228,12 @@ async function startServer() {
   // procedimento da URL (ver server/_core/corpo-grande-para-uploads.ts).
   app.use(corpoGrandeParaUploads);
 
-  // A gravação de reunião usa Base64 (até 10 MB de áudio, ~14 MB no JSON).
-  // O limite ampliado é aplicado somente ao procedimento privado de reunião.
-  app.use("/api/trpc/meetings.submitRecording", express.json({ limit: "15mb" }));
-
   // Mesmo caso para os anexos de contexto (fotos/PDF de até 10 MB em Base64):
   // sem este recorte, o limite global de 5 MB devolveria 413 para qualquer
   // arquivo acima de ~3,7 MB — antes de o tRPC sequer validar.
   app.use("/api/trpc/contexts.uploadMedia", express.json({ limit: "15mb" }));
+  // As fotos e os desenhos do resumo da reunião (H4g e H4h), até 10 MB de imagem.
+  app.use("/api/trpc/meetings.anexarAoResumo", express.json({ limit: "15mb" }));
 
   // Mesmo caso para foto e cartão de visita do contato (etapa 1, até 10 MB em
   // Base64 — MAX_CONTACT_IMAGE_BYTES em contact-media.ts): sem este recorte,
@@ -243,10 +257,26 @@ async function startServer() {
   // O áudio do link aberto da reunião, pelo token e sem sessão, e a página
   // /r/{token} fora dos buscadores (server/link-aberto-da-reuniao.ts).
   registrarRotasDoLinkAberto(app);
+  // O áudio da consulta da administração (R1a): sessão de staff e consulta aberta na última hora.
+  registrarRotaDoAudioDaConsulta(app);
+  // As fotos e os desenhos do resumo pelo link aberto (H4g e H4h), com a mesma senha.
+  registrarRotaDoAnexoDoLink(app);
+  // O download do áudio da reunião (H8c): só com a ficha de uso único que
+  // meetings.baixarAudio emitiu para a sessão da dona; o arquivo é convertido
+  // pelo ffmpeg enquanto sai (server/_core/rota-do-audio-baixado.ts).
+  registrarRotaDoAudioBaixado(app);
   // A ida à Google e a volta da conexão com a Google Agenda (H16b), antes do
   // Vite e do estático, que responderiam a página no lugar delas. Sem as
   // variáveis, 404 (server/rotas-da-google-agenda.ts).
   registrarRotasDaGoogleAgenda(app);
+  // Continuar com Google (A8): a ida e a volta da entrada, do cadastro e do
+  // ligar no Perfil. Sem ENTRAR_COM_GOOGLE=ligado e o cliente OAuth, 404
+  // (server/rotas-de-entrar-com-google.ts).
+  registrarRotasDeEntrarComGoogle(app);
+  // O Digital Asset Links do app das lojas (M1), antes do Vite e do estático:
+  // o express.static ignora /.well-known e o pedido cairia no index.html
+  // (server/assetlinks.ts).
+  registrarAssetLinks(app);
 
   // ============================================================
   // JOB PERIÓDICO: Limpeza de sessões expiradas
@@ -367,6 +397,9 @@ async function startServer() {
     createExpressMiddleware({
       router: appRouter,
       createContext,
+      // O lote tem teto (shared/lote-do-trpc.ts): sem ele, um pedido levava
+      // centenas de chamadas a um procedimento caro, e o limite contava uma.
+      maxBatchSize: CHAMADAS_POR_LOTE_MAX,
     })
   );
 

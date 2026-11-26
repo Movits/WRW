@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 // O bucket é dublê: a leitura do áudio vencido o tira do bucket com todas as
 // versões, e este arquivo não pode falar com um bucket de verdade.
@@ -116,13 +117,13 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
   afterAll(async () => {
     const db = await getDb();
     if (!db) return;
-    await db.delete(meetingRecordings).where(eq(meetingRecordings.ownerId, DONA));
-    await db.delete(meetingEntities).where(eq(meetingEntities.ownerId, DONA));
-    await db.delete(meetingContactSuggestions).where(eq(meetingContactSuggestions.ownerId, DONA));
-    await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-    await db.delete(meetings).where(eq(meetings.ownerId, DONA));
+    await apagarPelaChave(db, meetingRecordings, eq(meetingRecordings.ownerId, DONA));
+    await apagarPelaChave(db, meetingEntities, eq(meetingEntities.ownerId, DONA));
+    await apagarPelaChave(db, meetingContactSuggestions, eq(meetingContactSuggestions.ownerId, DONA));
+    await apagarPelaChave(db, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+    await apagarPelaChave(db, meetings, eq(meetings.ownerId, DONA));
     await db.delete(users).where(inArray(users.openId, [DONA, OUTRA]));
-    await db.delete(auditLogs).where(eq(auditLogs.userId, PROVA.userId));
+    await apagarPelaChave(db, auditLogs, eq(auditLogs.userId, PROVA.userId));
   });
 
   it("pedidos simultâneos de ligar ficam com o MESMO link, e ligar de novo devolve o mesmo", async () => {
@@ -158,8 +159,22 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
 
   it("a resposta do link tem a lista fechada de chaves: nada além do que a página mostra", async () => {
     const vista = await verReuniaoPeloLink(await ligarLinkAberto(DONA, PRONTA, PROVA));
-    expect(Object.keys(vista).sort()).toEqual(["criadaEm", "gravacao", "gravacaoExpirada", "gravacaoSaindo", "titulo", "transcricao", "vozes"]);
-    expect(Object.keys(vista.transcricao!).sort()).toEqual(["idioma", "segmentos", "texto"]);
+    // audioIncluido (H23): se a dona deixou o áudio no link; nada da senha sai daqui.
+    // `documento` (H12): só o sim ou não de a reunião ter nascido de um
+    // documento, para a página trocar "Transcrição" por "Texto do documento";
+    // o arquivo dele nunca sai pelo link (documento-da-reuniao.integracao.test.ts).
+    // `juntadas` (H3c): as vozes que a dona juntou ({ F3: "F1" }), sem dado pessoal;
+    // `participante` (R1b): falso no link, verdadeiro na leitura da participante.
+    expect(Object.keys(vista).sort()).toEqual(["audioIncluido", "criadaEm", "documento", "gravacao", "gravacaoExpirada", "gravacaoSaindo", "juntadas", "participante", "titulo", "transcricao", "videoDoYoutube", "vozes"]);
+    expect(vista.participante).toBe(false);
+    expect(vista.juntadas).toEqual({});
+    expect(vista.documento).toBe(false);
+    // A reunião gravada não veio de um vídeo do YouTube (H13): o id do vídeo é nulo.
+    expect(vista.videoDoYoutube).toBeNull();
+    // `editada` (H18): só o sim ou não de a dona ter corrigido a transcrição;
+    // o texto da IA nunca sai pelo link (editar-transcricao.integracao.test.ts).
+    expect(Object.keys(vista.transcricao!).sort()).toEqual(["editada", "idioma", "segmentos", "texto"]);
+    expect(vista.transcricao!.editada).toBe(false);
     expect(Object.keys(vista.gravacao!).sort()).toEqual(["durationSeconds", "expiresAt", "mimeType", "partes", "url"]);
   });
 
@@ -273,7 +288,7 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
       expect(await chaveDoAudioDoLink(token, 2)).toBeNull();
       expect(await chaveDoAudioDoLink(token, 9)).toBeNull();
     } finally {
-      await db.delete(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, EM_PARTES));
+      await apagarPelaChave(db, meetingAudioSlices, eq(meetingAudioSlices.meetingId, EM_PARTES));
     }
   });
 
@@ -352,13 +367,16 @@ describe.skipIf(!temBanco)("Link aberto da reunião no banco (integração)", ()
       resource: "meetings", ipAddress: PROVA.ipAddress, userAgent: PROVA.userAgent, status: "success", riskLevel: "medium",
     });
     // A frase e o idioma que a dona viu, com o hash: a frase vai mudar com a revisão jurídica.
-    // Sem a versão (a aba de antes da H3b), a linha leva a 1.
+    // Sem a versão (a aba de antes da H3b), a linha leva a 1. E diz como o link
+    // ficou (H23): ligar sem escolher nada é o link de antes, sem senha e com o áudio.
     expect(depois.at(-1)!.details).toEqual({
       autorizacaoDasPessoas: true,
       versaoDaAutorizacao: 1,
       idioma: PROVA.idioma,
       textoExibido: PROVA.textoExibido,
       textoHash: crypto.createHash("sha256").update(PROVA.textoExibido).digest("hex"),
+      comSenha: false,
+      incluirAudio: true,
     });
     // A caixa que fala dos nomes das vozes grava a versão 2 (H3b).
     await ligarLinkAberto(DONA, PRONTA, { ...PROVA, versaoDaAutorizacao: 2 });

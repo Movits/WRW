@@ -26,3 +26,56 @@ export function vozesNoTexto(
   // trocado pelo próprio rótulo.
   return texto.replace(ROTULO_DE_VOZ, (_rotulo, falante: string) => nomes[falante]?.trim() || rotuloDaVoz(Number(falante.slice(1))));
 }
+
+/** Um pedaço do texto: o que a IA escreveu, ou o nome (ou o rótulo traduzido) de uma voz. */
+export type ParteDoTextoComVozes = { texto: string; voz: boolean };
+
+/**
+ * A mesma troca de vozesNoTexto, em pedaços: cada voz vem separada do resto,
+ * para a tela isolar a direção dela (<bdi>). O rótulo traduzido de uma voz num
+ * idioma da direita para a esquerda ("المتحدث 2") no começo de um item escrito
+ * em inglês viraria a direção do parágrafo inteiro, e o ponto final iria para o
+ * lado errado. Juntos, os pedaços dão o mesmo texto que vozesNoTexto.
+ */
+export function partesComVozes(
+  texto: string,
+  nomes: Readonly<Record<string, string>>,
+  rotuloDaVoz: (numero: number) => string,
+): ParteDoTextoComVozes[] {
+  const partes: ParteDoTextoComVozes[] = [];
+  let de = 0;
+  for (const achado of Array.from(texto.matchAll(ROTULO_DE_VOZ))) {
+    const inicio = achado.index ?? 0;
+    if (inicio > de) partes.push({ texto: texto.slice(de, inicio), voz: false });
+    const falante = achado[1];
+    partes.push({ texto: nomes[falante]?.trim() || rotuloDaVoz(Number(falante.slice(1))), voz: true });
+    de = inicio + achado[0].length;
+  }
+  if (de < texto.length) partes.push({ texto: texto.slice(de), voz: false });
+  return partes;
+}
+
+/**
+ * Os nomes que a tela usa, já com as vozes juntadas (H3c, "F3 é a mesma pessoa
+ * que F1"): a voz juntada leva o nome da principal ou, sem nome, o rótulo da
+ * principal ("Falante 1"). Com este mapa, vozesNoTexto, partesComVozes e a
+ * transcrição por falante mostram {F3} como a principal sem saber das
+ * juntadas. As vozes que não estão juntadas ficam como estão.
+ */
+export function nomesComJuntadas(
+  nomes: Readonly<Record<string, string>>,
+  juntadas: Readonly<Record<string, string>>,
+  rotuloDaVoz: (numero: number) => string,
+): Record<string, string> {
+  const saida: Record<string, string> = { ...nomes };
+  for (const [voz, principal] of Object.entries(juntadas)) {
+    saida[voz] = nomes[principal]?.trim() || rotuloDaVoz(Number(principal.slice(1)));
+  }
+  return saida;
+}
+
+/** As falas com a voz juntada trocada pela principal: o tempo de fala e o "ouvir só esta voz" somam as duas. */
+export function falasComJuntadas<T extends { falante: string }>(falas: readonly T[], juntadas: Readonly<Record<string, string>>): T[] {
+  if (!Object.keys(juntadas).length) return falas as T[];
+  return falas.map(fala => (fala.falante in juntadas ? { ...fala, falante: juntadas[fala.falante] } : fala));
+}

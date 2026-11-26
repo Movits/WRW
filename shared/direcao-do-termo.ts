@@ -52,6 +52,19 @@ export type Direcao = "oferta" | "demanda" | "neutro";
 const VERBOS_DE_OFERTA = [
   // pt
   "exportar", "vender", "fornecer", "distribuir", "escoar", "prestar", "investir",
+  // pt/es — o verbo CONJUGADO (N7, achado C06 da rede com armadilhas): é assim que
+  // a empresa se descreve ("Exportamos frutas", "Vendo vinhos", "Fornece
+  // embalagens"). Sem ele a oferta ficava neutra, saoConcorrentes não barrava e
+  // a categoria em comum casava duas exportadoras. Só formas sem outra leitura
+  // corrente em tag: "venda" (substantivo) já está abaixo, e o imperativo não
+  // entra.
+  "exporto", "exporta", "exportamos", "exportam", "exportan", "exportando",
+  "vendo", "vende", "vendemos", "vendem", "venden", "vendendo",
+  "forneco", "fornece", "fornecemos", "fornecem", "fornecendo",
+  "distribuo", "distribui", "distribuimos", "distribuem", "distribuye", "distribuyen", "distribuindo",
+  "presto", "presta", "prestamos", "prestam", "prestando",
+  "invisto", "investe", "investimos", "investem", "investindo",
+  "suministramos", "suministra", "suministran",
   // en — "export" e "supply" são verbo E substantivo; a leitura de verbo
   // continua, e o composto nominal ("Export manager") e a forma com "of"
   // ("Supply of rare earths") são tratados em `analisar` (CABECAS_NOMINAIS_EN).
@@ -65,6 +78,15 @@ const VERBOS_DE_OFERTA = [
 const VERBOS_DE_DEMANDA = [
   // pt
   "importar", "comprar", "adquirir", "contratar", "terceirizar", "captar",
+  // pt/es — o verbo conjugado (N7). "Compra" e "compras" ficam só na lista de
+  // substantivos ("Compra de gado"); "contrato" fica de fora, porque em tag é o
+  // documento, não "eu contrato".
+  "importo", "importa", "importamos", "importam", "importan", "importando",
+  "compro", "compramos", "compram", "compran", "comprando",
+  "adquiro", "adquire", "adquirimos", "adquirem", "adquiere", "adquieren", "adquirindo",
+  "contrata", "contratamos", "contratam", "contratan", "contratando",
+  "terceiriza", "terceirizamos", "terceirizam", "terceirizando",
+  "capta", "captamos", "captam", "captando",
   // en
   "import", "importing", "buy", "buying", "purchase", "purchasing", "acquire",
   "hire", "hiring", "outsource", "outsourcing",
@@ -96,6 +118,9 @@ const SUBSTANTIVOS_DE_DEMANDA = [
 ];
 
 const VERBOS_FLEXIONADOS = new Set([...VERBOS_DE_OFERTA, ...VERBOS_DE_DEMANDA]);
+
+/** Pronome sujeito diante do verbo conjugado ("Nós exportamos", "We export"). */
+const PRONOMES_SUJEITO = new Set(["nos", "eu", "we", "i", "nosotros", "nosotras", "yo"]);
 const SUBSTANTIVOS_DE_ACAO = new Set([...SUBSTANTIVOS_DE_OFERTA, ...SUBSTANTIVOS_DE_DEMANDA]);
 
 /**
@@ -398,6 +423,13 @@ function analisar(rotulo: string): Analise {
     resto = depois;
   }
 
+  // "Nós exportamos frutas", "We export coffee": o pronome sujeito só sai da
+  // frente quando o que vem depois é verbo de direção. "Nos" sem acento é
+  // também "em + os", por isso a guarda do verbo.
+  if (resto.length > 2 && PRONOMES_SUJEITO.has(resto[0]) && VERBOS_FLEXIONADOS.has(resto[1])) resto = resto.slice(1);
+  // "Vende-se terreno", "Exporta-se café": o "se" não é o objeto.
+  if (resto.length > 2 && VERBOS_FLEXIONADOS.has(resto[0]) && resto[1] === "se") resto = [resto[0], ...resto.slice(2)];
+
   const cabeca = resto[0];
   const direcao = cabeca ? DIRECAO_POR_CABECA.get(cabeca) : undefined;
   const neutro: Analise = { direcao: "neutro", objeto: resto.join("-"), verbo: null, forma: null };
@@ -538,7 +570,7 @@ const CABECAS_TRANSPARENTES = new Set([
  * possui/procura; na dúvida, um lugar fora da lista mantém o comportamento
  * de hoje, que é o risco conhecido.
  */
-const LUGARES = new Set([
+const NOMES_DE_LUGARES = [
   // continentes e regiões
   "africa", "europa", "asia", "america", "americas", "oceania", "mercosul",
   "latam", "caribe", "iberia", "balcas", "magrebe", "nordeste", "amazonia",
@@ -560,10 +592,33 @@ const LUGARES = new Set([
   "switzerland", "austria", "greece", "ireland", "scotland", "wales",
   "belgium", "poland", "ukraine", "turkey", "japon", "alemania", "francia",
   "espana", "paises", "reino", "emirados", "arabia", "kuwait", "omã", "oma",
+  // as formas em inglês e espanhol que faltavam dos lugares acima (revisão de
+  // 17/11): sem "europe", "Import coffee to Europe" não tinha o qualificador de
+  // lugar lido, e o par com "Export coffee" zerava
+  "europe", "caribbean", "mercosur", "balkans", "egypt", "egipto", "morocco",
+  "marruecos", "algeria", "ghana", "kenya", "kenia", "ethiopia", "mozambique",
+  "uruguay", "paraguay", "ecuador", "rusia", "england", "holland", "suiza",
+  "qatar", "korea", "corea", "thailand", "malaysia", "singapore", "singapur",
+  "philippines", "zimbabwe", "botswana", "rwanda", "sudan", "libya",
+  "emirates", "guyana",
   // regiões e pontos cardeais usados como lugar
   "sul", "norte", "leste", "oeste", "ocidente", "oriente", "south", "north",
   "east", "west", "sur", "norte-africa",
-  // gentílicos correntes (masc/fem/plural mais comuns)
+  // estados brasileiros de uma palavra
+  "bahia", "ceara", "pernambuco", "amazonas", "parana", "goias", "tocantins",
+  "rondonia", "roraima", "acre", "amapa", "maranhao", "piaui", "alagoas",
+  "sergipe", "paraiba",
+  // capitais sem outra leitura corrente (N7: "Trasporte de carga pra Manaus" ×
+  // "Transporte de cargas" é o mesmo serviço com o destino dito). "Natal",
+  // "Salvador", "Vitória", "Palmas", "Recife" e "Fortaleza" ficam de fora de
+  // propósito: soltas são outra coisa ("Decoração de Natal"), e por isso
+  // shared/tipo-da-oferta.ts só as lê depois de "em/no/na".
+  "manaus", "belem", "curitiba", "goiania", "maceio", "teresina", "aracaju",
+  "florianopolis", "cuiaba", "brasilia", "macapa",
+];
+
+// gentílicos correntes (masc/fem/plural mais comuns)
+const GENTILICOS = [
   "chines", "chinesa", "chineses", "chinesas", "brasileiro", "brasileira",
   "brasileiros", "brasileiras", "americano", "americana", "americanos",
   "americanas", "argentino", "argentina", "argentinos", "argentinas",
@@ -576,11 +631,17 @@ const LUGARES = new Set([
   "mexicano", "mexicana", "canadense", "canadenses", "russo", "russa",
   "turco", "turca", "arabe", "arabes", "coreano", "coreana", "australiano",
   "australiana", "angolano", "angolana", "nigeriano", "nigeriana",
-  // estados brasileiros de uma palavra
-  "bahia", "ceara", "pernambuco", "amazonas", "parana", "goias", "tocantins",
-  "rondonia", "roraima", "acre", "amapa", "maranhao", "piaui", "alagoas",
-  "sergipe", "paraiba",
-]);
+];
+
+const LUGARES = new Set([...NOMES_DE_LUGARES, ...GENTILICOS]);
+
+/**
+ * O gentílico que não é também nome de lugar ("argentina" é os dois). Depois de
+ * preposição ele é a LÍNGUA, e não a origem: "Tradução de alemão" nomeia a
+ * especialidade do serviço (shared/tipo-da-oferta.ts lê o idioma antes do
+ * lugar), e o qualificador de lugar não pode descascá-lo.
+ */
+const SO_GENTILICOS = new Set(GENTILICOS.filter(gentilico => !NOMES_DE_LUGARES.includes(gentilico)));
 
 const LUGARES_COMPOSTOS = new Set([
   "estados unidos", "reino unido", "nova zelandia", "coreia do sul",
@@ -590,6 +651,7 @@ const LUGARES_COMPOSTOS = new Set([
   "costa rica", "el salvador", "republica dominicana", "cabo verde",
   "guine bissau", "timor leste", "sri lanka", "uniao europeia",
   "sao paulo", "rio de janeiro", "minas gerais", "rio grande do sul",
+  "belo horizonte", "porto alegre", "joao pessoa", "sao luis", "porto velho",
   "rio grande do norte", "mato grosso", "mato grosso do sul",
   "santa catarina", "espirito santo", "distrito federal",
   // formas em inglês e espanhol dos mesmos lugares — o motor recebe tag em
@@ -663,6 +725,257 @@ export function nucleoDoTermo(rotulo: string): string {
 }
 
 /**
+ * Qualificador de LUGAR no fim do termo: de onde vem, para onde vai ou onde
+ * está a coisa — "café DO BRASIL", "café PARA A EUROPA", "café NO CHILE",
+ * "coffee FROM BRAZIL", "coffee TO EUROPE", "café DEL BRASIL", "café HACIA
+ * EUROPA", "café A EUROPA". A preposição entra pela classe (origem, destino,
+ * onde), para "do Brasil", "de Brasil" e "del Brasil" serem o mesmo
+ * qualificador. Ficam de fora as preposições de parceiro, assunto ou caminho
+ * ("com", "with", "sobre", "entre", "por"): "Consultoria sobre a China" diz o
+ * assunto, não o lugar.
+ */
+const CLASSE_DA_PREPOSICAO_DO_LUGAR = new Map<string, string>([
+  ...["de", "da", "do", "das", "dos", "of", "from", "del", "desde"].map(p => [p, "origem"] as const),
+  ...["para", "pra", "pro", "ao", "aos", "to", "into", "for", "al", "hacia"].map(p => [p, "destino"] as const),
+  ...["em", "no", "na", "nos", "nas", "in", "en", "at"].map(p => [p, "onde"] as const),
+]);
+
+/** "do Brasil E da Colômbia", "to Europe AND Asia": a lista de lugares continua, e a preposição pode ficar subentendida. */
+const COORDENAM_LUGARES = new Set(["e", "and", "y", "ou", "or"]);
+
+/** Quantas palavras a partir de `indice` formam um lugar do qualificador (até 4: "rio grande do sul"); 0 se não formam. */
+function comprimentoDoLugarDoQualificador(palavras: string[], indice: number): number {
+  for (let n = Math.min(4, palavras.length - indice); n >= 1; n -= 1) {
+    const trecho = palavras.slice(indice, indice + n);
+    const soGentilico = n === 1 && (SO_GENTILICOS.has(trecho[0]) || SO_GENTILICOS.has(semPluralFinal(trecho[0])));
+    if (!soGentilico && ehLugar(trecho)) return n;
+  }
+  return 0;
+}
+
+/**
+ * Os lugares do qualificador que vai de `inicio` ao FIM das palavras, como
+ * "classe:lugar" ("origem:brasil", "destino:europa"); null se o resto não for
+ * inteiro um qualificador de lugar. A primeira parte exige a preposição; depois
+ * de "e"/"ou" ela pode ficar subentendida ("para a Europa e Ásia"). O "a" e o
+ * "as" do português e do espanhol são preposição só colados ao lugar ("café à
+ * Europa"); atrás de outra preposição são artigo ("para a Europa").
+ */
+function lugaresAteOFim(palavras: string[], inicio: number): string[] | null {
+  const lugares: string[] = [];
+  let classe: string | null = null;
+  let i = inicio;
+  while (i < palavras.length) {
+    const coordenado = lugares.length > 0 && COORDENAM_LUGARES.has(palavras[i]);
+    if (coordenado) i += 1;
+    const daPreposicao = CLASSE_DA_PREPOSICAO_DO_LUGAR.get(palavras[i]);
+    if (daPreposicao) {
+      classe = daPreposicao;
+      i += 1;
+    } else if ((palavras[i] === "a" || palavras[i] === "as") && comprimentoDoLugarDoQualificador(palavras, i + 1) > 0) {
+      classe = "destino";
+      i += 1;
+    } else if (!coordenado) {
+      return null;
+    }
+    while (i < palavras.length && ARTIGOS.has(palavras[i])) i += 1;
+    const comprimento = comprimentoDoLugarDoQualificador(palavras, i);
+    if (comprimento === 0 || classe === null) return null;
+    lugares.push(`${classe}:${palavras.slice(i, i + comprimento).join(" ")}`);
+    i += comprimento;
+  }
+  return lugares.length ? lugares : null;
+}
+
+/**
+ * O termo (já em slug, palavras separadas por "-") sem o qualificador de lugar
+ * do fim, e os lugares desse qualificador. Sem qualificador, a base é o termo
+ * inteiro e a lista vem vazia. A base nunca fica vazia: o qualificador começa,
+ * no mínimo, na segunda palavra.
+ */
+function separarLugaresDoFim(termo: string): { base: string; lugares: string[] } {
+  const palavras = termo.split("-").filter(Boolean);
+  for (let inicio = 1; inicio < palavras.length; inicio += 1) {
+    const lugares = lugaresAteOFim(palavras, inicio);
+    if (lugares) return { base: palavras.slice(0, inicio).join("-"), lugares };
+  }
+  return { base: termo, lugares: [] };
+}
+
+/**
+ * As duas substâncias são a mesma A MENOS DO LUGAR? Revisão de 17/11 do motor
+ * privado: "Exportação de café" × "Importação de café do Brasil" dava 0,
+ * enquanto "Importação de café" dava 100 — o qualificador de um lado só
+ * zerava um par legítimo. Lugar não é mercadoria (é o que os LOCATIVOS já
+ * dizem): sem ele, as duas pontas falam de café.
+ *
+ * A comparação continua sendo do termo INTEIRO, nunca de palavra solta: a base
+ * de um lado tem de ser igual à base do outro, e os lugares dos dois lados
+ * têm de se combinar (`lugaresSeCombinam`). `ehSubstancia` é a guarda de quem
+ * chama: a base que sobra não pode ser vazia, nem lugar quando houver direção
+ * declarada ("Exportação da China para a Europa" não vira "china").
+ */
+function mesmaSubstanciaAMenosDoLugar(
+  a: string,
+  b: string,
+  ehSubstancia: (x: string) => boolean,
+  iguais: (x: string, y: string) => boolean = (x, y) => x === y,
+): boolean {
+  const ladoA = separarLugaresDoFim(a);
+  const ladoB = separarLugaresDoFim(b);
+  if (!ladoA.lugares.length && !ladoB.lugares.length) return false;
+  if (!ehSubstancia(ladoA.base) || !iguais(ladoA.base, ladoB.base)) return false;
+  return lugaresSeCombinam(ladoA.lugares, ladoB.lugares);
+}
+
+/** Os lugares de um papel ("origem", "destino" ou "onde") numa lista "papel:lugar". */
+const lugaresDoPapel = (lugares: string[], papel: string) =>
+  lugares.filter(lugar => lugar.startsWith(`${papel}:`)).map(lugar => lugar.slice(papel.length + 1));
+
+const algumEmComum = (x: string[], y: string[]) => x.some(lugar => y.includes(lugar));
+
+/**
+ * Os lugares de dois termos de mesma base se combinam? É conservador:
+ * - o lado com menos lugares tem só lugares que o outro também diz, no mesmo
+ *   papel: o lado sem lugar sempre cabe ("café" × "café do Brasil"), e o mais
+ *   específico refina o outro ("café do Brasil" × "café do Brasil para a
+ *   Europa");
+ * - ou os dois descrevem a mesma ROTA: a origem de um lado e o destino do
+ *   outro ("Exportação de soja do Brasil" × "Importação de soja para a
+ *   China"), sem dois lugares diferentes no mesmo papel e sem o mesmo lugar
+ *   como origem de um lado e destino do outro ("café do Brasil" × "café para
+ *   o Brasil" são fluxos opostos).
+ * Dois lugares que se contradizem ("café do Brasil" × "café da Colômbia") não
+ * casam, que é o comportamento de antes. "Em", "no", "in" e "en" dizem onde, e
+ * não de onde nem para onde ("Fornecedor de café no Brasil" é a origem,
+ * "Importação de café na Europa" é o destino): esse papel só combina com ele
+ * mesmo, e "café para a Europa" × "café na Europa" fica como antes, sem casar.
+ */
+function lugaresSeCombinam(a: string[], b: string[]): boolean {
+  const [menos, mais] = a.length <= b.length ? [a, b] : [b, a];
+  if (menos.every(lugar => mais.includes(lugar))) return true;
+  if (lugaresDoPapel(a, "onde").length || lugaresDoPapel(b, "onde").length) return false;
+  for (const papel of ["origem", "destino"]) {
+    const deA = lugaresDoPapel(a, papel);
+    const deB = lugaresDoPapel(b, papel);
+    if (deA.length && deB.length && !algumEmComum(deA, deB)) return false;
+  }
+  return !algumEmComum(lugaresDoPapel(a, "origem"), lugaresDoPapel(b, "destino"))
+    && !algumEmComum(lugaresDoPapel(a, "destino"), lugaresDoPapel(b, "origem"));
+}
+
+/**
+ * Plural regular do português (e o "s" do inglês e do espanhol), para comparar
+ * grafias: "embalagens" → "embalagem", "sustentaveis" → "sustentavel", "graos"
+ * → "grao", "fornecedores" → "fornecedor", "beans" → "bean". Palavra curta só
+ * perde o "s" ("pais" não vira "pal"). Serve só para comparar os DOIS lados com
+ * a mesma régua; não é lematizador.
+ */
+function singular(palavra: string): string {
+  if (palavra.length <= 4) return palavra.length > 3 && palavra.endsWith("s") ? palavra.slice(0, -1) : palavra;
+  for (const [fim, troca] of [["oes", "ao"], ["aes", "ao"], ["aos", "ao"], ["ns", "m"], ["eis", "el"], ["ais", "al"], ["ois", "ol"], ["res", "r"], ["zes", "z"]] as const) {
+    if (palavra.endsWith(fim)) return palavra.slice(0, -fim.length) + troca;
+  }
+  return palavra.endsWith("s") && !palavra.endsWith("ss") ? palavra.slice(0, -1) : palavra;
+}
+
+/** Distância de edição (Levenshtein) com teto: devolve teto + 1 assim que passa dele. */
+function distanciaDeEdicao(a: string, b: string, teto: number): number {
+  if (Math.abs(a.length - b.length) > teto) return teto + 1;
+  let anterior = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i += 1) {
+    const atual = [i];
+    let menor = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      atual[j] = Math.min(anterior[j] + 1, atual[j - 1] + 1, anterior[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      menor = Math.min(menor, atual[j]);
+    }
+    if (menor > teto) return teto + 1;
+    anterior = atual;
+  }
+  return anterior[b.length];
+}
+
+/** Palavras que não são conteúdo: ligam, marcam ou declaram direção. */
+const PALAVRAS_DE_LIGACAO = new Set([
+  ...Array.from(GENITIVOS), ...Array.from(ARTIGOS), ...Array.from(LOCATIVOS), ...Array.from(MARCADORES_FRACOS),
+  ...Array.from(CONJUNCOES_DE_COORDENACAO), "pra", "pro", "ou", "or", "se",
+]);
+
+/** Tamanho mínimo da palavra em que um erro de digitação é perdoado. */
+const TAMANHO_MINIMO_DO_ERRO = 8;
+
+/**
+ * Os dois termos (em slug, palavras separadas por "-") são o MESMO termo escrito
+ * com outra grafia? N7, erros de digitação e de português da rede com
+ * armadilhas: "Soja em grão" × "soja em graos", "Embalagens sustentáveis" ×
+ * "embalagem sustentavel", "Transporte de cargas" × "Trasporte de carga".
+ *
+ * É comparação do termo INTEIRO, nunca de palavra solta: as duas pontas têm o
+ * mesmo número de palavras, na mesma ordem, e cada par de palavras é igual
+ * (o acento já saiu na normalização), igual no singular, ou — no máximo UMA
+ * vez por termo — uma palavra de conteúdo longa (8 letras ou mais), com a
+ * mesma inicial, a uma edição da outra. O erro só é perdoado em termo com duas
+ * palavras de conteúdo ou mais, onde o resto confirma do que se trata:
+ * "Conserto" × "Concerto", soltos, seguem diferentes. Palavra de direção nunca
+ * é perdoada nem trocada ("Exportação" × "Importação" seguem como antes). As
+ * preposições do genitivo em português valem entre si ("de cargas" × "da
+ * carga").
+ */
+export function mesmoTermoEmOutraGrafia(a: string, b: string): boolean {
+  if (a === b) return true;
+  const pa = a.split("-").filter(Boolean);
+  const pb = b.split("-").filter(Boolean);
+  if (!pa.length || pa.length !== pb.length) return false;
+  const conteudo = pa.filter(p => !PALAVRAS_DE_LIGACAO.has(p));
+  if (!conteudo.length) return false;
+  let errosPerdoados = 0;
+  for (let i = 0; i < pa.length; i += 1) {
+    const x = pa[i];
+    const y = pb[i];
+    if (x === y) continue;
+    if (GENITIVOS.has(x) && GENITIVOS.has(y) && x !== "of" && y !== "of") continue;
+    if (PALAVRAS_DE_LIGACAO.has(x) || PALAVRAS_DE_LIGACAO.has(y)) return false;
+    if (DIRECAO_POR_CABECA.has(x) || DIRECAO_POR_CABECA.has(y)) return false;
+    const sx = singular(x);
+    const sy = singular(y);
+    if (sx === sy) continue;
+    const perdoavel = conteudo.length >= 2 && errosPerdoados === 0
+      && Math.min(sx.length, sy.length) >= TAMANHO_MINIMO_DO_ERRO && sx[0] === sy[0];
+    if (perdoavel && distanciaDeEdicao(sx, sy, 1) <= 1) {
+      errosPerdoados += 1;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
+ * As palavras de conteúdo de um termo, no singular: sem preposição, artigo,
+ * marcador ("procuro", "tenho") nem palavra de direção ("exportar", "vendo").
+ * É o que o critério semântico estreito do motor privado usa para recusar o
+ * par que divide uma palavra (server/match-service.ts).
+ */
+export function palavrasDeConteudo(rotulo: string): string[] {
+  return tokensDoTermo(rotulo)
+    .filter(p => !PALAVRAS_DE_LIGACAO.has(p) && !DIRECAO_POR_CABECA.has(p) && !PRONOMES_SUJEITO.has(p))
+    .map(singular);
+}
+
+/**
+ * Dois objetos de termos COM direção (`analisarTermo(...).objeto`) são o mesmo,
+ * a menos do lugar (de um lado só, ou a rota: `lugaresSeCombinam`)? É a
+ * pergunta de `saoConcorrentes` (o mesmo serviço com o lugar de um lado só não
+ * é concorrência) e a do selo "Oferta e procura" da tela
+ * (client/src/pages/IntelligentMatches.tsx). Com direção, a base que sobra não
+ * pode ser lugar.
+ */
+export function mesmoObjetoAMenosDoLugar(objetoA: string, objetoB: string): boolean {
+  return mesmaSubstanciaAMenosDoLugar(objetoA, objetoB, x => !!x && !ehLugar(x.split("-")));
+}
+
+/**
  * As duas pontas nomeiam a MESMA coisa? É a equivalência que o motor privado
  * (`scoreMatch`) sempre usou depois do slug: mesmo objeto (tirado o verbo de
  * direção e os marcadores fracos) ou mesmo núcleo (atravessada a cabeça
@@ -677,6 +990,18 @@ export function nucleoDoTermo(rotulo: string): string {
  * verbo ou substantivo de ação: sem direção nas palavras, "China" × "Procura
  * China" é a mesma coisa dita de dois jeitos, como "Terras raras" × "Procura
  * terras raras" (revisão adversarial de 05/09).
+ *
+ * E o lugar de um lado só não separa as duas pontas (revisão de 17/11):
+ * "Exportação de café" × "Importação de café do Brasil" falam ambas de café,
+ * como "Exportação de café do Brasil" × "Importação de café para a Europa",
+ * que dizem a rota (`mesmaSubstanciaAMenosDoLugar`, com a mesma guarda).
+ *
+ * Só fora da concorrência: tirar o lugar nunca junta dois concorrentes. Os
+ * dois motores (o privado e, desde o N6, o de perfis, em `satisfaz` de
+ * server/matching.ts) já os zeram antes de perguntar isto; a guarda fica aqui
+ * para quem chama esta função sozinha (o portão da IA e a tela): "Exportar café" ×
+ * "Exportar café do Brasil" e "Buy coffee" × "Buy coffee from Angola" seguem
+ * sem nomear a mesma coisa, como antes do qualificador.
  */
 export function nomeiamAMesmaCoisa(rotuloOferta: string, rotuloDemanda: string): boolean {
   const termoOferta = analisarTermo(rotuloOferta);
@@ -686,7 +1011,18 @@ export function nomeiamAMesmaCoisa(rotuloOferta: string, rotuloDemanda: string):
   if (ehSubstancia(termoOferta.objeto) && termoOferta.objeto === termoDemanda.objeto) return true;
   const nucleoOferta = nucleoDoTermo(rotuloOferta);
   const nucleoDemanda = nucleoDoTermo(rotuloDemanda);
-  return ehSubstancia(nucleoOferta) && nucleoOferta === nucleoDemanda;
+  if (ehSubstancia(nucleoOferta) && nucleoOferta === nucleoDemanda) return true;
+  const aMenosDoLugar = mesmaSubstanciaAMenosDoLugar(termoOferta.objeto, termoDemanda.objeto, ehSubstancia)
+    || mesmaSubstanciaAMenosDoLugar(nucleoOferta, nucleoDemanda, ehSubstancia);
+  if (aMenosDoLugar) return !saoConcorrentes(rotuloOferta, rotuloDemanda);
+  // N7: o mesmo termo com erro de digitação, plural ou acento faltando
+  // (mesmoTermoEmOutraGrafia), também a menos do lugar ("Trasporte de carga
+  // pra Manaus" × "Transporte de cargas"). Fora da concorrência, como acima.
+  const outraGrafia = (ehSubstancia(termoOferta.objeto) && mesmoTermoEmOutraGrafia(termoOferta.objeto, termoDemanda.objeto))
+    || (ehSubstancia(nucleoOferta) && mesmoTermoEmOutraGrafia(nucleoOferta, nucleoDemanda))
+    || mesmaSubstanciaAMenosDoLugar(termoOferta.objeto, termoDemanda.objeto, ehSubstancia, mesmoTermoEmOutraGrafia)
+    || mesmaSubstanciaAMenosDoLugar(nucleoOferta, nucleoDemanda, ehSubstancia, mesmoTermoEmOutraGrafia);
+  return outraGrafia && !saoConcorrentes(rotuloOferta, rotuloDemanda);
 }
 
 /**
@@ -703,12 +1039,19 @@ export function nomeiamAMesmaCoisa(rotuloOferta: string, rotuloDemanda: string):
  * adversarial de 05/09): "Exportação de vinho" × "Exportação de uva" são
  * duas exportadoras, como na regra original. "Exportar vinho" × "Exportar
  * vinho" continua sendo concorrência, e "Exportação" × "Exportação" também.
+ *
+ * O mesmo objeto vale a menos do lugar de um lado só (revisão de 17/11):
+ * "Exportação de café" × "Exportação de café do Brasil" é o serviço pedido
+ * com a origem dita, como o par sem o lugar. Lugares que se contradizem
+ * ("Exportação de café do Brasil" × "Exportação de café da Colômbia") e o
+ * verbo ("Exportar café" × "Exportar café do Brasil") seguem concorrentes.
  */
 export function saoConcorrentes(rotuloOferta: string, rotuloDemanda: string) {
   const a = analisar(rotuloOferta);
   const b = analisar(rotuloDemanda);
   if (a.direcao === "neutro" || b.direcao === "neutro") return false;
   if (a.direcao !== b.direcao) return false;
-  const mesmoServico = a.forma === "substantivo-com-objeto" && b.forma === "substantivo-com-objeto" && a.objeto === b.objeto;
+  const mesmoServico = a.forma === "substantivo-com-objeto" && b.forma === "substantivo-com-objeto"
+    && (a.objeto === b.objeto || mesmoObjetoAMenosDoLugar(a.objeto, b.objeto));
   return !mesmoServico;
 }

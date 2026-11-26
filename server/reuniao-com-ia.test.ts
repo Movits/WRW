@@ -56,6 +56,8 @@ const banco = {
   segmentos: [] as unknown,
   // Os nomes que a dona deu às vozes (meetings.speaker_names).
   nomes: null as Record<string, string> | null,
+  // A hora em que a reunião foi para a lixeira (H7d); nula fora dela.
+  naLixeira: null as number | null,
   indisponivel: false,
   erroNaConsulta: null as Error | null,
   leituras: [] as Array<{ tabela: unknown; sql: string; params: unknown[]; campos: string[] }>,
@@ -69,6 +71,10 @@ const dialeto = new MySqlDialect();
 const soOPedido = (campos: Record<string, unknown>, linha: Record<string, unknown>) =>
   Object.fromEntries(Object.keys(campos).map(campo => [campo, linha[campo]]));
 
+// A guarda da lixeira (H7d) lê o banco antes do zod, em todo procedimento pelo id. Aqui o
+// router é provado com o banco dublado; a guarda tem os testes dela (guarda-da-lixeira.test.ts
+// e server/lixeira-de-reunioes.integracao.test.ts).
+vi.mock("./guarda-da-lixeira", async () => ({ procedimentoDaReuniao: (await import("./_core/trpc")).protectedProcedure }));
 vi.mock("./db", () => ({
   getDb: async () => null,
   exigirDb: async () => {
@@ -81,7 +87,7 @@ vi.mock("./db", () => ({
           if (banco.erroNaConsulta) throw banco.erroNaConsulta;
           // Como o MySQL: a linha só volta se o WHERE pede a dona dela.
           if (!params.includes(banco.dona)) return [];
-          if (tabela === schema.meetings) return banco.existe ? [soOPedido(campos, { status: banco.status, speakerNames: banco.nomes })] : [];
+          if (tabela === schema.meetings) return banco.existe ? [soOPedido(campos, { status: banco.status, speakerNames: banco.nomes, trashedAt: banco.naLixeira })] : [];
           if (tabela === schema.meetingTranscripts) {
             return banco.transcricao === null ? [] : [soOPedido(campos, { transcript: banco.transcricao, segments: banco.segmentos })];
           }
@@ -105,8 +111,11 @@ const {
   MENSAGEM_REUNIAO_LONGA_PARA_PERGUNTAR,
   MENSAGEM_SEM_TRANSCRICAO,
   perguntarAReuniao,
+  REGRA_DA_LISTA,
+  RESPOSTA_DA_PERGUNTA_MAX,
   trechoApareceNaTranscricao,
 } = await import("./reuniao-com-ia");
+const { SCHEMA_DO_VISUAL } = await import("./resposta-visual");
 
 const ID = "8b1f6a2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b";
 const contexto = (openId: string) => ({
@@ -135,7 +144,7 @@ beforeEach(() => {
   logInfo.mockClear();
   logAviso.mockClear();
   Object.assign(banco, {
-    dona: "dona-1", existe: true, status: "ready", transcricao: TRANSCRICAO, segmentos: [], nomes: null,
+    dona: "dona-1", existe: true, status: "ready", transcricao: TRANSCRICAO, segmentos: [], nomes: null, naLixeira: null,
     indisponivel: false, erroNaConsulta: null, leituras: [],
   });
 });
@@ -173,12 +182,13 @@ describe("meetings.perguntar — a transcrição pronta da dona, e só ela, vai 
   const perguntar = (openId = "dona-1") => rota(openId).perguntar({ meetingId: ID, idioma: "pt-BR", pergunta: "Quando sai o contêiner?" });
   const naoRespondida = () => invokeLLM.mockResolvedValue(respostaDaIA(NAO_RESPONDE));
 
-  it("pede JSON estruturado, com as citações no schema", async () => {
+  it("pede JSON estruturado, com as citações e o visual (H6d) no schema", async () => {
     naoRespondida();
     await expect(perguntar()).resolves.toEqual({ respondida: false });
     expect(invokeLLM.mock.calls[0][0]).toMatchObject({
-      response_format: { type: "json_schema", json_schema: { name: "resposta_da_reuniao", strict: true, schema: { required: ["respondida", "resposta", "citacoes"] } } },
+      response_format: { type: "json_schema", json_schema: { name: "resposta_da_reuniao", strict: true, schema: { required: ["respondida", "resposta", "citacoes", "visual"] } } },
     });
+    expect(invokeLLM.mock.calls[0][0].response_format.json_schema.schema.properties.visual).toEqual(SCHEMA_DO_VISUAL);
     // A função escolhe o modelo do Pergunte (LLM_MODEL_PERGUNTA; sem ela, o LLM_MODEL).
     expect(invokeLLM.mock.calls[0][0]).toMatchObject({ funcao: "pergunta" });
   });
@@ -194,6 +204,13 @@ describe("meetings.perguntar — a transcrição pronta da dona, e só ela, vai 
 
   it("reunião de outra dona: NOT_FOUND, sem ler a transcrição nem chamar a IA", async () => {
     await expect(perguntar("outra-dona")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(banco.leituras).toHaveLength(1);
+    expect(invokeLLM).not.toHaveBeenCalled();
+  });
+
+  it("a reunião que foi para a lixeira depois da guarda (H7d) é 'não encontrada' na leitura do serviço: NOT_FOUND, sem ler a transcrição nem chamar a IA", async () => {
+    banco.naLixeira = Date.now();
+    await expect(perguntar()).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(banco.leituras).toHaveLength(1);
     expect(invokeLLM).not.toHaveBeenCalled();
   });
@@ -320,7 +337,8 @@ describe("o que vai à IA (H6): a transcrição rotulada inteira primeiro, a per
     expect(prompt).not.toContain("Glória");
     expect(prompt).not.toContain("Otávio");
     const daReuniao = banco.leituras.find(leitura => leitura.tabela === schema.meetings)!;
-    expect(daReuniao.campos).toEqual(["status"]);
+    // O status e a lixeira (H7d), nada dos nomes.
+    expect(daReuniao.campos).toEqual(["status", "trashedAt"]);
   });
 
   it("sem as falas (envio único), vai o texto corrido, sem rótulo, e a IA é avisada de que não há vozes", async () => {
@@ -556,5 +574,93 @@ describe(`o teto da dona pesa a reunião longa (H6): a pergunta acima de ${ENTRA
     curta();
     await expect(perguntar()).resolves.toEqual({ respondida: false });
     await expect(perguntar()).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+  });
+});
+
+describe("a resposta em forma visual (H6d): a tabela ou o gráfico vêm num formato fixo, conferido, e só com a resposta que passou", () => {
+  const perguntar = (pergunta = "Monte uma tabela com os prazos") => rota().perguntar({ meetingId: ID, idioma: "pt-BR", pergunta });
+  const SANTOS = "O contêiner sai do porto de Santos no dia 12 de março";
+  const responde = (visual: unknown, resposta = "{F2} disse que o contêiner sai dia 12.") =>
+    invokeLLM.mockResolvedValue(respostaDaIA({ respondida: true, resposta, citacoes: [{ trecho: SANTOS }], visual }));
+  const tabelaDaIA = (celula: string) => ({
+    tipo: "tabela", titulo: "Prazos", unidade: "", colunas: ["Quem", "O quê"], linhas: [{ celulas: [celula, "contêiner no dia 12"] }],
+  });
+
+  it("as instruções pedem o visual só quando a pergunta pede, com as vozes como rótulo; sem as falas, sem rótulo", async () => {
+    comFalas();
+    invokeLLM.mockResolvedValue(respostaDaIA(NAO_RESPONDE));
+    await perguntar();
+    expect(mensagens()[0].content).toContain("só quando a pergunta pede uma tabela, um gráfico");
+    expect(mensagens()[0].content).toContain("({F2})");
+    banco.segmentos = [];
+    await perguntar();
+    expect(mensagens(1)[0].content).toContain("Não use rótulos de voz no visual.");
+  });
+
+  it("a tabela conferida vai à tela com a resposta, as vozes como rótulo", async () => {
+    comFalas();
+    responde(tabelaDaIA("{F2}"));
+    await expect(perguntar()).resolves.toMatchObject({
+      respondida: true,
+      visual: { tipo: "tabela", titulo: "Prazos", colunas: ["Quem", "O quê"], linhas: [["{F2}", "contêiner no dia 12"]] },
+    });
+  });
+
+  it("o gráfico de barras chega com os números, não com texto", async () => {
+    comFalas();
+    responde({ tipo: "barras", titulo: "Contêineres", unidade: "", colunas: ["Porto", "Contêineres"], linhas: [{ celulas: ["Santos", "12"] }, { celulas: ["Itajaí", "3"] }] });
+    const resposta = await perguntar("Faça um gráfico dos contêineres por porto");
+    expect(resposta).toMatchObject({ visual: { tipo: "barras", rotulos: ["Santos", "Itajaí"], series: [{ nome: "Contêineres", valores: [12, 3] }] } });
+  });
+
+  it("sem visual pedido (tipo nenhum, ou o campo ausente), a resposta vem sem o campo", async () => {
+    comFalas();
+    responde({ tipo: "nenhum", titulo: "", unidade: "", colunas: [], linhas: [] });
+    const resposta = await perguntar("Quando sai o contêiner?");
+    expect(resposta).toMatchObject({ respondida: true });
+    expect(resposta).not.toHaveProperty("visual");
+  });
+
+  it("a voz que a reunião não tem derruba só o visual: a resposta conferida continua", async () => {
+    comFalas();
+    responde(tabelaDaIA("{F7}"));
+    const resposta = await perguntar();
+    expect(resposta).toMatchObject({ respondida: true, resposta: "{F2} disse que o contêiner sai dia 12." });
+    expect(resposta).not.toHaveProperty("visual");
+    expect(logAviso.mock.calls.map(chamada => chamada.join(" "))).toContain("[Pergunte] visual fora da tela (voz): a IA pediu tabela");
+  });
+
+  it("a resposta que não passa na conferência não leva o visual, mesmo que a IA o mande", async () => {
+    comFalas();
+    invokeLLM.mockResolvedValue(respostaDaIA({ respondida: true, resposta: "O frete custa 10 mil.", citacoes: [{ trecho: "o frete custa dez mil reais" }], visual: tabelaDaIA("{F1}") }));
+    await expect(perguntar()).resolves.toEqual({ respondida: false });
+  });
+});
+
+// Defeito 3 do teste manual T50 (23/11): a sugestão "Ações e responsáveis"
+// veio incompleta. A transcrição já ia inteira à IA; o que cortava era a
+// resposta, com "no máximo 3 frases" e 1.000 letras para toda pergunta.
+describe("a pergunta que pede uma lista (as ações e os responsáveis) cobre a reunião inteira", () => {
+  const PERGUNTA_DAS_ACOES = "Quais ações ficaram combinadas, com quem é responsável e o prazo de cada uma?";
+
+  it("as instruções pedem a reunião inteira, um item por linha, sem o limite de 3 frases", async () => {
+    invokeLLM.mockResolvedValue(respostaDaIA(NAO_RESPONDE));
+    await rota().perguntar({ meetingId: ID, idioma: "pt-BR", pergunta: PERGUNTA_DAS_ACOES });
+    const [sistema] = mensagens();
+    expect(sistema.content).toContain(REGRA_DA_LISTA);
+    expect(REGRA_DA_LISTA).toMatch(/transcrição inteira/);
+    expect(REGRA_DA_LISTA).toMatch(/linha própria/);
+  });
+
+  it("o schema e a conferência deixam passar a lista longa: 30 ações, bem acima das 1.000 letras de antes, chegam inteiras", async () => {
+    const acoes = Array.from({ length: 30 }, (_, i) => `- A Carla manda a proposta revisada número ${i + 1} ao importador alemão até sexta-feira`);
+    const lista = acoes.join("\n");
+    expect(lista.length).toBeGreaterThan(2_000);
+    respondeCom(lista, "Então fica decidido que a Carla fecha o contrato com o importador até sexta-feira.");
+    banco.segmentos = [];
+    const resposta = await rota().perguntar({ meetingId: ID, idioma: "pt-BR", pergunta: PERGUNTA_DAS_ACOES });
+    expect(resposta.respondida).toBe(true);
+    expect((resposta as { resposta: string }).resposta).toBe(lista);
+    expect(invokeLLM.mock.calls[0][0].response_format.json_schema.schema.properties.resposta.maxLength).toBe(RESPOSTA_DA_PERGUNTA_MAX);
   });
 });

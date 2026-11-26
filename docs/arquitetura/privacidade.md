@@ -355,6 +355,47 @@ duas linhas de `MATCH_IDENTITY_REVEALED` (`via: "distribuidor"`).
 **Limite conhecido**: o termo do Smart Match não diz, hoje, que uma pessoa lê os
 dois perfis antes da entrega. Registrado em decisoes-em-aberto.md (D7).
 
+## A consulta das reuniões pela administração (R1a)
+
+A reunião gravada é da dona: toda consulta da dona leva a dona no WHERE, e o link aberto
+lê só pelo token. A única leitura sem a dona é a consulta da administração
+(`server/consulta-da-administracao.ts`, router `consultaDeReunioes`), com estas regras, todas
+na consulta:
+
+- só admin e presidente (`plataformaProcedure`); Ouro sem cargo leva FORBIDDEN;
+- abrir pede o motivo (apuração de denúncia, segurança, suporte pedido pela usuária,
+  obrigação legal ou ordem judicial, mais o porquê em texto), e a linha
+  `MEETING_ADMIN_READ` (motivo, conta da dona, IP e navegador) vai por `tx.insert` na
+  transação que confere a reunião, antes de qualquer leitura do conteúdo;
+- a lista também fica registrada (`MEETINGS_ADMIN_LIST`, com a busca e as contas que
+  apareceram), e as duas ações sobrevivem à exclusão da conta de quem consultou;
+- só a reunião visível (nem excluída nem na lixeira) e gravada com um aviso que anuncia a
+  consulta (`VERSOES_QUE_PREVEEM_O_ACESSO`, hoje 2026-11-23); a juntada com uma reunião
+  anterior ao aviso também fica fechada;
+- sai o que a dona vê da reunião (transcrição, resumo na projeção do link, nomes das vozes e
+  o áudio pela rota `/consulta-da-administracao/{id}/audio`, que pede a consulta aberta na
+  última hora); nunca a rede particular (contatos, entidades, sugestões, pendências), o
+  `owner_id`, o `contact_id`, o `context_id` nem o token do link;
+- a dona vê a data de cada consulta (`meetings.consultasDaAdministracao`), sem o motivo
+  nem quem consultou.
+
+## O perfil de voz da dona (H3d)
+
+A amostra da voz da dona (cerca de 30 s) é dado biométrico (LGPD art. 11) e segue regras de
+consulta, não de tela (`server/perfil-de-voz.ts`):
+
+- só existe com o consentimento próprio, separado do aceite dos Termos (texto da Cris em
+  `docs/termos/perfil-de-voz-rascunho.md`), e cada consentimento e cada revogação ficam em
+  `voice_profile_consents` com a data, a hora, a versão e o texto, sem a voz;
+- toda consulta leva o openId da dona no WHERE, e nenhum procedimento recebe o id de outra
+  conta; a chave no bucket (`perfis-de-voz/<openId>/`) é negada pelo proxy `/manus-storage`
+  a todo mundo, e o link aberto, as participantes, as membras e a consulta da administração
+  (R1a) não têm caminho até ela;
+- a amostra vai ao Gemini junto com cada parte das reuniões da dona, só para rotular a voz
+  dela; o resultado é a ligação da voz à conta (H3c), que a dona corrige;
+- desligar e excluir a conta apagam a amostra do bucket com todas as versões e a linha, de
+  vez; o registro dos consentimentos fica.
+
 ## Checklist antes de qualquer publicação
 
 - [ ] A aplicação conecta com `mmm_app`, nunca com a dona das tabelas

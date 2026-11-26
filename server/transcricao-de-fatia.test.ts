@@ -9,7 +9,7 @@ const ambiente = vi.hoisted(() => ({ ENV: { llmApiKey: "chave-de-teste-que-nunca
 vi.mock("./_core/env", () => ambiente);
 
 const { gerarComAudioNoGemini, GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError, raciocinioBaixo } = await import("./gemini");
-const { contextoParaAProxima, lerTempo, montarTranscricao, normalizarSegmentos, promptDaFatia, tempoEmTexto, TemposForaDaParteError, transcreverFatia } = await import("./transcricao-de-fatia");
+const { contextoParaAProxima, iniciosDasReunioesJuntadas, lerTempo, montarTranscricao, normalizarSegmentos, promptDaFatia, tempoEmTexto, TemposForaDaParteError, transcreverFatia } = await import("./transcricao-de-fatia");
 
 let fetchOriginal: typeof globalThis.fetch;
 let pedidos: Array<{ url: string; corpo: Record<string, any> }> = [];
@@ -430,6 +430,22 @@ describe("contexto entre as partes", () => {
     expect(ctx.falantes).toEqual(["F1", "F2", "F10"]);
   });
 
+  it("T22: a mesma voz mantém o rótulo ao interromper, falar por cima ou responder curto, na primeira parte e nas seguintes; rótulo novo só para voz que ainda não falou", () => {
+    const primeira = promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 600 });
+    const seguinte = promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 600, anterior: { falantes: ["F1", "F2", "F3"], ultimasFalas: [{ inicio: 1, fim: 2, falante: "F3", texto: "oi" }] } });
+    for (const prompt of [primeira, seguinte]) {
+      expect(prompt).toContain("também quando interrompe outra pessoa, fala ao mesmo tempo que ela");
+      expect(prompt).toContain("Interrupção, fala sobreposta e resposta curta não são sinal de voz nova");
+      expect(prompt).toContain("crie um novo só para uma voz que ainda não falou");
+      expect(prompt).toContain("Na fala sobreposta, cada voz é um item, com o próprio rótulo.");
+      expect(prompt).toContain("Nunca use nomes de pessoas no rótulo.");
+      // Sem "na dúvida, o rótulo antigo": juntar duas pessoas não tem conserto pelo texto.
+      expect(prompt).not.toMatch(/na dúvida/i);
+    }
+    expect(seguinte).toContain("Vozes já identificadas: F1, F2, F3. Reconheça as mesmas vozes e use os mesmos rótulos, também quando a voz só reaparece no meio de uma interrupção");
+    expect(seguinte).toContain("F3: oi");
+  });
+
   it("parte sem fala nenhuma passa adiante as últimas falas de antes", () => {
     const antes = { falantes: ["F1"], ultimasFalas: [{ inicio: 1, fim: 2, falante: "F1", texto: "oi" }] };
     expect(contextoParaAProxima([], antes)).toEqual(antes);
@@ -557,5 +573,86 @@ describe("transcreverFatia", () => {
     const uma = await transcreverFatia({ ...parteDe10Min, ultimaTentativa: false });
     expect(uma.segmentos).toHaveLength(1);
     expect(uma).not.toHaveProperty("tempos");
+  });
+});
+
+describe("G16: \"Detectar sozinho\" e os outros idiomas que a IA transcreve", () => {
+  it("com o idioma escolhido, o prompt e o esquema são os de sempre: sem pedir o idioma de cada fala", async () => {
+    const prompt = promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 600, anterior: { falantes: ["F1"], ultimasFalas: [] } });
+    expect(prompt).toContain("O idioma predominante esperado é português do Brasil; transcreva cada fala no idioma em que foi dita, sem traduzir.");
+    expect(prompt).not.toContain('"idioma"');
+    expect(prompt).toContain("6) Este trecho continua o anterior.");
+    responder({ corpo: respostaJson({ segmentos: [{ inicio: "00:01", fim: "00:02", falante: "F1", texto: "Oi." }] }) });
+    await transcreverFatia({ audio: Buffer.from("a"), mimeType: "audio/mp4", idioma: "pt-BR", inicioSegundos: 0, duracaoSegundos: 600 });
+    const item = pedidos[0].corpo.generationConfig.responseSchema.properties.segmentos.items;
+    expect(item.propertyOrdering).toEqual(["inicio", "fim", "falante", "texto"]);
+    expect(item.properties).not.toHaveProperty("idioma");
+  });
+
+  it("em \"Detectar sozinho\", o prompt não diz o idioma, avisa que ele pode mudar no meio, pede o código de cada fala e a continuação vira a regra 7", () => {
+    const anterior = { falantes: ["F1", "F2"], ultimasFalas: [{ inicio: 590, fim: 595, falante: "F2", texto: "Let's move on." }] };
+    const prompt = promptDaFatia({ idioma: "auto", duracaoSegundos: 600, anterior });
+    expect(prompt).not.toContain("predominante esperado");
+    expect(prompt).toContain("O idioma não foi informado: reconheça-o pela fala.");
+    expect(prompt).toContain("mudar de idioma no meio");
+    expect(prompt).toContain("transcreva cada fala no idioma em que foi dita, sem traduzir");
+    expect(prompt).toContain('6) "idioma" é o código do idioma em que a fala foi dita');
+    expect(prompt).toContain("7) Este trecho continua o anterior. Vozes já identificadas: F1, F2.");
+    // Na primeira parte, a regra do idioma é a última.
+    expect(promptDaFatia({ idioma: "auto", duracaoSegundos: 600 })).not.toContain("continua o anterior");
+  });
+
+  it("transcreverFatia em \"auto\" pede o idioma DEPOIS do texto, e cada fala volta com o código normalizado da lista", async () => {
+    responder({ corpo: respostaJson({ segmentos: [
+      { inicio: "00:01", fim: "00:05", falante: "F1", texto: "Bom dia, vamos começar.", idioma: "pt-BR" },
+      { inicio: "00:06", fim: "00:10", falante: "F2", texto: "The contract must be signed this month.", idioma: "en-US" },
+      { inicio: "00:11", fim: "00:12", falante: "F1", texto: "Certo.", idioma: "PT" },
+    ] }) });
+    const r = await transcreverFatia({ audio: Buffer.from("a"), mimeType: "audio/mp4", idioma: "auto", inicioSegundos: 600, duracaoSegundos: 600 });
+    expect(r.idioma).toBe("auto");
+    expect(r.segmentos.map(s => [s.inicio, s.idioma])).toEqual([[601, "pt-BR"], [606, "en"], [611, "pt-BR"]]);
+    // O inglês fica em inglês: nada aqui traduz.
+    expect(r.segmentos[1].texto).toBe("The contract must be signed this month.");
+    const item = pedidos[0].corpo.generationConfig.responseSchema.properties.segmentos.items;
+    expect(item.propertyOrdering).toEqual(["inicio", "fim", "falante", "texto", "idioma"]);
+    expect(item.required).toEqual(["inicio", "fim", "falante", "texto", "idioma"]);
+    expect(item.properties.idioma).toMatchObject({ type: "STRING" });
+    expect(pedidos[0].corpo.contents[0].parts[0].text).toContain("O idioma não foi informado");
+  });
+
+  it("o idioma que não é da lista (ou não é texto) some da fala, e a fala fica", () => {
+    const segmentos = normalizarSegmentos({ segmentos: [
+      { inicio: "00:01", fim: "00:02", falante: "F1", texto: "uno", idioma: "klingon" },
+      { inicio: "00:03", fim: "00:04", falante: "F1", texto: "dos", idioma: 7 },
+      { inicio: "00:05", fim: "00:06", falante: "F1", texto: "tres", idioma: "es" },
+    ] }, 0, 600);
+    expect(segmentos.map(s => s.texto)).toEqual(["uno", "dos", "tres"]);
+    expect(segmentos.map(s => s.idioma)).toEqual([undefined, undefined, "es"]);
+    expect(segmentos[0]).not.toHaveProperty("idioma");
+  });
+
+  it("um idioma fora dos 10 da tela (italiano) vai ao prompt pelo nome em português, e a escolha que não vale cai no padrão", async () => {
+    expect(promptDaFatia({ idioma: "it", duracaoSegundos: 600 })).toContain("O idioma predominante esperado é italiano;");
+    responder({ corpo: respostaJson({ segmentos: [{ inicio: "00:01", fim: "00:02", falante: "F1", texto: "Ciao." }] }) });
+    const r = await transcreverFatia({ audio: Buffer.from("a"), mimeType: "audio/mp4", idioma: "it-IT", inicioSegundos: 0, duracaoSegundos: 600 });
+    expect(r.idioma).toBe("it");
+    responder({ corpo: respostaJson({ segmentos: [] }) });
+    const padrao = await transcreverFatia({ audio: Buffer.from("a"), mimeType: "audio/mp4", idioma: "xx", inicioSegundos: 0, duracaoSegundos: 600 });
+    expect(padrao.idioma).toBe("pt-BR");
+  });
+});
+
+// Defeito 2 do teste manual T50 (23/11): onde começa cada reunião da juntada.
+describe("iniciosDasReunioesJuntadas", () => {
+  it("o início das partes com a marca, pela soma das anteriores; a que não chegou vale a duração padrão", async () => {
+    const { MARCA_DE_OUTRA_REUNIAO, DURACAO_DA_FATIA_SEGUNDOS } = await import("./transcricao-de-fatia");
+    const comMarca = { [MARCA_DE_OUTRA_REUNIAO]: true };
+    expect(iniciosDasReunioesJuntadas([
+      { seq: 0, durationMs: 300_000, result: {} },
+      { seq: 1, durationMs: 120_000, result: comMarca },
+      // seq 2 não chegou
+      { seq: 3, durationMs: 60_000, result: comMarca },
+    ])).toEqual([300, 300 + 120 + DURACAO_DA_FATIA_SEGUNDOS]);
+    expect(iniciosDasReunioesJuntadas([{ seq: 0, durationMs: 1, result: comMarca }, { seq: 1, durationMs: 1, result: null }])).toEqual([]);
   });
 });

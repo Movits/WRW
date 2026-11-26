@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
+import { terminaComALinhaPresa, type Transacao } from "./test/linha-presa";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -65,13 +67,13 @@ async function limpar() {
   const banco = await db();
   for (const dona of [DONA, EXCLUIDA]) {
     const contas = await banco.select({ id: users.id }).from(users).where(eq(users.openId, dona));
-    if (contas.length) await banco.delete(platformNotifications).where(inArray(platformNotifications.userId, contas.map(conta => conta.id)));
-    await banco.delete(lembretes).where(eq(lembretes.ownerId, dona));
-    await banco.delete(agendaReunioes).where(eq(agendaReunioes.ownerId, dona));
-    await banco.delete(proximasAcoes).where(eq(proximasAcoes.ownerId, dona));
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, dona));
-    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, dona));
-    await banco.delete(meetings).where(eq(meetings.ownerId, dona));
+    if (contas.length) await apagarPelaChave(banco, platformNotifications, inArray(platformNotifications.userId, contas.map(conta => conta.id)));
+    await apagarPelaChave(banco, lembretes, eq(lembretes.ownerId, dona));
+    await apagarPelaChave(banco, agendaReunioes, eq(agendaReunioes.ownerId, dona));
+    await apagarPelaChave(banco, proximasAcoes, eq(proximasAcoes.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.ownerId, dona));
+    await apagarPelaChave(banco, meetingSummaries, eq(meetingSummaries.ownerId, dona));
+    await apagarPelaChave(banco, meetings, eq(meetings.ownerId, dona));
   }
 }
 
@@ -242,5 +244,23 @@ describe.skipIf(!temBanco)("Lembretes no sino (integração)", () => {
     await excluirConta(await db(), { id: conta, openId: EXCLUIDA, email: null }, { apagarArquivo: async () => undefined });
     expect(await lembreteDe(id)).toBeUndefined();
     expect(await (await db()).select().from(platformNotifications).where(eq(platformNotifications.userId, conta))).toEqual([]);
+  });
+
+  // Revisão do pacote do match (20/11): o DELETE pela conta, pelo tipo e pelo
+  // endereço travava o intervalo da conta no índice e esperava pelo aviso que
+  // outra transação acabava de criar nela, a forma do deadlock que o aviso de
+  // pronta já tinha tirado (avisarReuniaoPronta).
+  it("apagar os avisos de um endereço vai pela chave: não espera pelo aviso que outra transação acabou de criar na mesma conta", async () => {
+    const conta = await contaDe(DONA);
+    const endereco = "/reunioes/reuniao-que-sai";
+    await (await db()).insert(platformNotifications).values([
+      { userId: conta, type: "reuniao_pronta", title: "Pronta", actionUrl: endereco, isRead: false },
+      { userId: conta, type: "lembrete", title: "Lembrete", actionUrl: endereco, isRead: false },
+    ]);
+    const outroAviso = (tx: Transacao) => tx.insert(platformNotifications).values({ userId: conta, type: "system", title: "Outro aviso", actionUrl: "/outro", isRead: false });
+    const apagar = async () => (await db()).transaction(tx => laco.apagarAvisosDoEndereco(tx, DONA, endereco));
+
+    expect(await terminaComALinhaPresa(await db(), outroAviso, apagar)).toBe(true);
+    expect(await avisosDe(DONA, endereco)).toEqual([]);
   });
 });

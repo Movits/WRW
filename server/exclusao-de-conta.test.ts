@@ -57,9 +57,9 @@ import {
 import { COLUNAS_DE_USUARIA } from "../scripts/exame/limpeza.mjs";
 import { CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
 import {
-  contextMedia, dealRoomDocuments, dealRooms, loginAttempts, meetingAudioSlices, meetingRecordings,
+  contextMedia, dealRoomDocuments, dealRooms, loginAttempts, meetingAttachments, meetingAudioSlices, meetingDocuments, meetingRecordings,
   meetings, opportunities, opportunityMatches, privateContacts, sivcDocuments, sivcVerifications,
-  strategicGroups, users, googleAgendaConexoes,
+  strategicGroups, users, googleAgendaConexoes, voiceProfileConsents, voiceProfiles,
 } from "../drizzle/schema";
 import { encryptData } from "./security";
 import { URL_DE_REVOGACAO } from "./google-oauth";
@@ -107,7 +107,46 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // 71: a agenda de reuniões (H16a) somou agenda_reunioes.owner_id.
     // 72: a conexão com a Google Agenda (H16b) somou google_agenda_conexoes.userId.
     // 73: os lembretes no sino (H15) somaram lembretes.owner_id.
-    expect(PARES).toHaveLength(73);
+    // 75: os 73 de antes, mais o documento da reunião (H12, meeting_documents.owner_id)
+    // e o resumo por e-mail (H22, resumo_por_email.owner_id).
+    // 77: as pastas das reuniões (H7d) somaram meeting_folders.owner_id, e o Pergunte
+    // a várias reuniões (H6c), perguntas_entre_reunioes.owner_id.
+    // 81: os 77, mais os modelos de resumo, as preferências e o teto do refazer (H4e, três
+    // tabelas) e as fotos e os desenhos do resumo (H4g e H4h, meeting_attachments.owner_id).
+    // 83: os 81, mais o áudio do resumo (H19b, resumo_em_audio.owner_id) e as buscas do
+    // complemento (H4i, buscas_do_complemento.owner_id).
+    // 87: os 83, mais a base das associações (N1): entidades, entidade_membros,
+    // importacoes_de_entidade e importacao_documentos_vistos, todas por owner_id.
+    // 89: os 87, mais o pedido de contato pela entidade (N2): pedidos_pela_entidade.owner_id e .userId.
+    expect(PARES).toContainEqual({ tabela: "entidade_membros", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "entidades", coluna: "owner_id" });
+    // 85 (na main, em paralelo): os 83, mais as participantes das reuniões (R1b): meeting_participants.owner_id
+    // (a dona) e meeting_participants.userId (a conta como participante).
+    // 88: os 85, mais os espaços de equipe (R2): meeting_folder_members.owner_id e
+    // userId, e meeting_folder_tasks.owner_id; com a conta Google (A8, contas_google.userId), 89.
+    // 95: os 89 das associações somados aos 6 das reuniões, das equipes e da conta Google.
+    // 97: os 95, mais o perfil de voz (H3d): voice_profiles.owner_id (sai) e
+    // voice_profile_consents.owner_id (fica: a prova do consentimento e da revogação).
+    expect(PARES).toHaveLength(97);
+    expect(PARES).toContainEqual({ tabela: "voice_profiles", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "voice_profile_consents", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "meeting_folder_members", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "meeting_folder_members", coluna: "userId" });
+    expect(PARES).toContainEqual({ tabela: "meeting_folder_tasks", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "meeting_participants", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "meeting_participants", coluna: "userId" });
+    expect(PARES).toContainEqual({ tabela: "contas_google", coluna: "userId" });
+    expect(PARES).toContainEqual({ tabela: "meeting_attachments", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "resumo_em_audio", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "buscas_do_complemento", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "meeting_folders", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "perguntas_entre_reunioes", coluna: "owner_id" });
+    // Os modelos de resumo da dona, as preferências do resumo e o teto do refazer (H4e).
+    expect(PARES).toContainEqual({ tabela: "modelos_de_resumo_proprios", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "preferencias_do_resumo", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "resumos_refeitos", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "meeting_documents", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "resumo_por_email", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "meeting_summary_translations", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "proximas_acoes", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "google_agenda_conexoes", coluna: "userId" });
@@ -159,6 +198,7 @@ describe("A2) a ordem do plano não deixa órfão", () => {
 // `condicao` é o WHERE inteiro, para os testes que o renderizam pelo dialeto.
 type Delecao = { tabela: unknown; colunas: string[]; sql: string; condicao: unknown };
 let delecoes: Delecao[] = [];
+let insercoes: Array<{ tabela: unknown; valores: Record<string, unknown> }> = [];
 let atualizacoes: Array<{ tabela: unknown; valores: Record<string, unknown>; condicao?: unknown }> = [];
 let linhasPorTabela: Map<unknown, unknown[]>;
 let apagadosNoBucket: string[] = [];
@@ -201,8 +241,14 @@ function textoDe(condicao: unknown): string {
 function selecionar(tabela: unknown) {
   const linhas = linhasPorTabela.get(tabela) ?? [];
   const resultado = Promise.resolve(linhas);
+  // O perfil de voz (H3d) lê com .limit() e .orderBy() depois do WHERE.
+  const encadeavel = (): Record<string, unknown> => ({
+    limit: () => encadeavel(),
+    orderBy: () => encadeavel(),
+    then: resultado.then.bind(resultado),
+  });
   return {
-    where: () => resultado,
+    where: () => encadeavel(),
     then: resultado.then.bind(resultado),
   };
 }
@@ -216,6 +262,13 @@ const fakeDb = {
       delecoes.push({ tabela, colunas: colunasDe(condicao), sql: textoDe(condicao), condicao });
       ordemDosEfeitos.push("delete");
       return [{ affectedRows: (linhasPorTabela.get(tabela) ?? []).length || 1 }];
+    },
+  }),
+  insert: (tabela: unknown) => ({
+    values: async (valores: Record<string, unknown>) => {
+      insercoes.push({ tabela, valores });
+      ordemDosEfeitos.push(`insert:${getTableName(tabela as MySqlTable)}`);
+      return [{ affectedRows: 1 }];
     },
   }),
   // O mysql2 devolve [ResultSetHeader, campos] também no UPDATE.
@@ -249,6 +302,7 @@ beforeEach(() => {
   bucketDublado.apagarTodasAsVersoes.mockClear();
   bucketDublado.apagarSimples.mockClear();
   delecoes = [];
+  insercoes = [];
   atualizacoes = [];
   apagadosNoBucket = [];
   ordemDosEfeitos = [];
@@ -315,7 +369,7 @@ describe("B) excluirConta apaga o que é da conta, na ordem, e nada além", () =
     expect(delecoes[delecoes.length - 1].tabela).toBe(users);
   });
 
-  it("o passo de audit_logs preserva as duas ações da decisão de 02/09", async () => {
+  it("o passo de audit_logs preserva as ações da decisão de 02/09 e as da consulta das reuniões (R1a)", async () => {
     await excluirConta(fakeDb, CONTA, { apagarArquivo });
     const auditoria = delecoes.find(d => d.colunas.includes("action"));
     expect(auditoria, "nenhum DELETE em audit_logs com filtro por ação").toBeDefined();
@@ -809,11 +863,11 @@ describe("C) cada passo gera um DELETE parametrizado com a coluna certa", () => 
     },
   );
 
-  it("o passo de audit_logs preserva as duas ações, com placeholder para cada uma", () => {
+  it("o passo de audit_logs preserva as quatro ações, com placeholder para cada uma", () => {
     const passo = PLANO_DE_EXCLUSAO.find(p => nomeDoPasso(p) === "audit_logs.userId")!;
     const { sql: texto, params } = db.delete(passo.tabela)
       .where(and(eq(passo.coluna, 7), passo.filtro!(chaves as never)!)).toSQL();
-    expect(texto).toMatch(/`action` NOT IN \(\?, \?\)/i);
+    expect(texto).toMatch(/`action` NOT IN \(\?, \?, \?, \?\)/i);
     expect(params).toEqual([7, ...ACOES_DE_AUDITORIA_PRESERVADAS]);
   });
 
@@ -833,5 +887,186 @@ describe("C) cada passo gera um DELETE parametrizado com a coluna certa", () => 
     expect(texto).toContain("`id` = ?");
     expect(texto).toContain("`openId` = ?");
     expect(params).toEqual([7, "open-7"]);
+  });
+});
+
+// ═══ B8) o PDF da reunião de documento (H12) segue a regra do áudio ═══════════
+// O arquivo da reunião que nasceu de um PDF ou de fotos de um texto fica 30
+// dias no bucket, como o áudio, e sai com a conta: com todas as versões e, se o
+// bucket recusar, a linha fica como ponteiro vencido para a varredura.
+describe("B8) o PDF da reunião de documento sai com a conta, e o que o bucket recusou fica só como ponteiro", () => {
+  const DOCUMENTO = "meetings/open-7/reuniao-3/documento-abcd1234.pdf";
+  const delecaoDosDocumentos = () => delecoes.filter(d => d.tabela === meetingDocuments);
+  const atualizacoesDosDocumentos = () => atualizacoes.filter(a => a.tabela === meetingDocuments);
+  beforeEach(() => {
+    linhasPorTabela.set(meetingDocuments, [{ id: "documento-1", chave: DOCUMENTO }]);
+  });
+
+  it("a chave do PDF prova a posse e vai ao bucket com TODAS as versões (apagador padrão)", async () => {
+    await excluirConta(fakeDb, CONTA);
+    expect(bucketDublado.apagarTodasAsVersoes.mock.calls.map(([chave]) => chave)).toContain(DOCUMENTO);
+    expect(bucketDublado.apagarSimples.mock.calls.map(([chave]) => chave)).not.toContain(DOCUMENTO);
+  });
+
+  it("sem falha, a linha sai pela dona e nenhuma vira ponteiro", async () => {
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(apagadosNoBucket).toContain(DOCUMENTO);
+    expect(atualizacoesDosDocumentos()).toEqual([]);
+    expect(renderizar(delecaoDosDocumentos()[0].condicao)).toEqual({ sql: "`meeting_documents`.`owner_id` = ?", params: ["open-7"] });
+  });
+
+  it("o bucket recusou o PDF: o DELETE o deixa de fora, e ele vence na hora como ponteiro", async () => {
+    bucketFalha.add(DOCUMENTO);
+    const antes = Date.now();
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(relatorio.arquivosComFalha).toEqual([DOCUMENTO]);
+    expect(renderizar(delecaoDosDocumentos()[0].condicao)).toEqual({
+      sql: "(`meeting_documents`.`owner_id` = ? and `meeting_documents`.`id` not in (?))",
+      params: ["open-7", "documento-1"],
+    });
+    const [ponteiro] = atualizacoesDosDocumentos();
+    expect(Object.keys(ponteiro.valores)).toEqual(["expiresAt"]);
+    expect(ponteiro.valores.expiresAt).toBeGreaterThanOrEqual(antes);
+    expect(renderizar(ponteiro.condicao)).toEqual({
+      sql: "(`meeting_documents`.`owner_id` = ? and `meeting_documents`.`id` in (?))",
+      params: ["open-7", "documento-1"],
+    });
+    expect(relatorio.passos.map(p => p.nome)).toContain("meeting_documents (ponteiro, UPDATE)");
+  });
+
+  it("a chave de outra dona não prova a posse e não vai ao bucket", async () => {
+    linhasPorTabela.set(meetingDocuments, [{ id: "documento-2", chave: "meetings/open-OUTRA/r/documento-0000.pdf" }]);
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(apagadosNoBucket.some(chave => chave.includes("open-OUTRA"))).toBe(false);
+  });
+});
+
+// ═══ B9) as fotos e os desenhos do resumo (H4g e H4h) seguem a regra do PDF ═══
+describe("B9) os anexos do resumo saem com a conta, e o que o bucket recusou fica só como ponteiro", () => {
+  const ANEXO = "meetings/open-7/reuniao-3/anexo-11111111-2222-4333-8444-555555555555.webp";
+  const delecaoDosAnexos = () => delecoes.filter(d => d.tabela === meetingAttachments);
+  const atualizacoesDosAnexos = () => atualizacoes.filter(a => a.tabela === meetingAttachments);
+  beforeEach(() => {
+    linhasPorTabela.set(meetingAttachments, [{ id: "anexo-1", chave: ANEXO }]);
+  });
+
+  it("a chave da imagem prova a posse e vai ao bucket com TODAS as versões", async () => {
+    await excluirConta(fakeDb, CONTA);
+    expect(bucketDublado.apagarTodasAsVersoes.mock.calls.map(([chave]) => chave)).toContain(ANEXO);
+    expect(bucketDublado.apagarSimples.mock.calls.map(([chave]) => chave)).not.toContain(ANEXO);
+  });
+
+  it("sem falha, a linha sai pela dona e nenhuma vira ponteiro", async () => {
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(apagadosNoBucket).toContain(ANEXO);
+    expect(atualizacoesDosAnexos()).toEqual([]);
+    expect(renderizar(delecaoDosAnexos()[0].condicao)).toEqual({ sql: "`meeting_attachments`.`owner_id` = ?", params: ["open-7"] });
+  });
+
+  it("o bucket recusou a imagem: o DELETE a deixa de fora, e ela vence na hora como ponteiro", async () => {
+    bucketFalha.add(ANEXO);
+    const antes = Date.now();
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(relatorio.arquivosComFalha).toEqual([ANEXO]);
+    expect(renderizar(delecaoDosAnexos()[0].condicao)).toEqual({
+      sql: "(`meeting_attachments`.`owner_id` = ? and `meeting_attachments`.`id` not in (?))",
+      params: ["open-7", "anexo-1"],
+    });
+    const [ponteiro] = atualizacoesDosAnexos();
+    expect(Object.keys(ponteiro.valores)).toEqual(["expiresAt"]);
+    expect(ponteiro.valores.expiresAt).toBeGreaterThanOrEqual(antes);
+    expect(relatorio.passos.map(p => p.nome)).toContain("meeting_attachments (ponteiro, UPDATE)");
+  });
+
+  it("a chave de outra dona não prova a posse e não vai ao bucket", async () => {
+    linhasPorTabela.set(meetingAttachments, [{ id: "anexo-2", chave: "meetings/open-OUTRA/r/anexo-0000.webp" }]);
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(apagadosNoBucket.some(chave => chave.includes("open-OUTRA"))).toBe(false);
+  });
+});
+
+// ═══════════ B10) o perfil de voz (H3d): a amostra e a linha saem, o registro fica ═══════════
+describe("B10) o perfil de voz sai de vez, e a revogação fica registrada", () => {
+  it("a amostra da dona sai do bucket com TODAS as versões (o apagador padrão), e a de outra conta não é colhida", async () => {
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: "perfis-de-voz/open-7/amostra.webm" }]);
+    const chaves = await lerChavesDaConta(fakeDb, CONTA);
+    expect(await chavesDeArquivosDaConta(fakeDb, chaves)).toContain("perfis-de-voz/open-7/amostra.webm");
+    await excluirConta(fakeDb, CONTA, { revogarGoogle: async () => "revogada" as const });
+    expect(bucketDublado.apagarTodasAsVersoes).toHaveBeenCalledWith("perfis-de-voz/open-7/amostra.webm");
+    expect(bucketDublado.apagarSimples).not.toHaveBeenCalledWith("perfis-de-voz/open-7/amostra.webm");
+
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-x", chave: "perfis-de-voz/open-OUTRA/amostra.webm" }]);
+    expect(await chavesDeArquivosDaConta(fakeDb, chaves)).not.toContain("perfis-de-voz/open-OUTRA/amostra.webm");
+  });
+
+  it("registra a revogação (origem exclusao_da_conta, sem a voz) ANTES de a linha do perfil sair, e o registro não é apagado", async () => {
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: "perfis-de-voz/open-7/amostra.webm" }]);
+    linhasPorTabela.set(voiceProfileConsents, [{ versao: "perfil-de-voz-2026-11-25" }]);
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    const revogacao = insercoes.find(i => i.tabela === voiceProfileConsents);
+    expect(revogacao?.valores).toMatchObject({ ownerId: "open-7", evento: "revogou", origem: "exclusao_da_conta", versaoDoTexto: "perfil-de-voz-2026-11-25" });
+    expect(Object.keys(revogacao!.valores)).not.toContain("storageKey");
+    const insercao = ordemDosEfeitos.indexOf("insert:voice_profile_consents");
+    const delecaoDoPerfil = delecoes.findIndex(d => d.tabela === voiceProfiles);
+    expect(insercao).toBeGreaterThanOrEqual(0);
+    expect(delecaoDoPerfil).toBeGreaterThanOrEqual(0);
+    // A inserção vem antes de qualquer DELETE do plano.
+    expect(ordemDosEfeitos.indexOf("delete")).toBeGreaterThan(insercao);
+    expect(delecoes.find(d => d.tabela === voiceProfiles)?.colunas).toEqual(["owner_id", "id"]);
+    expect(delecoes.some(d => d.tabela === voiceProfileConsents)).toBe(false);
+    expect(relatorio.passos.map(p => p.nome)).toContain("voice_profile_consents (revogação, INSERT)");
+  });
+
+  it("sem perfil, nenhuma revogação é registrada", async () => {
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(insercoes.some(i => i.tabela === voiceProfileConsents)).toBe(false);
+  });
+
+  const AMOSTRA = "perfis-de-voz/open-7/amostra.webm";
+  const delecaoDoPerfil = () => delecoes.find(d => d.tabela === voiceProfiles);
+
+  it("sem falha, sai a linha do perfil cuja amostra saiu do bucket, pelo id e pela dona", async () => {
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: AMOSTRA }]);
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(apagadosNoBucket).toContain(AMOSTRA);
+    expect(renderizar(delecaoDoPerfil()!.condicao)).toEqual({
+      sql: "(`voice_profiles`.`owner_id` = ? and `voice_profiles`.`id` in (?))",
+      params: ["open-7", "perfil-1"],
+    });
+  });
+
+  it("o bucket recusou SÓ a amostra: a linha do perfil fica (é o único ponteiro para a voz), e o resto sai", async () => {
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: AMOSTRA }]);
+    bucketFalha.add(AMOSTRA);
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(relatorio.arquivosComFalha).toEqual([AMOSTRA]);
+    // O DELETE do perfil não casa nenhuma linha: a varredura a acha sem a conta.
+    expect(renderizar(delecaoDoPerfil()!.condicao).params).toEqual(["open-7"]);
+    expect(renderizar(delecaoDoPerfil()!.condicao).sql).toMatch(/and false\)$/);
+    // O áudio de reunião, que não falhou, sai como sempre; a conta também.
+    expect(apagadosNoBucket).toContain("meetings/open-7/reuniao-1/recording.webm");
+    expect(delecoes.some(d => d.tabela === users)).toBe(true);
+  });
+
+  it("o perfil regravado depois da leitura das chaves fica: a amostra nova não foi tentada", async () => {
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: AMOSTRA }]);
+    // A regravação acontece enquanto a exclusão fala com o bucket.
+    const regravandoNoMeio = async (chave: string) => {
+      await apagarArquivo(chave);
+      linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: "perfis-de-voz/open-7/nova.webm" }]);
+    };
+    await excluirConta(fakeDb, CONTA, { apagarArquivo: regravandoNoMeio });
+    expect(apagadosNoBucket).toContain(AMOSTRA);
+    expect(apagadosNoBucket).not.toContain("perfis-de-voz/open-7/nova.webm");
+    expect(renderizar(delecaoDoPerfil()!.condicao).sql).toMatch(/and false\)$/);
+  });
+
+  it("a revogação não se repete: se o último evento da dona já é uma revogação, a exclusão não grava outra", async () => {
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: AMOSTRA }]);
+    // O dublê devolve a mesma linha para a última revogação e o último consentimento: a mesma hora conta como revogado.
+    linhasPorTabela.set(voiceProfileConsents, [{ quando: 1_000, versao: "perfil-de-voz-2026-11-25" }]);
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(insercoes.some(i => i.tabela === voiceProfileConsents)).toBe(false);
+    expect(relatorio.passos.map(p => p.nome)).not.toContain("voice_profile_consents (revogação, INSERT)");
   });
 });

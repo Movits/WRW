@@ -73,7 +73,7 @@ export const VALIDADE_DO_DESAFIO_MS = 5 * 60_000;
 export const ALGORITMOS_ACEITOS = [-7, -8, -257];
 
 /** O nome que o aparelho mostra ao guardar a chave. */
-const NOME_DO_SITE = "WRW";
+const NOME_DO_SITE = "Marquesa Global Match";
 
 export const ACAO_CHAVE_CADASTRADA = "PASSKEY_REGISTERED";
 export const ACAO_CHAVE_REMOVIDA = "PASSKEY_REMOVED";
@@ -598,9 +598,9 @@ export function montarAvisoDeChaveCadastrada(dados: {
   const nome = dados.nome?.trim() || "Membro";
   const quando = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(dados.quando);
   const linkDaSenha = dados.site ? `${dados.site.replace(/\/+$/, "")}/forgot-password` : null;
-  const assunto = "Nova chave de acesso na sua conta WRW";
+  const assunto = "Nova chave de acesso na sua conta Marquesa Global Match";
   const cadastrada = (apelido: string | null) =>
-    `Uma chave de acesso (Face ID, digital ou bloqueio de tela) foi cadastrada na sua conta WRW em ${quando}, no horário de Brasília${apelido ? `, com o nome "${apelido}"` : ""}.`;
+    `Uma chave de acesso (Face ID, digital ou bloqueio de tela) foi cadastrada na sua conta Marquesa Global Match em ${quando}, no horário de Brasília${apelido ? `, com o nome "${apelido}"` : ""}.`;
   const seNaoFoi = "Se não foi você, redefina a sua senha agora: isso encerra todas as sessões e apaga todas as chaves de acesso da conta.";
   const text = [
     `Olá, ${nome}.`,

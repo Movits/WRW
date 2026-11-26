@@ -64,7 +64,7 @@ describe("useGravacaoEmPartes (G9)", () => {
   it("cria a reunião no início, guarda cada parte no aparelho, envia em ordem, apaga a confirmada e encerra na última", async () => {
     d.enviarParte.mockResolvedValue({ tipo: "recebida" });
     const aoEncerrar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar: vi.fn() }));
     await act(async () => { await result.current.iniciar({ title: "Reunião", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
     expect(d.iniciar).toHaveBeenCalledWith(expect.objectContaining({ title: "Reunião", consentGranted: true, origem: "gravacao" }));
 
@@ -83,7 +83,7 @@ describe("useGravacaoEmPartes (G9)", () => {
   it("envio passageiro: a parte FICA no aparelho (a retomada manda depois), e o fim ainda é declarado", async () => {
     d.enviarParte.mockResolvedValue({ tipo: "passageira" });
     const aoEncerrar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar: vi.fn() }));
     await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
     act(() => result.current.receberParte(parte(0, true)));
     await waitFor(() => expect(aoEncerrar).toHaveBeenCalled());
@@ -93,7 +93,7 @@ describe("useGravacaoEmPartes (G9)", () => {
   it("sem IndexedDB, envia da memória mesmo assim", async () => {
     d.guardarParte.mockRejectedValue(new Error("sem IndexedDB"));
     d.enviarParte.mockResolvedValue({ tipo: "recebida" });
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
     act(() => result.current.receberParte(parte(0, false)));
     await waitFor(() => expect(d.enviarParte).toHaveBeenCalled());
@@ -103,7 +103,7 @@ describe("useGravacaoEmPartes (G9)", () => {
     d.enviarParte.mockResolvedValue({ tipo: "recebida" });
     d.encerrar.mockRejectedValue(new Error("rede"));
     const aoFalhar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar }));
     await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
     act(() => result.current.receberParte(parte(0, true)));
     await waitFor(() => expect(aoFalhar).toHaveBeenCalled());
@@ -113,7 +113,7 @@ describe("useGravacaoEmPartes (G9)", () => {
     d.enviarParte.mockResolvedValue({ tipo: "recebida" });
     d.encerrar.mockRejectedValueOnce(new Error("rede"));
     const aoFalhar = vi.fn();
-    const primeira = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar }));
+    const primeira = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar }));
     // A retomada da montagem termina antes (senão ela mesma declara o fim já na primeira volta).
     await waitFor(() => expect(d.enviarPendentes).toHaveBeenCalled());
     await act(async () => { await new Promise(r => setTimeout(r, 10)); });
@@ -125,7 +125,7 @@ describe("useGravacaoEmPartes (G9)", () => {
     expect(JSON.parse(localStorage.getItem("wrw:fins-de-gravacao-pendentes")!)).toEqual({ "r-1": { partes: 2, dona: "dona-1" } });
     primeira.unmount();
     // A tela aberta de novo (ou a próxima volta da retomada) declara o fim.
-    renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await waitFor(() => expect(localStorage.getItem("wrw:fins-de-gravacao-pendentes")).toBeNull());
     expect(d.encerrar).toHaveBeenLastCalledWith({ meetingId: "r-1", partes: 2 });
   });
@@ -134,7 +134,7 @@ describe("useGravacaoEmPartes (G9)", () => {
     d.enviarParte.mockResolvedValue({ tipo: "recebida" });
     d.encerrar.mockRejectedValueOnce({ message: "Esta gravação já foi encerrada.", data: { code: "CONFLICT" } });
     const aoFalhar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar }));
     await retomadaDaMontagemFeita();
     await act(async () => { await result.current.iniciar(INICIO); });
     act(() => result.current.receberParte(parte(0, true)));
@@ -145,7 +145,7 @@ describe("useGravacaoEmPartes (G9)", () => {
   it("a última parte vazia (Parar logo depois de uma troca) não vai, e o fim conta só as partes com áudio", async () => {
     d.enviarParte.mockResolvedValue({ tipo: "recebida" });
     const aoEncerrar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar: vi.fn() }));
     await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
     act(() => result.current.receberParte(parte(0, false)));
     act(() => result.current.receberParte({ ...parte(1, true), blob: new Blob([]) }));
@@ -154,18 +154,21 @@ describe("useGravacaoEmPartes (G9)", () => {
     expect(d.encerrar).toHaveBeenCalledWith({ meetingId: "r-1", partes: 1 });
   });
 
-  it("nenhuma parte com áudio: a reunião vazia é excluída, não encerrada", async () => {
+  it("nenhuma parte com áudio: a reunião vazia é excluída, não encerrada, e a tela não vai ao detalhe dela", async () => {
     const aoEncerrar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    const aoEncerrarSemAudio = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoEncerrarSemAudio, aoFalhar: vi.fn() }));
     await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
+    // G17: o microfone caiu no primeiro segundo, e a última parte (a primeira) saiu vazia.
     act(() => result.current.receberParte({ ...parte(0, true), blob: new Blob([]) }));
-    await waitFor(() => expect(aoEncerrar).toHaveBeenCalled());
+    await waitFor(() => expect(aoEncerrarSemAudio).toHaveBeenCalledWith("r-1"));
+    expect(aoEncerrar).not.toHaveBeenCalled();
     expect(d.encerrar).not.toHaveBeenCalled();
     expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-1" });
   });
 
   it("cancelar (o microfone não abriu) exclui a reunião que nasceu, pelo caminho de exclusão de sempre", async () => {
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
     let resultado: ResultadoDoDescarte | undefined;
     await act(async () => { resultado = await result.current.cancelar("r-1"); });
@@ -179,7 +182,7 @@ describe("useGravacaoEmPartes (G9)", () => {
     d.getData.mockReturnValue(undefined);
     d.fetch.mockResolvedValue({ openId: "dona-2" });
     d.enviarParte.mockResolvedValue({ tipo: "recebida" });
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
     act(() => result.current.receberParte(parte(0, false)));
     await waitFor(() => expect(d.guardarParte).toHaveBeenCalledWith(expect.objectContaining({ dona: "dona-2" })));
@@ -187,7 +190,7 @@ describe("useGravacaoEmPartes (G9)", () => {
 
   it("parte que não foi ao servidor ocupa a sessão até sair do aparelho", async () => {
     d.enviarParte.mockResolvedValue({ tipo: "passageira" });
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await waitFor(() => expect(d.enviarPendentes).toHaveBeenCalled());
     await act(async () => { await new Promise(r => setTimeout(r, 10)); });
     await act(async () => { await result.current.iniciar({ title: "R", language: "pt-BR", consentNoticeVersion: "2026-11-14" }); });
@@ -195,15 +198,12 @@ describe("useGravacaoEmPartes (G9)", () => {
     await waitFor(() => expect(motivoDaOcupacao()).toBe("audio-nao-enviado"));
   });
 
-  it("ativo: retoma o que ficou no aparelho ao montar; inativo: não toca o servidor", async () => {
-    renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+  // G14: o hook não tem mais o modo inativo, que era o do ?envioUnico=1 (o
+  // envio único de antes, que não tocava o servidor durante a gravação): o
+  // gravador grava sempre em partes, e toda tela que o monta retoma.
+  it("retoma o que ficou no aparelho ao montar", async () => {
+    renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await waitFor(() => expect(d.enviarPendentes).toHaveBeenCalledWith("dona-1", expect.objectContaining({ aoRecusar: expect.any(Function) })));
-    d.enviarPendentes.mockClear();
-    d.getData.mockClear();
-    renderHook(() => useGravacaoEmPartes({ ativo: false, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
-    await new Promise(r => setTimeout(r, 10));
-    expect(d.enviarPendentes).not.toHaveBeenCalled();
-    expect(d.getData).not.toHaveBeenCalled();
   });
 });
 
@@ -218,7 +218,7 @@ describe("useGravacaoEmPartes — G13b", () => {
     d.enviarParte.mockResolvedValue({ tipo: "recebida" });
     const aoEncerrar = vi.fn();
     const aoFalhar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar }));
     await act(async () => { await result.current.iniciar(INICIO); });
     // A outra tentativa (o segundo clique de um duplo clique) cancela a reunião DELA.
     await act(async () => { await result.current.cancelar("r-2"); });
@@ -237,7 +237,7 @@ describe("useGravacaoEmPartes — G13b", () => {
     d.iniciar.mockResolvedValueOnce({ id: "r-1" }).mockResolvedValueOnce({ id: "r-2" });
     const aoEncerrar = vi.fn();
     const aoFalhar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar }));
     await act(async () => { await result.current.iniciar(INICIO); });
     act(() => result.current.receberParte(parte(0, true)));
     await waitFor(() => expect(d.enviarParte).toHaveBeenCalledTimes(1));
@@ -258,7 +258,7 @@ describe("useGravacaoEmPartes — G13b", () => {
       return { restantes: 0, semSessao: false };
     });
     const aoRecusarParte = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoRecusarParte }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoRecusarParte }));
     await waitFor(() => expect(aoRecusarParte).toHaveBeenCalledWith("FORMATO"));
     await act(async () => { await result.current.iniciar(INICIO); });
     act(() => result.current.receberParte(parte(0, false)));
@@ -272,7 +272,7 @@ describe("useGravacaoEmPartes — G13b", () => {
     d.iniciar.mockResolvedValueOnce({ id: "r-1" }).mockResolvedValueOnce({ id: "r-2" });
     const aoFicarSemCopia = vi.fn();
     const aoEncerrar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn(), aoFicarSemCopia }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar: vi.fn(), aoFicarSemCopia }));
     await act(async () => { await result.current.iniciar(INICIO); });
     act(() => result.current.receberParte(parte(0, false)));
     act(() => result.current.receberParte(parte(1, true)));
@@ -291,7 +291,7 @@ describe("useGravacaoEmPartes — G13b", () => {
     d.fetch.mockRejectedValue(new Error("rede"));
     d.enviarParte.mockResolvedValue({ tipo: "recebida" });
     const aoFicarSemCopia = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoFicarSemCopia }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoFicarSemCopia }));
     await act(async () => { await result.current.iniciar(INICIO); });
     act(() => result.current.receberParte(parte(0, false)));
     await waitFor(() => expect(d.enviarParte).toHaveBeenCalled());
@@ -305,7 +305,7 @@ describe("useGravacaoEmPartes — G13b", () => {
     d.enviarParte.mockResolvedValue({ tipo: "recebida" });
     const aoEncerrar = vi.fn();
     const aoFalhar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar }));
     await act(async () => { await result.current.iniciar(INICIO); });
     act(() => result.current.receberParte(parte(0, false)));
     act(() => result.current.receberParte(parte(1, false)));
@@ -334,7 +334,7 @@ describe("useGravacaoEmPartes — G13b", () => {
 
   it("descartar com a exclusão falhando: responde 'pendente', fica guardado e a retomada apaga depois", async () => {
     d.excluir.mockRejectedValueOnce(new Error("rede"));
-    const primeira = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    const primeira = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await retomadaDaMontagemFeita();
     await act(async () => { await primeira.result.current.iniciar(INICIO); });
     let resultado: ResultadoDoDescarte | undefined;
@@ -343,7 +343,7 @@ describe("useGravacaoEmPartes — G13b", () => {
     expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([{ id: "r-1", dona: "dona-1" }]);
     primeira.unmount();
     // A tela aberta de novo (ou a próxima volta da retomada) apaga.
-    renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await waitFor(() => expect(localStorage.getItem(DESCARTES)).toBeNull());
     expect(d.excluir).toHaveBeenCalledTimes(2);
     expect(d.excluir).toHaveBeenLastCalledWith({ meetingId: "r-1" });
@@ -352,7 +352,7 @@ describe("useGravacaoEmPartes — G13b", () => {
   it("a exclusão repetida que responde NOT_FOUND (a anterior chegou e só a resposta se perdeu) dá o descarte por feito", async () => {
     localStorage.setItem(DESCARTES, JSON.stringify([{ id: "r-velha", dona: "dona-1" }]));
     d.excluir.mockRejectedValue({ message: "Reunião não encontrada.", data: { code: "NOT_FOUND" } });
-    renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await waitFor(() => expect(localStorage.getItem(DESCARTES)).toBeNull());
     expect(d.apagarPartesDaReuniao).toHaveBeenCalledWith("r-velha");
   });
@@ -368,7 +368,7 @@ describe("useGravacaoEmPartes — G13b", () => {
       return { restantes: 0, semSessao: false };
     });
     const aoRecusarParte = vi.fn();
-    renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoRecusarParte }));
+    renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoRecusarParte }));
     await waitFor(() => expect(aoRecusarParte).toHaveBeenCalled());
     expect(aoRecusarParte).toHaveBeenCalledTimes(1);
     expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-descartada" });
@@ -387,7 +387,7 @@ describe("useGravacaoEmPartes — o descarte com dona e o que ele responde (revi
     localStorage.setItem(DESCARTES, JSON.stringify([{ id: "r-minha", dona: "dona-1" }, { id: "r-da-outra", dona: "outra-conta" }]));
     // Para a conta logada, toda reunião que não é dela responde NOT_FOUND.
     d.excluir.mockRejectedValue({ message: "Reunião não encontrada.", data: { code: "NOT_FOUND" } });
-    renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await waitFor(() => expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([{ id: "r-da-outra", dona: "outra-conta" }]));
     expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-minha" });
     expect(d.excluir).not.toHaveBeenCalledWith({ meetingId: "r-da-outra" });
@@ -395,7 +395,7 @@ describe("useGravacaoEmPartes — o descarte com dona e o que ele responde (revi
   });
 
   it("descartar sem gravação em curso responde 'nada' e não exclui nada", async () => {
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await retomadaDaMontagemFeita();
     let resultado: ResultadoDoDescarte | undefined;
     await act(async () => { resultado = await result.current.descartar(); });
@@ -408,7 +408,7 @@ describe("useGravacaoEmPartes — o descarte com dona e o que ele responde (revi
     let soltar: (resultado: unknown) => void = () => {};
     d.enviarParte.mockImplementationOnce(() => new Promise(resolver => { soltar = resolver; }));
     const aoEncerrar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar: vi.fn() }));
     await act(async () => { await result.current.iniciar(INICIO); });
     act(() => result.current.receberParte(parte(0, true)));
     await waitFor(() => expect(d.enviarParte).toHaveBeenCalledTimes(1));
@@ -423,7 +423,7 @@ describe("useGravacaoEmPartes — o descarte com dona e o que ele responde (revi
   });
 
   it("a exclusão dá certo e só a cópia no aparelho falha: 'descartada', e o descarte fica guardado até a cópia sair, sem excluir de novo no servidor", async () => {
-    const primeira = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    const primeira = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await retomadaDaMontagemFeita();
     await act(async () => { await primeira.result.current.iniciar(INICIO); });
     d.apagarPartesDaReuniao.mockRejectedValueOnce(new Error("bloqueado por outra aba"));
@@ -433,7 +433,7 @@ describe("useGravacaoEmPartes — o descarte com dona e o que ele responde (revi
     expect(JSON.parse(localStorage.getItem(DESCARTES)!)).toEqual([{ id: "r-1", dona: "dona-1", soFaltaACopia: true }]);
     primeira.unmount();
     // A retomada seguinte tira a cópia, e o servidor não é chamado de novo.
-    renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await waitFor(() => expect(localStorage.getItem(DESCARTES)).toBeNull());
     expect(d.apagarPartesDaReuniao).toHaveBeenCalledTimes(2);
     expect(d.excluir).toHaveBeenCalledTimes(1);
@@ -443,7 +443,7 @@ describe("useGravacaoEmPartes — o descarte com dona e o que ele responde (revi
     let soltar: (resultado: unknown) => void = () => {};
     d.enviarParte.mockImplementationOnce(() => new Promise(resolver => { soltar = resolver; }));
     const aoRecusarParte = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoRecusarParte }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoRecusarParte }));
     await retomadaDaMontagemFeita();
     await act(async () => { await result.current.iniciar(INICIO); });
     act(() => result.current.receberParte(parte(0, false)));
@@ -462,7 +462,7 @@ describe("useGravacaoEmPartes — o descarte com dona e o que ele responde (revi
     const aoConcluirDescarte = vi.fn();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoConcluirDescarte }));
+      renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoConcluirDescarte }));
       // A primeira volta da retomada, na montagem.
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       expect(d.excluir).toHaveBeenCalledTimes(1);
@@ -485,7 +485,7 @@ describe("useGravacaoEmPartes — o descarte com dona e o que ele responde (revi
 
   it("o descarte que dá certo na hora não é 'concluído pela retomada': a tela não recebe aoConcluirDescarte", async () => {
     const aoConcluirDescarte = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoConcluirDescarte }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoConcluirDescarte }));
     await retomadaDaMontagemFeita();
     await act(async () => { await result.current.iniciar(INICIO); });
     await act(async () => { await result.current.descartar(); });
@@ -507,7 +507,7 @@ describe("useGravacaoEmPartes — a dona desde o Iniciar (revisão da G13c)", ()
     d.enviarParte.mockResolvedValue({ tipo: "sem-sessao" });
     d.encerrar.mockRejectedValue({ message: "Sessão encerrada.", data: { code: "UNAUTHORIZED" } });
     const aoFalhar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar }));
     await retomadaDaMontagemFeita();
     await act(async () => { await result.current.iniciar(INICIO); });
     // O Sair com a gravação no ar: o cache fica sem a conta, e o servidor não a reconhece mais.
@@ -518,11 +518,15 @@ describe("useGravacaoEmPartes — a dona desde o Iniciar (revisão da G13c)", ()
     expect(JSON.parse(localStorage.getItem(FINS)!)).toEqual({ "r-1": { partes: 1, dona: "dona-1" } });
     // Depois do Sair nenhuma voz fica no aparelho.
     expect(d.guardarParte).not.toHaveBeenCalled();
+    // Sem cópia e com a sessão encerrada, a parte não sobe mais por esta aba
+    // (revisão da #260): não fica insistindo, e a tela avisa que ela se perdeu.
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+    expect(d.enviarParte).toHaveBeenCalledTimes(1);
   });
 
   it("descartar sem a conta no cache nem do servidor: o descarte fica guardado com a conta que começou a gravação", async () => {
     d.excluir.mockRejectedValue(new TypeError("Failed to fetch"));
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await retomadaDaMontagemFeita();
     await act(async () => { await result.current.iniciar(INICIO); });
     d.getData.mockReturnValue(undefined);
@@ -537,7 +541,7 @@ describe("useGravacaoEmPartes — a dona desde o Iniciar (revisão da G13c)", ()
 
 describe("useGravacaoEmPartes — o MP3 importado em partes (H9a)", () => {
   it("a origem vai ao servidor: 'arquivo' na importação, 'gravacao' por padrão", async () => {
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await act(async () => { await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
     expect(d.iniciar).toHaveBeenLastCalledWith({ ...INICIO, consentGranted: true, origem: "arquivo" });
     await act(async () => { await result.current.iniciar(INICIO); });
@@ -547,7 +551,7 @@ describe("useGravacaoEmPartes — o MP3 importado em partes (H9a)", () => {
   it("a parte audio/mpeg vai ao aparelho e ao servidor com o tipo dela", async () => {
     d.enviarParte.mockResolvedValue({ tipo: "recebida" });
     const aoEncerrar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar: vi.fn() }));
     await act(async () => { await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
     const blob = new Blob(["quadros"], { type: "audio/mpeg" });
     act(() => result.current.receberParte({ blob, mimeType: "audio/mpeg", duracaoMs: 599_976, seq: 0, ultima: true }));
@@ -559,7 +563,7 @@ describe("useGravacaoEmPartes — o MP3 importado em partes (H9a)", () => {
   const parteDoArquivo = (seq: number) => ({ blob: new Blob(["quadros"], { type: "audio/mpeg" }), mimeType: "audio/mpeg" as const, duracaoMs: 599_976, seq });
 
   it("a parte do arquivo responde o que houve com ela: recebida sai do aparelho; passageira fica nele, sem contar como áudio por enviar; a trava com outra aba é 'ocupada'", async () => {
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     await retomadaDaMontagemFeita();
     let id = "";
     await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
@@ -580,7 +584,7 @@ describe("useGravacaoEmPartes — o MP3 importado em partes (H9a)", () => {
   it("a parte do arquivo cancelado que esperava a vez não sobe nem vai ao aparelho: 'descartada'", async () => {
     let soltar: (resultado: unknown) => void = () => {};
     d.enviarParte.mockImplementationOnce(() => new Promise(resolver => { soltar = resolver; }));
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
     let id = "";
     await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
     let primeira: Promise<unknown> = Promise.resolve();
@@ -602,7 +606,7 @@ describe("useGravacaoEmPartes — o MP3 importado em partes (H9a)", () => {
 
   it("o fim do arquivo: declara com o total e vai ao detalhe ('declarado')", async () => {
     const aoEncerrar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar: vi.fn() }));
     let id = "";
     await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
     let fim: unknown;
@@ -620,7 +624,7 @@ describe("useGravacaoEmPartes — o MP3 importado em partes (H9a)", () => {
     d.encerrar.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     const aoEncerrar = vi.fn();
     const aoFalhar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar }));
     await retomadaDaMontagemFeita();
     let id = "";
     await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
@@ -635,7 +639,7 @@ describe("useGravacaoEmPartes — o MP3 importado em partes (H9a)", () => {
   it("o fim do arquivo que o servidor recusa de vez (a reunião excluída em outro aparelho): 'recusado', com o aviso, e nada guardado", async () => {
     d.encerrar.mockRejectedValueOnce({ message: "Reunião não encontrada.", data: { code: "NOT_FOUND" } });
     const aoFalhar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar: vi.fn(), aoFalhar }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar }));
     let id = "";
     await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
     let fim: unknown;
@@ -649,7 +653,7 @@ describe("useGravacaoEmPartes — o MP3 importado em partes (H9a)", () => {
     let confirmarOFim: (resposta: unknown) => void = () => {};
     d.encerrar.mockImplementationOnce(() => new Promise(resolver => { confirmarOFim = resolver; }));
     const aoEncerrar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar: vi.fn() }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar: vi.fn() }));
     let id = "";
     await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
     let fim: Promise<unknown> = Promise.resolve();
@@ -672,7 +676,7 @@ describe("useGravacaoEmPartes — o MP3 importado em partes (H9a)", () => {
     d.encerrar.mockImplementationOnce(() => new Promise(resolver => { confirmarOFim = resolver; }));
     const aoEncerrar = vi.fn();
     const aoFalhar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar }));
     let id = "";
     await act(async () => { id = await result.current.iniciar(INICIO); });
     act(() => result.current.receberParte(parte(0, true)));
@@ -690,7 +694,7 @@ describe("useGravacaoEmPartes — o MP3 importado em partes (H9a)", () => {
     d.enviarParte.mockImplementationOnce(() => new Promise(resolver => { soltar = resolver; }));
     const aoEncerrar = vi.fn();
     const aoFalhar = vi.fn();
-    const { result } = renderHook(() => useGravacaoEmPartes({ ativo: true, aoEncerrar, aoFalhar }));
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar }));
     let id = "";
     await act(async () => { id = await result.current.iniciar({ ...INICIO, origem: "arquivo" }); });
     act(() => result.current.receberParte(parte(0, true)));
@@ -704,5 +708,188 @@ describe("useGravacaoEmPartes — o MP3 importado em partes (H9a)", () => {
     expect(aoEncerrar).not.toHaveBeenCalled();
     expect(aoFalhar).not.toHaveBeenCalled();
     expect(d.excluir).toHaveBeenCalledWith({ meetingId: "r-1" });
+  });
+});
+
+/**
+ * O defeito achado na validação da #202: sem a cópia no aparelho e com o
+ * envio falhando junto, a parte só existia na memória e a fila seguia sem
+ * ela. A retomada lê o aparelho e nunca a acharia: o trecho sumia da gravação.
+ */
+describe("useGravacaoEmPartes — a parte sem cópia no aparelho não se perde (#202)", () => {
+  it("sem cópia e com o envio falhando, a aba insiste até o servidor confirmar; o fim não espera, e a sessão segue ocupada até a parte subir", async () => {
+    d.guardarParte.mockRejectedValue(new Error("sem IndexedDB"));
+    d.enviarParte
+      .mockResolvedValueOnce({ tipo: "passageira" })
+      .mockResolvedValueOnce({ tipo: "passageira" })
+      .mockResolvedValueOnce({ tipo: "recebida" });
+    const aoEncerrar = vi.fn();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar, aoFalhar: vi.fn() }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await result.current.iniciar(INICIO); });
+      act(() => result.current.receberParte(parte(0, true)));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      // A primeira tentativa falhou; o fim já foi declarado (o servidor aceita a parte depois dele).
+      expect(d.enviarParte).toHaveBeenCalledTimes(1);
+      expect(d.encerrar).toHaveBeenCalledWith({ meetingId: "r-1", partes: 1 });
+      expect(aoEncerrar).toHaveBeenCalledWith("r-1");
+      expect(sessaoOcupada()).toBe(true);
+      // 2 s depois, a segunda tentativa, com a cópia tentada de novo.
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+      expect(d.enviarParte).toHaveBeenCalledTimes(2);
+      expect(d.guardarParte).toHaveBeenCalledTimes(2);
+      expect(sessaoOcupada()).toBe(true);
+      // 5 s depois, a terceira, que o servidor confirma: a mesma parte, com o mesmo áudio.
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(d.enviarParte).toHaveBeenCalledTimes(3);
+      expect(d.enviarParte.mock.calls.map(c => [c[0], c[1]])).toEqual([["r-1", 0], ["r-1", 0], ["r-1", 0]]);
+      expect(d.enviarParte.mock.calls[2][2]).toBe(d.enviarParte.mock.calls[0][2]);
+      expect(sessaoOcupada()).toBe(false);
+      // Confirmada, para de tentar.
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(d.enviarParte).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a cópia que volta a funcionar devolve a parte ao caminho de sempre: fica no aparelho para a retomada, e esta aba para de insistir", async () => {
+    d.guardarParte.mockRejectedValueOnce(new Error("cota cheia")).mockResolvedValue(undefined);
+    d.enviarParte.mockResolvedValue({ tipo: "passageira" });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await result.current.iniciar(INICIO); });
+      act(() => result.current.receberParte(parte(0, false)));
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+      expect(d.guardarParte).toHaveBeenCalledTimes(2);
+      expect(d.guardarParte.mock.calls[1][0]).toMatchObject({ meetingId: "r-1", seq: 0, dona: "dona-1" });
+      // Guardada, a parte é da retomada (áudio por enviar), e esta volta não a envia.
+      expect(d.enviarParte).toHaveBeenCalledTimes(1);
+      expect(motivoDaOcupacao()).toBe("audio-nao-enviado");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a gravação descartada para de insistir na parte sem cópia", async () => {
+    d.guardarParte.mockRejectedValue(new Error("sem IndexedDB"));
+    d.enviarParte.mockResolvedValue({ tipo: "passageira" });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn() }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await result.current.iniciar(INICIO); });
+      act(() => result.current.receberParte(parte(0, false)));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(d.enviarParte).toHaveBeenCalledTimes(1);
+      await act(async () => { await result.current.cancelar("r-1"); });
+      // O descarte acorda a espera: a sessão desocupa já, sem esperar a próxima volta.
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(sessaoOcupada()).toBe(false);
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(d.enviarParte).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+/**
+ * Revisão da #260: a insistência na parte sem cópia não fica pendurada. Ela
+ * para no desmonte da tela (os relógios saem) e na sessão encerrada, e a
+ * parte não fica sem rumo: com a cópia, a retomada de toda tela logada segue;
+ * sem ela, a tela avisa que o trecho se perdeu.
+ */
+describe("useGravacaoEmPartes — a insistência para no desmonte e na sessão encerrada (revisão da #260)", () => {
+  it("o desmonte para a insistência e tira os relógios; sem conseguir a cópia na última chance, avisa que a parte se perdeu", async () => {
+    d.guardarParte.mockRejectedValue(new Error("sem IndexedDB"));
+    d.enviarParte.mockResolvedValue({ tipo: "passageira" });
+    const aoPerderParte = vi.fn();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { result, unmount } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoPerderParte }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await result.current.iniciar(INICIO); });
+      act(() => result.current.receberParte(parte(0, false)));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(d.enviarParte).toHaveBeenCalledTimes(1);
+      expect(sessaoOcupada()).toBe(true);
+      unmount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      // Nenhum relógio pendurado, nenhum envio a mais, a sessão livre.
+      expect(vi.getTimerCount()).toBe(0);
+      await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+      expect(d.enviarParte).toHaveBeenCalledTimes(1);
+      expect(sessaoOcupada()).toBe(false);
+      // A última chance de cópia foi tentada, falhou, e a tela avisa.
+      expect(d.guardarParte).toHaveBeenCalledTimes(2);
+      expect(aoPerderParte).toHaveBeenCalledWith("r-1", 0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o desmonte com a cópia dando certo na última chance: a parte fica no aparelho para a retomada da G13c, sem aviso de perda", async () => {
+    d.guardarParte.mockRejectedValueOnce(new Error("cota cheia")).mockResolvedValue(undefined);
+    d.enviarParte.mockResolvedValue({ tipo: "passageira" });
+    const aoPerderParte = vi.fn();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { result, unmount } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoPerderParte }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await result.current.iniciar(INICIO); });
+      act(() => result.current.receberParte(parte(0, false)));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      unmount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(d.guardarParte).toHaveBeenCalledTimes(2);
+      expect(d.guardarParte.mock.calls[1][0]).toMatchObject({ meetingId: "r-1", seq: 0, dona: "dona-1" });
+      expect(aoPerderParte).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(d.enviarParte).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a sessão encerrada (401/403) no meio da insistência para de tentar, sem nova cópia, e avisa que a parte se perdeu", async () => {
+    d.guardarParte.mockRejectedValue(new Error("sem IndexedDB"));
+    d.enviarParte.mockResolvedValueOnce({ tipo: "passageira" }).mockResolvedValue({ tipo: "sem-sessao" });
+    const aoPerderParte = vi.fn();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoPerderParte }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await result.current.iniciar(INICIO); });
+      act(() => result.current.receberParte(parte(0, false)));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+      expect(d.enviarParte).toHaveBeenCalledTimes(2);
+      expect(aoPerderParte).toHaveBeenCalledWith("r-1", 0);
+      expect(sessaoOcupada()).toBe(false);
+      const copias = d.guardarParte.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+      expect(d.enviarParte).toHaveBeenCalledTimes(2);
+      expect(d.guardarParte).toHaveBeenCalledTimes(copias);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a sessão já encerrada no primeiro envio da parte sem cópia: não insiste e avisa na hora", async () => {
+    d.guardarParte.mockRejectedValue(new Error("sem IndexedDB"));
+    d.enviarParte.mockResolvedValue({ tipo: "sem-sessao" });
+    const aoPerderParte = vi.fn();
+    const { result } = renderHook(() => useGravacaoEmPartes({ aoEncerrar: vi.fn(), aoFalhar: vi.fn(), aoPerderParte }));
+    await retomadaDaMontagemFeita();
+    await act(async () => { await result.current.iniciar(INICIO); });
+    act(() => result.current.receberParte(parte(0, false)));
+    await waitFor(() => expect(aoPerderParte).toHaveBeenCalledWith("r-1", 0));
+    await waitFor(() => expect(sessaoOcupada()).toBe(false));
+    expect(d.enviarParte).toHaveBeenCalledTimes(1);
   });
 });

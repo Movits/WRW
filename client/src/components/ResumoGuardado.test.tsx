@@ -41,9 +41,16 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => duble.utils,
     meetings: {
+      // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
+      modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
+      responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       pedirResumo: duble.registrar("pedirResumo"),
       refazerResumo: duble.registrar("refazerResumo"),
       decidirItemDoResumo: duble.registrar("decidirItemDoResumo"),
+      // O grupo voz: baixar o áudio do resumo (H19b) e o complemento pela busca (H4i).
+      audioDoResumo: duble.registrar("audioDoResumo"),
+      pedirComplemento: duble.registrar("pedirComplemento"),
+      decidirComplemento: duble.registrar("decidirComplemento"),
       confirmarItensDoResumo: duble.registrar("confirmarItensDoResumo"),
       marcarAcaoFeita: duble.registrar("marcarAcaoFeita"),
       // As do formulário do item (H4f), que só monta quando a dona o abre.
@@ -180,6 +187,23 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
     expect(screen.queryByText(/Escrito pela IA/)).not.toBeInTheDocument();
   });
 
+  it("o item que a dona ignorou e a IA repetiu no refazer volta para conferir, com o aviso de que voltou (T29)", () => {
+    const voltou = { ...ITENS[5], voltouDoIgnorado: true };
+    daDona(pronto(ITENS.map(item => item.id === voltou.id ? voltou : item)));
+    const item = itemDoTexto("Não renovar com a transportadora antiga.");
+    expect(within(item).getByText("Para conferir")).toBeInTheDocument();
+    expect(within(item).getByText(/Você tinha ignorado este item, e a IA o trouxe de volta/)).toBeInTheDocument();
+    expect(within(item).getByRole("button", { name: /Confirmar/ })).toBeInTheDocument();
+    expect(within(item).getByRole("button", { name: /Ignorar/ })).toBeInTheDocument();
+    // Só nele: os outros pendentes não têm o aviso.
+    expect(screen.getAllByText(/a IA o trouxe de volta/)).toHaveLength(1);
+  });
+
+  it("o aviso de que voltou é só do item pendente: confirmado, ele some", () => {
+    daDona(pronto(ITENS.map(item => item.id === "i-decisao" ? { ...item, status: "confirmed", voltouDoIgnorado: true } : item)));
+    expect(screen.queryByText(/a IA o trouxe de volta/)).not.toBeInTheDocument();
+  });
+
   it("os ignorados ficam recolhidos; abertos, o Desfazer volta o item a pendente", () => {
     daDona(pronto());
     expect(screen.queryByText("Abrir um escritório em Berlim.")).not.toBeInTheDocument();
@@ -238,7 +262,7 @@ describe("Resumo guardado — o formato da cliente, para a dona", () => {
     // depende dela.
     doLink(pronto(ITENS_DO_LINK));
     expect(screen.getByText("03:20")).toBeInTheDocument();
-    expect(screen.getAllByRole("button")).toEqual([screen.getByRole("button", { name: "Ouvir o resumo" })]);
+    expect(screen.getAllByRole("button")).toEqual([screen.getByRole("button", { name: "Ouvir resumo · áudio gerado pela IA da Google" })]);
   });
 
   it("o trecho fica aberto nos pendentes e recolhível nos outros", () => {
@@ -329,7 +353,7 @@ describe("Resumo guardado — a dona edita e acrescenta itens (H4f)", () => {
     expect(screen.getAllByText("Escrito ou editado por quem gravou a reunião")).toHaveLength(2);
     expect(screen.queryByText(/ por você$/)).not.toBeInTheDocument();
     // Nenhum botão da dona: o único botão do link é o "Ouvir o resumo" (H19).
-    expect(screen.getAllByRole("button").map(botao => botao.textContent?.trim())).toEqual(["Ouvir o resumo"]);
+    expect(screen.getAllByRole("button").map(botao => botao.textContent?.trim())).toEqual(["Ouvir resumo · áudio gerado pela IA da Google"]);
   });
 
   it("com o link ligado, editar e acrescentar avisam que o que a dona salva aparece para quem tem o link; sem link, não", () => {
@@ -551,9 +575,32 @@ describe("Resumo guardado — pelo link aberto, só leitura", () => {
     expect(screen.queryByText(/Escrito pela IA/)).not.toBeInTheDocument();
     const botoes = screen.getAllByRole("button");
     expect(botoes.length).toBeGreaterThan(1);
-    for (const botao of botoes) expect(botao).toHaveAccessibleName(/^(Ouvir a partir de |Ouvir o resumo$)/);
+    for (const botao of botoes) expect(botao).toHaveAccessibleName(/^(Ouvir a partir de |Ouvir resumo · áudio gerado pela IA da Google$)/);
     fireEvent.click(screen.getByRole("button", { name: "Ouvir a partir de 03:20" }));
     expect(aoIrPara).toHaveBeenCalledWith(200);
+  });
+
+  it("o trecho que a dona tirou da transcrição (H18) vem vazio pelo link: o item fica, sem trecho, com o aviso de que quem gravou o corrigiu", () => {
+    const aviso = "O trecho da transcrição deste item foi corrigido por quem gravou a reunião.";
+    const itens = ITENS_DO_LINK.map(item => (item.text === "Não renovar com a transportadora antiga."
+      ? { ...item, excerpt: "", trechoForaDaTranscricao: true }
+      : { ...item, trechoForaDaTranscricao: false }));
+    const aoIrPara = vi.fn();
+    doLink(pronto(itens), aoIrPara);
+    const corrigido = itemDoTexto("Não renovar com a transportadora antiga.");
+    expect(within(corrigido).getByText(aviso)).toBeInTheDocument();
+    expect(corrigido.querySelector("details, q, blockquote")).toBeNull();
+    // O tempo do item continua: o "▶" leva ao ponto da gravação.
+    fireEvent.click(within(corrigido).getByRole("button", { name: "Ouvir a partir de 05:20" }));
+    expect(aoIrPara).toHaveBeenCalledWith(320);
+    // Só nele: os outros seguem com o trecho, sem o aviso.
+    expect(screen.getAllByText(aviso)).toHaveLength(1);
+    expect(within(itemDoTexto("A licença de exportação ainda não saiu.")).getByText("Trecho da transcrição")).toBeInTheDocument();
+  });
+
+  it("para a dona, a marca do link não aparece (ela vê o trecho da versão da IA)", () => {
+    daDona(pronto(ITENS.map(item => ({ ...item, trechoForaDaTranscricao: true }))));
+    expect(screen.queryByText(/foi corrigido por quem gravou a reunião/)).not.toBeInTheDocument();
   });
 
   it("sem resumo: 'Pedir resumo' pede pelo token, nunca pela rota da dona; e relê o resumo do link", () => {
@@ -652,7 +699,7 @@ describe("Resumo guardado — a próxima ação do item na Google Agenda (H5c)",
     expect(duble.utils.googleAgenda.estado.invalidate).toHaveBeenCalled();
     act(() => mutacao("marcarAcaoFeita").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "falhou", motivo: "google" }, { itemId: "i-acao-feita", feito: false }));
     expect(toast.warning).toHaveBeenLastCalledWith(
-      "A ação está salva na WRW, mas não foi para a sua Google Agenda. A Google não respondeu. Tente de novo em instantes.", { duration: 10_000 });
+      "A ação está salva na Marquesa Global Match, mas não foi para a sua Google Agenda. A Google não respondeu. Tente de novo em instantes.", { duration: 10_000 });
   });
 
   // A junção com a H4f: o item que a dona escreveu não volta a "para
@@ -696,7 +743,7 @@ describe("Resumo guardado — a próxima ação do item na Google Agenda (H5c)",
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
     act(() => mutacao("editarItemDoResumo").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "falhou", motivo: "google" }, {}));
     expect(toast.warning).toHaveBeenLastCalledWith(
-      "A ação está salva na WRW, mas não foi para a sua Google Agenda. A Google não respondeu. Tente de novo em instantes.", { duration: 10_000 });
+      "A ação está salva na Marquesa Global Match, mas não foi para a sua Google Agenda. A Google não respondeu. Tente de novo em instantes.", { duration: 10_000 });
     vi.mocked(toast.warning).mockClear();
     act(() => mutacao("editarItemDoResumo").opcoes.onSuccess!({ ok: true, acaoId: "acao-9", naGoogle: "ok" }, {}));
     expect(toast.warning).not.toHaveBeenCalled();
@@ -805,7 +852,7 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
   // O tocar, pausar e continuar estão em OuvirOResumo.test.tsx; aqui, o que o
   // resumo manda ler, em que idioma e quando o botão aparece.
   const VOZES = [{ name: "Luciana", lang: "pt-BR", default: true }, { name: "Samantha", lang: "en-US" }];
-  const ouvir = () => fireEvent.click(screen.getByRole("button", { name: "Ouvir o resumo" }));
+  const ouvir = () => fireEvent.click(screen.getByRole("button", { name: "Ouvir resumo · áudio gerado pela IA da Google" }));
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -922,7 +969,7 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
     expect(voz.lerAteOFim()).toContain("Carla envia a proposta revisada");
     unmount();
     const tela = daDona(anterior("pendente"));
-    expect(screen.getByRole("button", { name: "Ouvir o resumo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ouvir resumo · áudio gerado pela IA da Google" })).toBeInTheDocument();
     tela.unmount();
     doLink(consulta({ estado: "falhou", emoji: "☕", idioma: "pt-BR", versaoAnterior: true, itens: ITENS_DO_LINK }));
     ouvir();
@@ -934,11 +981,11 @@ describe("Resumo guardado — ouvir o resumo com a voz do aparelho (H19)", () =>
     const soIgnorados = ITENS.filter(item => item.status === "ignored");
     for (const c of [consulta(undefined), comEstado("sem_resumo"), comEstado("pendente"), comEstado("gerando"), comEstado("falhou"), pronto([]), pronto(soIgnorados)]) {
       const { unmount } = daDona(c);
-      expect(screen.queryByRole("button", { name: "Ouvir o resumo" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Ouvir resumo · áudio gerado pela IA da Google" })).not.toBeInTheDocument();
       unmount();
     }
     doLink(pronto(ITENS_DO_LINK));
-    expect(screen.getByRole("button", { name: "Ouvir o resumo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ouvir resumo · áudio gerado pela IA da Google" })).toBeInTheDocument();
   });
 
   it("o resumo que volta a ser gerado no meio da leitura cala a voz", () => {
@@ -976,7 +1023,7 @@ describe("Resumo guardado — a tradução com o ouvir e o editar (pacote P2)", 
   it("ouvir o resumo traduzido: a voz, os títulos e os rótulos vão no idioma da tradução, que é o texto à vista", () => {
     const voz = instalarSinteseFalsa({ vozes: [{ name: "Luciana", lang: "pt-BR", default: true }, { name: "Samantha", lang: "en-US" }] });
     render(<ResumoGuardado meetingId={REUNIAO} consulta={pronto(ITENS.filter(item => item.id === "i-acao")) as never} nomes={{ F2: "Carla" }} traducao={traducaoPronta() as never}/>);
-    fireEvent.click(screen.getByRole("button", { name: "Ouvir o resumo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ouvir resumo · áudio gerado pela IA da Google" }));
     expect(voz.lerAteOFim()).toEqual([
       // Como o aviso da tela: é uma tradução da IA, e o original é outro idioma.
       "This summary was translated by the AI.", "The original is in Portuguese.",

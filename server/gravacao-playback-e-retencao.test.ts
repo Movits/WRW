@@ -119,14 +119,13 @@ const fakeDb = {
       if (falhasNaLeitura.has(tabela)) return consultaQueFalha(falhasNaLeitura.get(tabela));
       return consulta(projetar(tabela, projecao, tabelas.get(tabela) ?? []));
     };
+    // A varredura junta a reunião (LEFT JOIN) para pular a que está em
+    // 'processing', e a lista junta o contato e o contexto para os nomes (H7c);
+    // o fake não executa o JOIN nem o predicado: devolve as linhas da tabela e
+    // guarda o WHERE renderizado, como nas outras leituras. O JOIN encadeia.
+    const comJuncao = (tabela: unknown): Record<string, unknown> => ({ where: ondeDe(tabela), leftJoin: () => comJuncao(tabela) });
     return {
-      from: (tabela: unknown) => ({
-        where: ondeDe(tabela),
-        // A varredura junta a reunião (LEFT JOIN) para pular a que está em
-        // 'processing'; o fake não executa o JOIN nem o predicado: devolve as
-        // linhas da tabela e guarda o WHERE renderizado, como nas outras leituras.
-        leftJoin: () => ({ where: ondeDe(tabela) }),
-      }),
+      from: (tabela: unknown) => comJuncao(tabela),
     };
   },
   delete: (tabela: unknown) => ({
@@ -226,7 +225,8 @@ describe("Playback — a API entrega a gravação para a tela poder tocar", () =
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
     await servico.getPrivateMeeting("dona-1", "reuniao-1");
     const porTabela = (tabela: unknown) => leituras.filter(operacao => operacao.tabela === tabela).map(predicadoDe);
-    expect(porTabela(schema.meetings)).toEqual([REUNIAO_DA_DONA]);
+    // A leitura da reunião deixa de fora a da lixeira (H7d), que é "não encontrada".
+    expect(porTabela(schema.meetings)).toEqual([{ sql: "(`meetings`.`id` = ? and `meetings`.`owner_id` = ? and `meetings`.`trashed_at` is null)", params: ["reuniao-1", "dona-1"] }]);
     expect(porTabela(schema.meetingTranscripts)).toEqual([derivadaDaReuniaoDaDona("meeting_transcripts")]);
     expect(porTabela(schema.meetingEntities)).toEqual([derivadaDaReuniaoDaDona("meeting_entities")]);
     expect(porTabela(schema.meetingContactSuggestions)).toEqual([derivadaDaReuniaoDaDona("meeting_contact_suggestions")]);
@@ -238,6 +238,52 @@ describe("Playback — a API entrega a gravação para a tela poder tocar", () =
     expect(dados).toHaveProperty("transcript");
     expect(dados).toHaveProperty("entities");
     expect(dados).toHaveProperty("suggestions");
+  });
+});
+
+// H8c, revisão do pacote 4b: o botão "Baixar o áudio" segue o audioParaBaixar
+// do detalhe, que conta as partes com o áudio no bucket (também as que falharam
+// na IA, que o player não toca), no mesmo tempo da preparação do download.
+describe("Baixar o áudio — o detalhe diz o que se baixa, também quando nada toca", () => {
+  const parte = (seq: number, extra: Record<string, unknown> = {}) => ({
+    id: `parte-${seq}`, meetingId: "reuniao-1", ownerId: "dona-1", seq, status: "transcribed", lastError: null,
+    storageKey: `meetings/dona-1/reuniao-1/partes/${seq}.webm`, storageUrl: `/manus-storage/meetings/dona-1/reuniao-1/partes/${seq}.webm`,
+    mimeType: "audio/webm", durationMs: 600_000, offsetMs: seq * 600_000, expiresAt: AGORA + TTL_MS, ...extra,
+  });
+  const emPartes = (status: string, partes: Array<Record<string, unknown>>) => {
+    tabelas.set(schema.meetings, [{ ...REUNIAO, status, audioPipeline: "slices" }]);
+    tabelas.set(schema.meetingAudioSlices, partes);
+  };
+
+  it("a reunião que falhou inteira na IA: nada toca, mas o áudio guardado se baixa (a parte que nunca subiu fica de fora)", async () => {
+    emPartes("failed", [
+      parte(0, { status: "failed", lastError: "IA_INDISPONIVEL", offsetMs: null }),
+      parte(1, { status: "failed", lastError: "TENTATIVAS_ESGOTADAS", offsetMs: null }),
+      parte(2, { status: "failed", lastError: "NAO_RECEBIDA", offsetMs: null, durationMs: 300_000 }),
+    ]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.recording).toBeNull();
+    expect(dados?.audioParaBaixar).toEqual({ duracaoSegundos: 1200, expiresAt: AGORA + TTL_MS });
+  });
+
+  it("com partes que tocam, a que falhou na IA no fim entra na duração do arquivo, e não na do player", async () => {
+    emPartes("ready", [parte(0), parte(1, { status: "failed", lastError: "IA_RECUSOU", offsetMs: null, expiresAt: AGORA + TTL_MS - 5 })]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.recording?.durationSeconds).toBe(600);
+    expect(dados?.audioParaBaixar).toEqual({ duracaoSegundos: 1200, expiresAt: AGORA + TTL_MS - 5 });
+  });
+
+  it("sem parte nenhuma com o áudio no bucket: nada a baixar", async () => {
+    emPartes("failed", [parte(0, { status: "failed", lastError: "AUDIO_AUSENTE" }), parte(1, { status: "uploading" })]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.recording).toBeNull();
+    expect(dados?.audioParaBaixar).toBeNull();
+  });
+
+  it("o envio único: a gravação inteira, com o prazo dela", async () => {
+    tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.audioParaBaixar).toEqual({ duracaoSegundos: 92, expiresAt: AGORA + 1000 });
   });
 });
 
@@ -284,7 +330,21 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     "audioPipeline", "expectedSlices",
     // Os nomes das vozes (H3): a lista e o detalhe são só da dona.
     "speakerNames",
+    // De onde a reunião veio: a de documento (H12) troca o player pelo texto do
+    // documento, e no vídeo do YouTube (H13) vem a URL dele, para a marca da
+    // lista e o bloco do vídeo no lugar da gravação. São só da dona.
+    "origem", "sourceUrl",
+    // Os detalhes (H7c): as etiquetas e o "Onde foi", só da dona.
+    "etiquetas", "ondeFoi",
+    // A pasta (H7d), só da dona: a lista filtra e agrupa por ela.
+    "folderId",
   ];
+  // A lista leva também o nome do contato e o do contexto (a busca na tela, H7b),
+  // e o detalhe, o contato e o contexto com o nome (o painel dos detalhes, H7c),
+  // lidos só da rede da dona. E o sim ou não de a dona ter editado a
+  // transcrição (H18: a junção avisa que as correções não passam), sem o texto.
+  const SO_NA_LISTA = ["contatoNome", "contextoNome", "transcricaoEditada"];
+  const SO_NO_DETALHE = ["contato", "contexto"];
   const linhaCompleta = () => ({
     ...Object.fromEntries(Object.keys(getTableColumns(schema.meetings)).map(chave => [chave, `valor-de-${chave}`])),
     ...REUNIAO,
@@ -304,17 +364,32 @@ describe("Lista e detalhe — escolhem as colunas, e o controle da fila não vai
     expect(lista).toHaveLength(1);
     for (const coluna of CONTROLE_DA_FILA) expect(lista[0]).not.toHaveProperty(coluna);
     expect(JSON.stringify(lista)).not.toContain("ficha-da-fila-0123");
-    expect(Object.keys(lista[0]).sort()).toEqual([...NA_TELA].sort());
+    expect(Object.keys(lista[0]).sort()).toEqual([...NA_TELA, ...SO_NA_LISTA].sort());
     expect(lista[0]).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready", createdAt: AGORA - 1000 });
   });
 
-  it("o detalhe também, mais o token do link aberto, que só a dona recebe, e se o link mostra os nomes das vozes (H3b)", async () => {
-    tabelas.set(schema.meetings, [{ ...linhaCompleta(), shareToken: "token-do-link-aberto" }]);
+  it("o detalhe também, mais o token do link aberto, que só a dona recebe, se o link mostra os nomes das vozes (H3b), e se pede senha e leva o áudio (H23)", async () => {
+    tabelas.set(schema.meetings, [{ ...linhaCompleta(), shareToken: "token-do-link-aberto", sharePasswordHash: "scrypt$hash-da-senha", shareAudio: false }]);
     const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
     for (const coluna of CONTROLE_DA_FILA) expect(dados?.meeting).not.toHaveProperty(coluna);
     expect(JSON.stringify(dados)).not.toContain("ficha-da-fila-0123");
-    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA, "shareToken", "linkMostraNomes"].sort());
-    expect(dados?.meeting).toMatchObject({ id: "reuniao-1", title: "Reunião", status: "ready", shareToken: "token-do-link-aberto", linkMostraNomes: false });
+    // O hash da senha e o freio da força bruta ficam no servidor: a tela recebe só os dois sim ou não.
+    for (const coluna of ["sharePasswordHash", "sharePasswordFailures", "sharePasswordFailedAt", "sharePasswordLockedUntil", "shareAudio", "speakerAccounts", "speakerMerges"]) {
+      expect(dados?.meeting).not.toHaveProperty(coluna);
+    }
+    expect(JSON.stringify(dados)).not.toContain("hash-da-senha");
+    expect(Object.keys(dados!.meeting).sort()).toEqual([...NA_TELA, ...SO_NO_DETALHE, "shareToken", "linkMostraNomes", "linkComSenha", "linkComAudio",
+      // As vozes como a dona as vê e a conta ligada a cada uma (H3c): speaker_accounts e speaker_merges não saem crus.
+      "vozes", "contasDasVozes"].sort());
+    expect(dados?.meeting).toMatchObject({
+      id: "reuniao-1", title: "Reunião", status: "ready", shareToken: "token-do-link-aberto", linkMostraNomes: false, linkComSenha: true, linkComAudio: false,
+    });
+  });
+
+  it("sem link, o detalhe diz que não há senha, ainda que a linha guarde um hash (H23)", async () => {
+    tabelas.set(schema.meetings, [{ ...linhaCompleta(), shareToken: null, sharePasswordHash: "scrypt$hash-da-senha", shareAudio: true }]);
+    const dados = await servico.getPrivateMeeting("dona-1", "reuniao-1");
+    expect(dados?.meeting).toMatchObject({ shareToken: null, linkComSenha: false, linkComAudio: true });
   });
 
   it("com o link ligado, linkMostraNomes vem da última confirmação da dona na auditoria: só a versão 2 mostra os nomes (H3b)", async () => {
@@ -527,6 +602,8 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
       [schema.meetingSummaryTranslations, derivadaDaReuniaoDaDona("meeting_summary_translations")],
       [schema.meetingSummaryItems, derivadaDaReuniaoDaDona("meeting_summary_items")],
       [schema.meetingSummaries, derivadaDaReuniaoDaDona("meeting_summaries")],
+      // As participantes e os convites da reunião (R1b) saem com ela, da reunião DA dona.
+      [schema.meetingParticipants, derivadaDaReuniaoDaDona("meeting_participants")],
       // A linha do áudio sai pelo id (e pela dona), e só a do arquivo que saiu.
       // Sem partes nesta reunião, não há DELETE em meeting_audio_slices.
       [schema.meetingRecordings, { sql: "(`meeting_recordings`.`owner_id` = ? and `meeting_recordings`.`id` in (?))", params: ["dona-1", "grav-1"] }],
@@ -578,10 +655,11 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     expect(typeof atualizacoes[0].valores.updatedAt).toBe("number");
     // id E owner_id, em AND: `or` marcaria 'deleted' toda reunião da dona
     expect(predicadoDe(atualizacoes[0])).toEqual(REUNIAO_DA_DONA);
-    // e a linha da reunião só sai por último, depois dos derivados (10: os oito
-    // derivados da IA, com as traduções do resumo da H11, a gravação cujo
-    // arquivo saiu e a reunião; sem partes, não há DELETE de partes)
-    expect(sequencia.filter(operacao => operacao === "delete").length).toBe(10);
+    // e a linha da reunião só sai por último, depois dos derivados (11: os oito
+    // derivados da IA, com as traduções do resumo da H11, as participantes da
+    // R1b, a gravação cujo arquivo saiu e a reunião; sem partes, não há DELETE
+    // de partes)
+    expect(sequencia.filter(operacao => operacao === "delete").length).toBe(11);
     expect(tabelasApagadas().at(-1)).toBe(schema.meetings);
   });
 
@@ -599,15 +677,20 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     expect(sequencia.slice(-2)).toEqual(["update", "delete"]);
   });
 
-  it("os avisos da reunião no sino (H15) saem com ela: só os do gravador, da conta da dona, pelo link da reunião, antes de soltar a agenda", async () => {
+  it("os avisos da reunião no sino (H15) saem com ela: só os do gravador, da conta da dona, pelo link da reunião, pela chave, antes de soltar a agenda", async () => {
     tabelas.set(schema.users, [{ id: 7, openId: "dona-1" }]);
+    tabelas.set(schema.platformNotifications, [{ id: 41 }]);
     await servico.deletePrivateMeeting("dona-1", "reuniao-1");
     expect(leituras.find(operacao => operacao.tabela === schema.users)?.params).toEqual(["dona-1"]);
-    const avisos = delecoes.filter(operacao => operacao.tabela === schema.platformNotifications);
-    expect(avisos.map(predicadoDe)).toEqual([{
+    // Achados numa leitura sem trava e apagados pela chave: o DELETE pela conta
+    // travava o intervalo dela no índice e o vão até a vizinha (revisão do
+    // pacote do match, 20/11; server/lembretes.ts, apagarAvisosDoEndereco).
+    expect(leituras.filter(operacao => operacao.tabela === schema.platformNotifications).map(predicadoDe)).toEqual([{
       sql: "(`platform_notifications`.`userId` = ? and `platform_notifications`.`type` in (?, ?) and `platform_notifications`.`actionUrl` = ?)",
       params: [7, "lembrete", "reuniao_pronta", "/meetings/reuniao-1"],
     }]);
+    const avisos = delecoes.filter(operacao => operacao.tabela === schema.platformNotifications);
+    expect(avisos.map(predicadoDe)).toEqual([{ sql: "`platform_notifications`.`id` = ?", params: [41] }]);
     // Os avisos, o ponteiro da agenda e, por último, a reunião.
     expect(sequencia.slice(-3)).toEqual(["delete", "update", "delete"]);
     expect(tabelasApagadas().at(-1)).toBe(schema.meetings);
@@ -618,6 +701,7 @@ describe("Exclusão — apagar a reunião apaga a VOZ, não só a linha", () => 
     // (SIGTERM) ou o banco que cai no meio dele corta a exclusão. Aqui o banco
     // cai na primeira escrita depois do bucket, a da linha do áudio que saiu.
     tabelas.set(schema.users, [{ id: 7, openId: "dona-1" }]);
+    tabelas.set(schema.platformNotifications, [{ id: 41 }]);
     tabelas.set(schema.meetingRecordings, [gravacaoCom(AGORA + 1000)]);
     const queda = quedaDoBanco();
     deleteQueFalha = ordem => (delecoes[ordem].tabela === schema.meetingRecordings ? queda : null);

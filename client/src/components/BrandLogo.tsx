@@ -10,7 +10,9 @@ const ARTES = {
   selo: "/brand/selo.png",
 } as const;
 
-const ALT = "WRW — Women Rocking the World";
+// O nome visível é Marquesa Global Match desde 24/11/2026 (decisão da cliente). A logo nova
+// ainda não chegou: as artes acima seguem as da WRW até a troca, e o alt já diz o nome.
+const ALT = "Marquesa Global Match";
 
 type Variante = keyof typeof ARTES;
 

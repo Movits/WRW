@@ -91,8 +91,8 @@ ilimitado. Elas mudam o plano de 30/10 e valem sobre ele.
   gravação, para todos os níveis e sem teto mensal. No lugar do teto, a G10 avisa a
   cada hora completa de gravação ("1 hora de gravação", "2 horas"...), sem parar a
   gravação, para quem grava acompanhar o tempo (trocado em 15/11: o aviso passa a pedir
-  OK, ver "Decisões de 15/11/2026"). O envio único em base64 continua em 10
-  minutos e 10 MB até sair na G14. O teto de 3 gravações abertas por conta, que é
+  OK, ver "Decisões de 15/11/2026"). O envio único em base64 ficou em 10
+  minutos e 10 MB até sair na G14 (a rota saiu na parte 2, em 25/11/2026). O teto de 3 gravações abertas por conta, que é
   contra abuso e não de tempo, segue como pergunta ao Roberto.
 - **Compartilhar sem link público e sem senha.** A reunião continua visível só para as
   participantes adicionadas e, para consulta, para a presidência e a admin, como na R1.
@@ -410,10 +410,12 @@ Tamanho: P é pequena, M é média e G é grande.
 | PR | O que faz | Depende de |
 |---|---|---|
 | H3 (M, migração) | Nomes dos falantes. Entrou em 14/11 (#204), só para a dona. Pela decisão do Roberto de 16/11, a **H3b** (P, sem migração) leva os nomes ao link aberto ligado com a confirmação que fala deles; o link ligado antes segue com "Falante n" (ver os contratos). | D1, R1 (adiada em 12/11) |
+| H3d (M, migração) | Perfil de voz da dona (HN-24, aprovado pelo Roberto em 24/11): ela grava cerca de 30 s da própria voz no Perfil, com o consentimento próprio da Cris, e a amostra vai com cada parte ao Gemini para a voz dela sair com o nome dela (o rótulo F1 ligado à conta, como na H3c). Ver `server/CLAUDE.md` e `docs/termos/perfil-de-voz-rascunho.md`. | H3c, G6, G7 |
 | H4 (G, migração) | Resumo guardado, no formato que a cliente pediu (ações com caixa de marcar, foco do trabalho, tarefas por assunto, decisões, bloqueios e questões pendentes), no idioma da reunião, cada item pendente até a dona confirmar. Os modelos de resumo são Geral, Networking, Mentoria, Vendas e 1:1. A #171 já pôs na `main` uma primeira versão, gerada a pedido, sem modelos, sem guardar nada e só para a dona; a H4 parte dela. Dividida em 15/11: **H4a1** (#205), a base, com as tabelas, o prompt e a conferência de cada item; **H4a2** (#206), a fila que gera o resumo em segundo plano e as rotas para ler e decidir; **H4b** (#207), o player fixo no rodapé, um só para todas as abas; **H4c** (#208, aberta), o resumo na tela e no link aberto, gerado sozinho quando a reunião fica pronta, no lugar do resumo a pedido da #171; e **H4d**, os modelos de resumo, que esperam a Glenda. As três primeiras estão no ar desde 15/11. | H3, G7 |
 | H6 (M) | "Pergunte à reunião", só com o que foi dito e citando os tempos. Pelo plano, as perguntas e as respostas não ficam guardadas (ver o ponto sobre "o chat" nas decisões de 10/11). A #171 já pôs na `main` uma primeira versão, só para a dona e citando o trecho, ainda sem os tempos. Pelo plano de 15/11, lê até 400 mil caracteres da transcrição, cerca de 7 h, e recusa acima disso, com aviso. | H4 |
 | H5 (M) | Combinados confirmados viram "Próximas ações". Em 16/11, a **H5c** levou a ação aberta com prazo à agenda da dona (pedido da Glenda em 11/11, R-27): um evento às 9h do dia do prazo, com aviso na hora, na Google Agenda conectada (a conexão da H16b, sem variável nova) ou, sem ela, pelo link de criar evento e pelo `.ics`. Feita, sem prazo ou apagada, a ação sai da agenda (`server/acoes-na-google.ts`, `shared/acoes-na-agenda.ts`). | H4 |
 | H8 (M) | Quem gravou exporta a reunião, com auditoria. Pelo plano de 15/11, só saem os itens confirmados do resumo. Em 16/11 o Roberto deixou só o **PDF** nesta entrega (TXT, Markdown, SRT e Word ficam de fora, e a `docx` não entra): o "Baixar PDF" do detalhe abre a impressão do aparelho sobre um documento próprio, com as fontes do sistema, para o árabe, o hindi, o chinês e o japonês saírem certos no celular. A leitura e a linha `MEETING_EXPORTED` vão na mesma transação, com teto de 30 a cada 10 min (ver as decisões de 16/11). | H4 |
+| H8c (M/G) | A dona baixa o áudio da reunião num arquivo só, em MP3 ou M4A (HN-60 no HiNoter). Pelo **servidor**: o ffmpeg na imagem do `Dockerfile` emenda as partes, na ordem e no tempo do player (silêncio no trecho que falta), em qualquer mistura de formatos (WebM/Opus, MP4/AAC, MP3 e os da importação em partes da H9b e da H9c: WAV, OGG, FLAC e AAC em ADTS), e converte enquanto o arquivo sai, sem guardar o resultado (`server/conversao-do-audio.ts`). O navegador ficou de fora: o iPhone teria de decodificar o WebM/Opus gravado no Android, o MP3 pediria um codificador em JavaScript, e 12 h de áudio não cabem na memória de um celular. Em dois passos: `meetings.baixarAudio` confere a dona, a gravação encerrada, os 30 dias e o teto, lê as partes e grava `MEETING_AUDIO_DOWNLOADED` na mesma transação, e devolve uma ficha de uso único, de 2 minutos e só para a sessão da dona; a rota `GET /api/reunioes/baixar-audio/{ficha}` transmite o arquivo, sem URL nem chave do bucket no navegador. Teto de 10 áudios por hora por dona e 2 conversões por vez na instância; depois dos 30 dias o botão some e o servidor recusa com `AUDIO_VENCIDO`, que a tela traduz. O link aberto não baixa áudio. | H8; a retenção de 30 dias |
 | H7 (M, migração) | Busca entre reuniões, etiquetas e "Onde foi". | H4 |
 | H16 (M, migração) | Agendar a reunião na WRW, com título, data, hora e participantes, pô-la na Google Agenda por link de criação de evento ou por um arquivo .ics e mandar o convite por WhatsApp e por e-mail (o botão do Outlook saiu em 12/11). Em 15/11, o desenho detalhado entrou no plano aprovado pelo Roberto, em três PRs: **H16a**, a agenda na WRW (também com fuso, local ou link e lembrete), o .ics gerado no navegador, o link de criação de evento e o convite, aberto no app da própria dona; **H16b**, a dona conecta a própria conta Google por OAuth; e **H16c**, a WRW cria, atualiza e exclui o evento na Google Agenda, com convidados e lembrete, e o convite pela conta Google da dona fica desmarcado por padrão. A agenda por API, que em 10/11 ficava para depois, entrou na fila. A reunião agendada só ganha a gravação quando a dona toca em "Gravar agora", que abre o gravador e liga a reunião. O que falta do Roberto no Google Cloud está em "O que depende de quem". | G5, G9 e D1, pelo "Gravar agora" (a R1 ficou fora da fila de 15/11) |
 
@@ -426,17 +428,82 @@ Tamanho: P é pequena, M é média e G é grande.
   de 768 px, contorno vertical que recolhe no celular, e funciona também da direita para a
   esquerda (árabe). A aba "Mapa mental" fica no detalhe da reunião e no link aberto.
 - **H11:** tradução do resumo.
-- **H12:** resumo de PDF.
-- **H13:** resumo de vídeo do YouTube. O recurso do Gemini para isso ainda está em
-  prévia.
+- **H12:** resumo de PDF. Na reunião de documento, os textos do detalhe e do link aberto
+  falam do documento, e não da transcrição ou do que foi dito (o resumo, o Pergunte, o
+  mapa mental, as entidades e a tradução); com o teto de 10 documentos por hora já
+  cheio, `meetings.iniciarDocumento` recusa antes de a reunião nascer, e a reunião de um
+  envio que não terminou aceito sai quando a dona deixa a tela (menos a da rede que
+  caiu, que o servidor pode ter recebido).
+- **H13:** resumo de vídeo do YouTube, como no HiNoter que a Glenda viu (o Roberto decidiu
+  em 16/11 que entra). A dona cola o link de um vídeo público, e a reunião nasce com a
+  origem `youtube` e a URL canônica do vídeo em `meetings.source_url` (migração 0022):
+  - `shared/youtube.ts` tira o id do link (watch, youtu.be, shorts, embed, live e v, com e
+    sem parâmetros), com a mesma regra na tela e no servidor;
+  - o servidor nunca busca a URL: o Gemini lê o vídeo pela própria URL (`file_data`), só
+    a primeira hora (`video_metadata.end_offset`), com um quadro a cada 5 s em baixa
+    resolução, e devolve as falas no contrato da transcrição em partes, com os tempos em
+    "MM:SS"; daí em diante é o caminho de sempre (resumo guardado, mapa mental e
+    Pergunte);
+  - teto de 5 vídeos por dona a cada 24 h, contado na auditoria do pedido
+    (`MEETING_YOUTUBE_REQUESTED`), que vale também para o "Tentar de novo";
+  - as falhas que se repetem com o mesmo vídeo (fala demais para uma resposta e nenhuma
+    fala) não têm "Tentar de novo", e o servidor o recusa nelas sem gastar vaga; o mesmo
+    vale para o "Reprocessar" do PDF longo demais e do PDF corrompido que o Gemini não
+    abre (`DOCUMENTO_ILEGIVEL`, H12);
+  - o aviso do YouTube tem versão própria, gravada em `consent_notice_version`
+    (`docs/termos/aviso-de-gravacao-rascunho.md`), e o link aberto do vídeo tem caixa
+    própria (`meetings.youtube.shareAuthorization`), que fala da transcrição, e não da
+    gravação, que não existe;
+  - a marca entre colchetes sem fala (`[música]`, `[ruído]`) não é voz: fica fora do tempo
+    de fala e sem o rótulo do falante (`shared/fala-na-transcricao.ts`), também no áudio;
+  - na tela não há player, porque a CSP proíbe frames de outros sites: o ▶ de cada fala,
+    item e citação abre `youtube.com/watch?v=ID&t=Ns` numa aba nova, também no link
+    aberto;
+  - os erros (vídeo privado, longo demais, sem fala, link inválido, IA ocupada, teto)
+    saem como código traduzido.
+  O recurso do Gemini para vídeo do YouTube ainda está em prévia.
 - **H14:** gravar a aba de uma reunião online, só no Chrome e no Edge do computador. Usa
   o hook da G1a, passando a ele o áudio da aba.
 - **H15:** lembrete no sino.
-- **H9b:** importar WAV, OGG e WebM longos. Até lá, esses formatos seguem no envio único
-  de hoje.
-- **G14:** tirar o envio único em base64. Só entra quando houver uma semana de logs sem
-  `submitRecording`, nenhum cliente fora do repositório que ainda use esse envio, e o
-  H9b pronto ou o aval da cliente.
+- **H9b e H9c** (`feat/importar-outros-formatos`): importar em partes, até 12 h, o M4A, o
+  MP4 e o MOV (H9c, só o áudio AAC sai do aparelho, cada parte um MP4 fragmentado), o WAV,
+  o OGG (Opus e Vorbis), o WebM e o MKV (o Opus vira Ogg Opus; o AAC, MP4 fragmentado), o
+  FLAC e o AAC em ADTS (H9b), sem recodificar (`client/src/lib/corte-do-arquivo.ts`). O
+  arquivo curto de um formato que o corte reconhece mas não lê (ALAC, AC-3, o Vorbis no
+  WebM) vai inteiro, como uma parte só, pela mesma rota (o recuo do corte; até a G14,
+  parte 2, ia pelo envio único); o maior recebe o aviso com o nome do formato. Cada
+  parte fecha na última pausa da fala antes do teto, até 20 s antes dele, como a gravação
+  ao vivo (`client/src/lib/pausas-do-corte.ts`): o WAV mede o volume das amostras na
+  janela antes do teto; os comprimidos são lidos duas vezes, a primeira para achar as
+  pausas pelo global_gain (MP3, AAC), pela marca de voz (Opus em modo SILK) ou pelos bits
+  por amostra (FLAC). Sem pausa na janela, o corte cai no teto. O Vorbis e o Opus em modo
+  CELT só acham a pausa em silêncio digital (conferência de tela do pacote 4b: a fala que
+  atravessava a emenda do WAV, cortado a cada 14 MB, sumia da transcrição).
+- **G14:** tirar o envio único em base64. Em duas partes:
+  - **parte 1 (pacote 5b, 21/11, decisão do Claude, vetável):** o gravador grava sempre
+    em partes. Saíram o `?envioUnico=1` (a saída de suporte da G13b, que agora grava em
+    partes como o `/gravar` de sempre), a revisão antes de enviar ("Transcrever áudio",
+    "Descartar e gravar novamente"), o modo inativo de `useGravacaoEmPartes` e os textos
+    dos 10 minutos e 10 MB onde as partes já cobrem o caso: a dica sob o relógio, o FAQ
+    da Home e a ajuda do limite no painel de minutos, que agora diz que as 12 h valem
+    também para o arquivo. Ficou o que ainda é preciso: `meetings.submitRecording`, com
+    os 10 minutos e 10 MB, para o recuo do corte (o arquivo curto de um formato que o
+    corte reconhece mas não lê, que a tela marca com `recuoDoCorte: true`) e para um
+    cliente de fora do repositório, se houver; os mesmos tetos, porque o reprocesso e a
+    junção leem a gravação inteira das reuniões antigas; e o ditado e a voz do contato,
+    que têm rotas próprias (`assistenteTexto.transcrever` e
+    `networkInteligente.complementarPorVoz`), não passam pelo envio único e não mudaram.
+    Cada chamada do envio único deixa no log uma linha `[Reuniões] envio único
+    (submitRecording)`, que diz se veio do recuo do corte ou sem a marca;
+  - **parte 2 (25/11/2026, com o aval do Roberto, que dispensou a semana de log):** a
+    rota `meetings.submitRecording` saiu, com a linha do log, o recorte de 15 MB e a
+    entrada em `corpoGrandeParaUploads`. O recuo do corte vai às partes: o arquivo
+    inteiro como uma parte só, até 16 MB e 12 min (`recuoDoCorte`, em
+    `client/src/pages/Meetings.tsx`). A rota das partes converte em MP3, com o ffmpeg
+    contido, a parte de um codec que o Gemini não lista (o ALAC, o AC-3, o Vorbis no WebM,
+    o ADPCM no WAV: `precisaConverterParaOGemini`, em `server/fatias-de-reuniao.ts`), e
+    recusa com `FORMATO` a que não converte. A leitura da gravação inteira das reuniões
+    antigas fica, para o reprocesso e a junção (ver "Decisões tomadas", 25/11/2026).
 - **A8:** redirecionar o endereço `.onrender.com` do Render para o domínio próprio,
   quando o Roberto confirmar o `FRONTEND_URL`, o www e o health check.
 
@@ -566,9 +633,6 @@ mescla, só por `gh pr merge`).
     - pôr no Render `WEBAUTHN_RP_ID` e `WEBAUTHN_ORIGENS`, com os valores decididos em
       15/11 (ver os contratos das passkeys). Até lá, a A6 e a A7 ficam invisíveis em
       produção;
-    - se existe app ou outro cliente fora do repositório chamando
-      `meetings.submitRecording` (o `shared/const.ts` cita "o app Expo"), porque a G14
-      só entra sem cliente externo;
     - se "o chat" que a administração consulta inclui as perguntas feitas à IA sobre a
       reunião (H6), porque isso muda a H6 e o aviso de gravação (G4);
   - antes da Onda 3:
@@ -646,12 +710,21 @@ mescla, só por `gh pr merge`).
     leva a transcrição desta reunião, com os nomes que você deu às vozes, e só os itens do
     resumo que você confirmou. Depois de baixado, o arquivo fica fora da WRW: guarde-o com
     cuidado e compartilhe só com quem participou da reunião ou autorizou."
+  - o aviso do "Baixar o áudio" (H8c, chave `meetings.audioDownload.notice`, nos 10
+    idiomas): "O arquivo leva a gravação inteira desta reunião, com a voz de todas as
+    pessoas que falaram. Depois de baixado, ele fica fora da WRW e não é apagado aos 30
+    dias: guarde-o com cuidado e compartilhe só com quem participou da reunião ou
+    autorizou." Como no PDF, o arquivo baixado também não some quando uma das pessoas
+    pede a exclusão dos dados: se o termo de gravação precisa dizer isso, é com ela.
 
 ## Fora do escopo
 
 - Bots que entram no Zoom, no Meet e no Teams: serviço pago por hora, ou software que
   não cabe no servidor de hoje. A agenda entra pela H16, sem robô.
-- Transcrição ao vivo e app de relógio.
+- Transcrição ao vivo pela IA e app de relógio. A legenda ao vivo pelo reconhecimento de voz
+  do próprio navegador (G15b, 22/11/2026) entrou: de graça, liga e desliga, não separa quem
+  fala, não fica guardada e não substitui a transcrição; o aviso dela está em
+  `docs/termos/aviso-de-gravacao-rascunho.md`.
 - Integrações com Notion, Google Docs e OneNote.
 - Espaços de equipe: a reunião compartilhada cobre o caso.
 - Link público com senha. O link aberto, sem senha, entrou em 12/11, por enquanto (ver

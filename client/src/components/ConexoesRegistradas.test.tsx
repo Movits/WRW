@@ -136,6 +136,14 @@ describe("cartão sem itens mostra o motivo", () => {
     expect(screen.getByText(/compatibilidade de 72%/)).toBeInTheDocument();
   });
 
+  it("entre membras sem a nota (U3: a Bronze não a recebe), a frase diz quando ela aparece, e não '0%'", () => {
+    renderizar(conexao({ origem: "PLATFORM_MATCH", itens: [], pontuacao: null, motivo: null }));
+
+    expect(screen.getByText(/A compatibilidade aparece quando o seu perfil chega a Membro Prata/)).toBeInTheDocument();
+    expect(screen.queryByText(/compatibilidade de/)).toBeNull();
+    expect(document.body.textContent).not.toContain("0%");
+  });
+
   it("quando o outro lado tirou a autorização, o cartão diz isso em vez de ficar vazio", () => {
     renderizar(conexao({
       origem: "NETWORK_NETWORK_MATCH",
@@ -218,5 +226,15 @@ describe("entre membras, o que identifica a conexão antes do descarte", () => {
     expect(within(dialogo).getByText(/O outro lado continua anônimo/)).toBeInTheDocument();
     expect(within(dialogo).getByRole("button", { name: `Descartar ${referenciaDaConexao(PAR_A)}` })).toBeInTheDocument();
     expect(duble.mutate).not.toHaveBeenCalled();
+  });
+
+  it("o selo do contato de outro network com a entidade é um bloco: quebra inteiro, com a borda em volta (375 px)", () => {
+    const c = conexao();
+    c.lados[1] = { ...c.lados[1], entidade: { nome: "Federação das Indústrias do Estado de Teste" } } as ConexaoNaTela["lados"][number];
+    const { container } = renderizar(c);
+    const selo = Array.from(container.querySelectorAll("[data-selo]")).find(el => el.textContent!.includes("Federação"))!;
+    expect(selo).toBeTruthy();
+    expect(selo.className).toContain("inline-block");
+    expect(selo.className).toContain("max-w-full");
   });
 });

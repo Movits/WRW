@@ -506,11 +506,12 @@ describe("o perfil do contato lê as próximas ações ligadas a ele (H5b)", () 
       }
       if (/from `proximas_acoes`/.test(sql)) {
         // id, texto, detalhe, responsavel, prazo, prazoDito, origem, feita, feitaEm, trecho, google (H5c),
-        // createdAt, updatedAt (H5c), meetingId, contactId, tituloDaReuniao, vozesDaReuniao, itemVivo, nomeDoContato
+        // createdAt, updatedAt (H5c), meetingId, contactId, tituloDaReuniao, vozesDaReuniao, itemVivo, nomeDoContato,
+        // origemDoItem e itemEditadoEm (H4f), reuniaoNaLixeira (H7d: nula, a reunião fora da lixeira)
         return [
           ["acao-1", "{F2} envia a proposta", null, "{F2}", "2026-11-20", "até sexta", "reuniao", 0, null, "eu mando", "ok", 300, 310,
-            "reuniao-1", 5, "Café na feira", JSON.stringify({ F2: "Carla" }), "item-1", "Maria Silva"],
-          ["acao-2", "Mandar o catálogo", null, null, null, null, "manual", 1, 500, null, null, 200, 500, null, 5, null, null, null, "Maria Silva"],
+            "reuniao-1", 5, "Café na feira", JSON.stringify({ F2: "Carla" }), "item-1", "Maria Silva", null, null, null],
+          ["acao-2", "Mandar o catálogo", null, null, null, null, "manual", 1, 500, null, null, 200, 500, null, 5, null, null, null, "Maria Silva", null, null, null],
         ];
       }
       return [];
@@ -566,5 +567,72 @@ describe("o perfil do contato lê as próximas ações ligadas a ele (H5b)", () 
     // Quem traduziu foi o middleware de server/_core/trpc.ts, que registra a queda.
     expect(registro).toHaveBeenCalledWith(expect.stringContaining("[Banco] indisponível em contato"));
     registro.mockRestore();
+  });
+});
+
+/**
+ * U3, "matches possíveis": a Bronze vê só QUANTAS conexões o motor de perfis
+ * sugere, e o Painel tranca a nota delas. O registro traz as mesmas conexões
+ * como PLATFORM_MATCH, com a nota na `pontuacao` e repetida no `motivo`
+ * (achado 9 da revisão do pacote do match, 20/11): a trava vale também aqui,
+ * na consulta.
+ */
+describe("U3 — a nota das conexões entre membras no registro é de quem vê a lista", () => {
+  const MOTIVO_COM_A_NOTA = "Conexão sugerida pelo motor de perfis entre duas membras da plataforma, com o termo do Smart Match aceito pelas duas: compatibilidade de 87%.";
+  const MOTIVO_DA_REDE = "NW-AAAAAA tem Vinho, que NW-BBBBBB procura.";
+
+  /** Uma conexão entre membras (registrada pela rodada do motor) e uma interna da rede da própria dona. */
+  function registroComEntreMembras() {
+    estado.responder = sql => {
+      if (/^select `conexao_id` from `conexoes_participantes`/.test(sql)) return [["c-membras"], ["c-interna"]];
+      if (/from `conexoes_registradas`/.test(sql)) {
+        // id, origem, chave_do_par, motivo, itens, pontuacao, status, apresentacao_em, negociacao_em, fechamento_em, descartada_em, status_comissao, created_at, updated_at
+        return [
+          ["c-membras", "PLATFORM_MATCH", "PLATFORM_MATCH|membro:9|membro:44", MOTIVO_COM_A_NOTA, "[]", 87, "apresentacao", 1500, null, null, null, "sem_negocio", 2000, 2000],
+          ["c-interna", "PRIVATE_NETWORK_MATCH", "PRIVATE_NETWORK_MATCH|contato:11|contato:12", MOTIVO_DA_REDE, "[]", 100, "identificada", null, null, null, null, "sem_negocio", 1000, 1000],
+        ];
+      }
+      if (/from `conexoes_participantes`/.test(sql)) {
+        // id, conexao_id, lado, tipo, owner_id, userId, contact_id, codigo_anonimo, originador, status_comissao_originador, created_at, updated_at, descartada_em, fechamento_confirmado_em
+        return [
+          [1, "c-membras", "a", "membro", null, 9, null, null, false, null, 2000, 2000, null, null],
+          [2, "c-membras", "b", "membro", null, 44, null, null, false, null, 2000, 2000, null, null],
+          [3, "c-interna", "a", "contato", "dona-9", null, 11, "NW-AAAAAA", true, "sem_negocio", 1000, 1000, null, null],
+          [4, "c-interna", "b", "contato", "dona-9", null, 12, "NW-BBBBBB", true, "sem_negocio", 1000, 1000, null, null],
+        ];
+      }
+      return undefined;
+    };
+  }
+
+  const comoConta = (role: string, extra: Record<string, unknown> = {}) => networkInteligenteRouter.createCaller({
+    user: { id: 9, openId: "dona-9", email: "dona@local", role, ...extra },
+    req: { headers: {}, socket: {} },
+    res: { cookie: () => {} },
+  } as never);
+
+  it.each([
+    ["Bronze", "bronze", {}],
+    // O Distribuidor do Smart Match é um poder, não um nível: a Bronze com o poder também não vê a nota.
+    ["Bronze distribuidora", "bronze", { isDistributor: true }],
+  ])("%s: a conexão entre membras vem sem a nota e sem o motivo que a repete; o resto do cartão fica", async (_nome, role, extra) => {
+    registroComEntreMembras();
+    const r = await comoConta(role, extra).conexoes();
+    if (!r.termoAceito) throw new Error("o termo está aceito neste teste");
+
+    const entreMembras = r.lista.find(c => c.id === "c-membras")!;
+    expect(entreMembras).toMatchObject({ origem: "PLATFORM_MATCH", pontuacao: null, motivo: null, status: "apresentacao", statusComissao: "sem_negocio" });
+    expect(JSON.stringify(r)).not.toContain("87");
+    // A conexão da rede da própria dona passa como veio.
+    expect(r.lista.find(c => c.id === "c-interna")).toMatchObject({ pontuacao: 100, motivo: MOTIVO_DA_REDE });
+    // A contagem não lê nota: as duas conexões contam.
+    expect(r.contagem).toMatchObject({ internas: 1, oportunidades: 2, intermediacoes: 1 });
+  });
+
+  it.each(["silver", "gold", "president", "admin"])("%s vê a nota da conexão entre membras, como antes", async (role) => {
+    registroComEntreMembras();
+    const r = await comoConta(role).conexoes();
+    if (!r.termoAceito) throw new Error("o termo está aceito neste teste");
+    expect(r.lista.find(c => c.id === "c-membras")).toMatchObject({ pontuacao: 87, motivo: MOTIVO_COM_A_NOTA });
   });
 });

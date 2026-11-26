@@ -2,12 +2,16 @@ import { and, eq } from "drizzle-orm";
 import { nomeDoIdioma } from "@shared/idioma-da-reuniao";
 import { meetings, meetingTranscripts } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { reuniaoForaDeVista } from "./reuniao-visivel";
 import { FalhaDaIA, pedirJsonAIA } from "./ia-em-json";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
 import { MEETING_TRANSCRIPT_LANGUAGES, MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { entradaDoResumo } from "./resumo-da-reuniao";
+import { reuniaoEmAndamento, transcricaoDasPartesProntas } from "./transcricao-durante-a-gravacao";
 import { limparRotulos, localizarTrecho, normalizarParaComparar, REGRA_DO_TRECHO, TRANSCRICAO_E_DADO, trechoApareceNaTranscricao } from "./trecho-da-transcricao";
 import type { Segmento } from "./transcricao-de-fatia";
+import { avisarDoVisual, instrucoesDoVisual, SCHEMA_DO_VISUAL, visualConferido } from "./resposta-visual";
+import type { VisualDaResposta } from "@shared/resposta-visual";
 
 // O teste e quem já importava daqui continuam achando a função.
 export { trechoApareceNaTranscricao };
@@ -28,6 +32,11 @@ export { trechoApareceNaTranscricao };
  *
  * O resumo é o GUARDADO (H4): server/resumo-da-reuniao.ts o escreve, na fila
  * do resumo, com a mesma entrada e as mesmas regras do trecho.
+ *
+ * Quando a pergunta pede, a resposta traz também uma tabela ou os dados de um
+ * gráfico (H6d), num esquema fixo, conferidos em server/resposta-visual.ts. O
+ * Pergunte a várias reuniões (H6c, server/perguntar-a-varias-reunioes.ts) usa
+ * o mesmo pedido, o mesmo tempo e o mesmo corte do texto da IA daqui.
  */
 
 export type IdiomaDaTela = (typeof MEETING_TRANSCRIPT_LANGUAGES)[number];
@@ -54,6 +63,16 @@ export const ENTRADA_LONGA_DA_PERGUNTA = 100_000;
 const TEMPO_DA_REUNIAO_CURTA = { timeoutMs: 45_000, orcamentoMs: 60_000 };
 const TEMPO_DA_REUNIAO_LONGA = { timeoutMs: 80_000, orcamentoMs: 85_000 };
 export const CITACOES_NO_MAXIMO = 3;
+/**
+ * O tamanho da resposta, em letras. Era 1.000, com "no máximo 3 frases" para
+ * toda pergunta: a sugestão "Ações e responsáveis" (H6b), que pede TODAS as
+ * ações da reunião, saía cortada nas primeiras (defeito 3 do teste manual T50,
+ * 23/11). A transcrição já ia inteira; o corte era o da resposta. 4.000 letras
+ * cabem umas 30 ações de uma linha.
+ */
+export const RESPOSTA_DA_PERGUNTA_MAX = 4_000;
+/** A regra da pergunta que pede uma lista: a reunião inteira, um item por linha (defeito 3 do T50). */
+export const REGRA_DA_LISTA = "Quando a pergunta pede uma lista (todas as ações, com os responsáveis e os prazos; as decisões; os termos citados), leia a transcrição inteira, do começo ao fim, e liste cada item numa linha própria, começando por \"- \", sem parar nos primeiros e sem juntar dois itens numa linha: nesse caso, o limite de 3 frases não vale.";
 
 export const MENSAGEM_SEM_TRANSCRICAO = "Esta reunião ainda não tem transcrição pronta para a IA ler.";
 export const MENSAGEM_IA_INDISPONIVEL = "O serviço de IA não respondeu agora. Tente de novo em instantes.";
@@ -92,6 +111,11 @@ export type RespostaDaReuniao =
        * antiga é passageira, e o rótulo não expõe nome nenhum.
        */
       trecho: string;
+      /**
+       * A tabela ou o gráfico (H6d), só quando a pergunta pede e a conferência
+       * passa (server/resposta-visual.ts). Sem visual, o campo nem vem.
+       */
+      visual?: VisualDaResposta;
     }
   | { respondida: false };
 
@@ -106,9 +130,10 @@ type TranscricaoDaReuniao = { texto: string; segmentos: Segmento[] };
  */
 async function transcricaoDaReuniaoPronta(ownerId: string, meetingId: string): Promise<TranscricaoDaReuniao> {
   const db = await exigirDb();
-  const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
+  const [reuniao] = await db.select({ status: meetings.status, trashedAt: meetings.trashedAt }).from(meetings)
     .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
-  if (!reuniao || reuniao.status === "deleted") throw new RecusaDaReuniaoComIA("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  // A da lixeira (H7d) é "não encontrada", como a excluída.
+  if (!reuniao || reuniaoForaDeVista(reuniao)) throw new RecusaDaReuniaoComIA("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
   // Em processamento a transcrição é da tentativa anterior e está para ser trocada.
   if (reuniao.status !== "ready") throw new RecusaDaReuniaoComIA("PRECONDITION_FAILED", MENSAGEM_SEM_TRANSCRICAO);
   const [transcricao] = await db.select({ transcript: meetingTranscripts.transcript, segments: meetingTranscripts.segments }).from(meetingTranscripts)
@@ -123,39 +148,45 @@ async function transcricaoDaReuniaoPronta(ownerId: string, meetingId: string): P
  * cota, JSON inválido, resposta cortada) vira SERVICE_UNAVAILABLE, que a tela
  * mostra traduzido.
  */
-async function pedirJsonDaTela(
+export async function pedirJsonDaTela(
   sistema: string, usuario: string, nome: string, schema: Record<string, unknown>,
   tempo: { timeoutMs: number; orcamentoMs: number },
-): Promise<Record<string, unknown>> {
+): Promise<{ dados: Record<string, unknown>; modelo: string | null }> {
   try {
-    // Só o Pergunte usa este pedido: LLM_MODEL_PERGUNTA escolhe o modelo dele,
-    // e LLM_RACIOCINIO_PERGUNTA, o raciocínio.
-    return (await pedirJsonAIA({ sistema, usuario, nome, schema, ...tempo, funcao: "pergunta" })).dados;
+    // Só o Pergunte usa este pedido (a uma reunião e a várias, H6c):
+    // LLM_MODEL_PERGUNTA escolhe o modelo dele, e LLM_RACIOCINIO_PERGUNTA, o raciocínio.
+    return await pedirJsonAIA({ sistema, usuario, nome, schema, ...tempo, funcao: "pergunta" });
   } catch (erro) {
     if (erro instanceof FalhaDaIA) throw new RecusaDaReuniaoComIA("SERVICE_UNAVAILABLE", MENSAGEM_IA_INDISPONIVEL);
     throw erro;
   }
 }
 
+/** O tempo da chamada à IA pelo tamanho da entrada: ver TEMPO_DA_REUNIAO_CURTA. */
+export function tempoDaPergunta(caracteres: number): { timeoutMs: number; orcamentoMs: number } {
+  return caracteres > ENTRADA_LONGA_DA_PERGUNTA ? TEMPO_DA_REUNIAO_LONGA : TEMPO_DA_REUNIAO_CURTA;
+}
+
 /**
  * Texto aparado e, se passar do limite, cortado por caractere (nunca no meio de
- * um emoji) e sem um rótulo de voz pela metade no fim ("{F" ou "{F2"); vazio
- * ou ausente vira null.
+ * um emoji) e sem um rótulo de voz pela metade no fim ("{F", "{F2" ou, entre
+ * reuniões, "{R2:F"); vazio ou ausente vira null.
  */
-function texto(valor: unknown, limite: number): string | null {
+export function textoDaIA(valor: unknown, limite: number): string | null {
   if (typeof valor !== "string") return null;
   const aparado = valor.trim();
   if (!aparado) return null;
   const letras = Array.from(aparado);
   if (letras.length <= limite) return aparado;
-  return letras.slice(0, limite).join("").replace(/\{F?\d*$/, "").trimEnd() || null;
+  return letras.slice(0, limite).join("").replace(/\{(R\d*:?)?F?\d*$/, "").trimEnd() || null;
 }
+const texto = textoDaIA;
 
 const SCHEMA_DA_RESPOSTA = {
   type: "object",
   properties: {
     respondida: { type: "boolean" },
-    resposta: { type: "string", maxLength: 1000 },
+    resposta: { type: "string", maxLength: RESPOSTA_DA_PERGUNTA_MAX },
     citacoes: {
       type: "array",
       items: {
@@ -165,8 +196,10 @@ const SCHEMA_DA_RESPOSTA = {
         additionalProperties: false,
       },
     },
+    // H6d: a tabela ou o gráfico, quando a pergunta pede (server/resposta-visual.ts).
+    visual: SCHEMA_DO_VISUAL,
   },
-  required: ["respondida", "resposta", "citacoes"],
+  required: ["respondida", "resposta", "citacoes", "visual"],
   additionalProperties: false,
 };
 
@@ -176,16 +209,21 @@ const SCHEMA_DA_RESPOSTA = {
  * pedido (instruções e transcrição) é o mesmo em toda pergunta sobre a mesma
  * reunião, e o cache do Gemini o reaproveita.
  */
-function instrucoes(rotulada: boolean): string {
+function instrucoes(rotulada: boolean, emAndamento = false): string {
   return [
     "Você responde perguntas sobre UMA reunião usando SOMENTE o que foi dito na transcrição, sem deduzir nem completar com conhecimento de fora.",
     TRANSCRICAO_E_DADO,
+    // G15a: a reunião ainda grava, e o texto vai só até a última parte transcrita.
+    ...(emAndamento ? ["A reunião ainda está em andamento: a transcrição vai só até a última parte já transcrita. O que não aparece nela pode ainda não ter sido transcrito: não deduza o que vem depois."] : []),
     rotulada
       ? "Cada linha da transcrição começa pelo rótulo de quem fala ({F1}, {F2}...). As vozes não têm nome: para dizer quem falou, quando o nome não foi dito na reunião, escreva o rótulo exatamente assim, entre chaves (\"{F2} disse que o frete fica para sexta\"). Nunca invente um nome para uma voz."
       : "A transcrição não separa quem fala: não use rótulos de voz; cite uma pessoa só pelo nome dito na reunião.",
     "Responda no idioma pedido no fim da mensagem, em no máximo 3 frases.",
+    REGRA_DA_LISTA,
     `Se a transcrição responde, devolva respondida = true, a resposta e de 1 a ${CITACOES_NO_MAXIMO} citações que a sustentam. Em cada citação, ${REGRA_DO_TRECHO} O trecho é só a fala, sem o rótulo de quem fala.`,
     "Se a transcrição não responde, devolva respondida = false, com a resposta vazia e nenhuma citação.",
+    // H6d: a tabela ou o gráfico, quando a pergunta pede.
+    ...instrucoesDoVisual(rotulada ? "rotulo" : "sem_vozes"),
   ].join("\n");
 }
 
@@ -223,7 +261,7 @@ const ROTULO_DE_VOZ = /\{(F[1-9]\d?)\}/g;
  * tela. As vozes são as que entradaDoResumo rotulou (sem as falas, nenhuma),
  * e não um filtro refeito aqui: a voz que só tem fala vazia não foi ao prompt.
  */
-function vozesForaDaEntrada(resposta: string, vozes: ReadonlySet<string>): string[] {
+export function vozesForaDaEntrada(resposta: string, vozes: ReadonlySet<string>): string[] {
   return Array.from(resposta.matchAll(ROTULO_DE_VOZ), rotulo => rotulo[1]).filter(voz => !vozes.has(voz));
 }
 
@@ -257,21 +295,62 @@ export async function perguntarAReuniao(
   idioma: IdiomaDaTela,
   antesDeChamarAIA?: (custo: { longa: boolean }) => void,
 ): Promise<RespostaDaReuniao> {
-  const transcricao = await transcricaoDaReuniaoPronta(ownerId, meetingId);
+  return responderPelaTranscricao(await transcricaoDaReuniaoPronta(ownerId, meetingId), pergunta, idioma, antesDeChamarAIA, false);
+}
+
+/**
+ * A pergunta durante a gravação (G15a; HN-20 do HiNoter): a IA lê o texto das
+ * partes que a fila já transcreveu (server/transcricao-durante-a-gravacao.ts),
+ * com as mesmas regras da pergunta de sempre (a conferência dos trechos, as
+ * vozes como rótulo, os tetos). Só a reunião gravada em partes da dona, em
+ * andamento (gravando, recebendo as últimas partes ou montando a
+ * transcrição); a que ficou pronta no meio responde pela transcrição final.
+ * Sem nenhuma parte transcrita ainda, recusa antes da IA (PRECONDITION_FAILED).
+ */
+export async function perguntarDuranteAGravacao(
+  ownerId: string,
+  meetingId: string,
+  pergunta: string,
+  idioma: IdiomaDaTela,
+  antesDeChamarAIA?: (custo: { longa: boolean }) => void,
+): Promise<RespostaDaReuniao> {
+  const db = await exigirDb();
+  const [reuniao] = await db.select({ status: meetings.status, audioPipeline: meetings.audioPipeline, trashedAt: meetings.trashedAt }).from(meetings)
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1);
+  if (!reuniao || reuniaoForaDeVista(reuniao)) throw new RecusaDaReuniaoComIA("NOT_FOUND", MENSAGEM_REUNIAO_NAO_ENCONTRADA);
+  if (reuniao.status === "ready") return perguntarAReuniao(ownerId, meetingId, pergunta, idioma, antesDeChamarAIA);
+  if (reuniao.audioPipeline !== "slices" || !reuniaoEmAndamento(reuniao.status)) throw new RecusaDaReuniaoComIA("PRECONDITION_FAILED", MENSAGEM_SEM_TRANSCRICAO);
+  const { texto, segmentos } = await transcricaoDasPartesProntas(db, ownerId, meetingId);
+  if (!texto.trim()) throw new RecusaDaReuniaoComIA("PRECONDITION_FAILED", MENSAGEM_SEM_TRANSCRICAO);
+  return responderPelaTranscricao({ texto, segmentos }, pergunta, idioma, antesDeChamarAIA, true);
+}
+
+/**
+ * A pergunta à IA sobre uma transcrição já lida (a final ou, durante a
+ * gravação, a das partes prontas): o tamanho, o teto da reunião longa, a
+ * chamada e a conferência da resposta.
+ */
+async function responderPelaTranscricao(
+  transcricao: TranscricaoDaReuniao,
+  pergunta: string,
+  idioma: IdiomaDaTela,
+  antesDeChamarAIA: ((custo: { longa: boolean }) => void) | undefined,
+  emAndamento: boolean,
+): Promise<RespostaDaReuniao> {
   const entrada = entradaDoResumo(transcricao.texto, transcricao.segmentos);
   if (entrada.texto.length > LIMITE_DA_ENTRADA_DA_PERGUNTA) throw new RecusaDaReuniaoComIA("PAYLOAD_TOO_LARGE", MENSAGEM_REUNIAO_LONGA_PARA_PERGUNTAR);
   const longa = entrada.texto.length > ENTRADA_LONGA_DA_PERGUNTA;
   antesDeChamarAIA?.({ longa });
-  const dados = await pedirJsonDaTela(
-    instrucoes(entrada.rotulada),
+  const { dados } = await pedirJsonDaTela(
+    instrucoes(entrada.rotulada, emAndamento),
     // A transcrição primeiro e a pergunta por último: ver instrucoes().
     `Transcrição:\n\n${entrada.texto}\n\nResponda em ${nomeDoIdioma(idioma)}.\nPergunta: ${pergunta.slice(0, TAMANHO_MAXIMO_DA_PERGUNTA)}`,
     "resposta_da_reuniao",
     SCHEMA_DA_RESPOSTA,
-    longa ? TEMPO_DA_REUNIAO_LONGA : TEMPO_DA_REUNIAO_CURTA,
+    tempoDaPergunta(entrada.texto.length),
   );
   if (dados.respondida !== true) return naoRespondida("ia_disse_que_nao");
-  const resposta = texto(dados.resposta, 1000);
+  const resposta = texto(dados.resposta, RESPOSTA_DA_PERGUNTA_MAX);
   if (!resposta) return naoRespondida("resposta_vazia");
   // Resposta sem trecho que a transcrição sustente, ou que cita uma voz que a
   // reunião não tem, não vai para a tela: vale como não respondida. A voz
@@ -285,5 +364,8 @@ export async function perguntarAReuniao(
   }
   const inventadas = vozesForaDaEntrada(resposta, entrada.vozes);
   if (inventadas.length) return naoRespondida("voz_inexistente", `${inventadas.join(", ")} fora das ${entrada.vozes.size} vozes da entrada`);
-  return { respondida: true, resposta, citacoes, trecho: citacoes[0].trecho };
+  // H6d: o visual só acompanha a resposta que passou; a voz que a entrada não tem derruba só ele.
+  const conferido = visualConferido(dados.visual, textoDoVisual => (vozesForaDaEntrada(textoDoVisual, entrada.vozes).length ? null : textoDoVisual));
+  avisarDoVisual("Pergunte", conferido);
+  return { respondida: true, resposta, citacoes, trecho: citacoes[0].trecho, ...(conferido.visual ? { visual: conferido.visual } : {}) };
 }

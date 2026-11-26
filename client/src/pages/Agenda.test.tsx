@@ -101,6 +101,27 @@ afterEach(async () => {
   await i18n.changeLanguage("pt-BR");
 });
 
+/**
+ * O "Arquivo .ics" solta o endereço do arquivo 10 s depois do clique
+ * (baixarIcs, em Agenda.tsx). Com o relógio de verdade, esse timer disparava
+ * depois do fim do teste, quando o afterEach já tinha devolvido o
+ * URL.revokeObjectURL do jsdom, que não existe: o arquivo, que leva mais de
+ * 10 s com a máquina carregada, derrubava a suíte com "URL.revokeObjectURL is
+ * not a function" (CI local de 21/11/2026). Com o relógio falso, o teste vê o
+ * endereço sair, e nenhum timer sobra.
+ */
+function clicarNoIcs() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    fireEvent.click(screen.getByRole("button", { name: /Arquivo \.ics/ }));
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(10_000);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:agenda");
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 describe("Agenda — a lista", () => {
   it("carregando: o aviso de carregamento, nada de 'nenhuma reunião'", () => {
     duble.listar.mockReturnValue({ data: undefined, isLoading: true, isError: false, error: null, refetch: vi.fn() });
@@ -230,7 +251,7 @@ describe("Agenda — convites e calendário", () => {
     const cliques: string[] = [];
     const clicar = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { cliques.push(this.download); });
     render(<Agenda/>);
-    fireEvent.click(screen.getByRole("button", { name: /Arquivo \.ics/ }));
+    clicarNoIcs();
     expect(criarUrl).toHaveBeenCalledTimes(1);
     const arquivo = criarUrl.mock.calls[0][0] as Blob;
     expect(arquivo.type).toBe("text/calendar;charset=utf-8");
@@ -247,7 +268,7 @@ describe("Agenda — convites e calendário", () => {
     duble.listar.mockReturnValue(lista([reuniao({ createdAt: criada, updatedAt: criada + 60 * 60_000 })]));
     const clicar = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     render(<Agenda/>);
-    fireEvent.click(screen.getByRole("button", { name: /Arquivo \.ics/ }));
+    clicarNoIcs();
     const linhas = (await (criarUrl.mock.calls[0][0] as Blob).text()).replace(/\r\n /g, "").split("\r\n");
     expect(linhas).toContain(`UID:${ID}@wrwglobal.org`);
     expect(linhas).toContain("SEQUENCE:3600");
@@ -482,12 +503,12 @@ describe("Agenda — a Google Agenda conectada (H16c)", () => {
     expect(duble.mutacao("atualizar").mutate).toHaveBeenCalledWith(expect.objectContaining({ id: ID, googleConvites: true }));
   });
 
-  it("salvou na WRW e a Google falhou: o aviso de sempre e outro com o porquê", async () => {
+  it("salvou na Marquesa Global Match e a Google falhou: o aviso de sempre e outro com o porquê", async () => {
     render(<Agenda/>);
     fireEvent.click(screen.getByRole("button", { name: /Marcar reunião/ }));
     await act(async () => { await duble.mutacao("criar").opcoes.onSuccess?.({ id: ID, naGoogle: "falhou", motivo: "revogada" }, {}); });
     expect(toast.success).toHaveBeenCalledWith("Reunião marcada.");
-    expect(toast.warning).toHaveBeenCalledWith("A reunião está salva na WRW, mas não foi para a sua Google Agenda. Reconecte a Google Agenda no Perfil.", expect.anything());
+    expect(toast.warning).toHaveBeenCalledWith("A reunião está salva na Marquesa Global Match, mas não foi para a sua Google Agenda. Reconecte a Google Agenda no Perfil.", expect.anything());
     // Deu certo na Google, ou nada foi tentado: só o aviso de sempre.
     vi.mocked(toast.warning).mockClear();
     await act(async () => { await duble.mutacao("atualizar").opcoes.onSuccess?.({ id: ID, naGoogle: "ok" }, {}); });
@@ -500,7 +521,7 @@ describe("Agenda — a Google Agenda conectada (H16c)", () => {
     await act(async () => { await duble.mutacao("excluir").opcoes.onSuccess?.({ ok: true, avisarConvidados: true, naGoogle: "falhou", motivo: "google" }, { id: ID }); });
     expect(toast.success).toHaveBeenCalledWith("Reunião tirada da agenda.");
     const [texto, opcoes] = vi.mocked(toast.warning).mock.calls[0] as unknown as [string, { action: { label: string; onClick: () => void } }];
-    expect(texto).toBe("A reunião saiu da agenda da WRW, mas continua na sua Google Agenda. A Google não respondeu. Tente de novo em instantes.");
+    expect(texto).toBe("A reunião saiu da agenda da Marquesa Global Match, mas continua na sua Google Agenda. A Google não respondeu. Tente de novo em instantes.");
     expect(opcoes.action.label).toBe("Tentar de novo");
     opcoes.action.onClick();
     expect(duble.mutacao("tirarDaGoogle").mutate).toHaveBeenCalledWith({ id: ID, avisarConvidados: true });
@@ -510,7 +531,7 @@ describe("Agenda — a Google Agenda conectada (H16c)", () => {
     render(<Agenda/>);
     await act(async () => { await duble.mutacao("excluir").opcoes.onSuccess?.({ ok: true, avisarConvidados: false, naGoogle: "falhou", motivo: "revogada" }, { id: ID }); });
     const [texto, opcoes] = vi.mocked(toast.warning).mock.calls[0] as unknown as [string, Record<string, unknown>];
-    expect(texto).toBe("A reunião saiu da agenda da WRW, mas continua na sua Google Agenda. Se quiser, apague o evento por lá.");
+    expect(texto).toBe("A reunião saiu da agenda da Marquesa Global Match, mas continua na sua Google Agenda. Se quiser, apague o evento por lá.");
     expect(opcoes).not.toHaveProperty("action");
   });
 
@@ -519,14 +540,14 @@ describe("Agenda — a Google Agenda conectada (H16c)", () => {
     await act(async () => { await duble.mutacao("mandarParaGoogle").opcoes.onSuccess?.({ naGoogle: "ok" }, { id: ID }); });
     expect(toast.success).toHaveBeenCalledWith("A reunião está na sua Google Agenda.");
     await act(async () => { await duble.mutacao("mandarParaGoogle").opcoes.onSuccess?.({ naGoogle: "falhou", motivo: "nao-conectada" }, { id: ID }); });
-    expect(toast.warning).toHaveBeenCalledWith("A reunião está salva na WRW, mas não foi para a sua Google Agenda. Conecte a Google Agenda no Perfil.", expect.anything());
+    expect(toast.warning).toHaveBeenCalledWith("A reunião está salva na Marquesa Global Match, mas não foi para a sua Google Agenda. Conecte a Google Agenda no Perfil.", expect.anything());
     expect(duble.utils.agenda.listar.invalidate).toHaveBeenCalledTimes(2);
   });
 
-  it("Tentar de novo na reunião que já acabou e não está na Google: o aviso de que ela fica só na WRW, nunca 'está na sua Google Agenda'", async () => {
+  it("Tentar de novo na reunião que já acabou e não está na Google: o aviso de que ela fica só na Marquesa Global Match, nunca 'está na sua Google Agenda'", async () => {
     render(<Agenda/>);
     await act(async () => { await duble.mutacao("mandarParaGoogle").opcoes.onSuccess?.({ naGoogle: null }, { id: ID }); });
-    expect(toast.info).toHaveBeenCalledWith("Esta reunião já aconteceu e fica só na agenda da WRW.");
+    expect(toast.info).toHaveBeenCalledWith("Esta reunião já aconteceu e fica só na agenda da Marquesa Global Match.");
     expect(toast.success).not.toHaveBeenCalled();
     expect(duble.utils.agenda.listar.invalidate).toHaveBeenCalled();
   });

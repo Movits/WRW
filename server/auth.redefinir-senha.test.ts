@@ -192,7 +192,8 @@ const passos = () =>
     return o.op;
   });
 /** O que a transação da redefinição grava, na ordem, quando a conta não tem chave de acesso. */
-const GRAVADAS_NO_RESET = ["password_reset_tokens", "users", "sessions", "chaves_de_acesso", "desafios_de_chave_de_acesso"];
+// A conta Google ligada (A8) sai junto, depois das chaves de acesso.
+const GRAVADAS_NO_RESET = ["password_reset_tokens", "users", "sessions", "chaves_de_acesso", "desafios_de_chave_de_acesso", "contas_google"];
 const selecoes = () =>
   estado.operacoes.filter((o): o is Extract<Operacao, { op: "select" }> => o.op === "select");
 const atualizacoes = (tabela: string) =>
@@ -244,6 +245,7 @@ describe("auth.resetPassword — derruba as sessões, audita e gasta o link uma 
       "tx.update:sessions",
       "tx.delete:chaves_de_acesso",
       "tx.delete:desafios_de_chave_de_acesso",
+      "tx.delete:contas_google",
       "commit",
       "revogar",
       "auditar",
@@ -428,7 +430,7 @@ describe("auth.resetPassword — apaga as chaves de acesso da conta, na transaç
     expect(consulta(sessoes.filtro).sql).toMatch(/`userId` = \?/);
     expect(consulta(sessoes.filtro).params).toEqual([LINK.userId]);
 
-    expect(remocoes().map(r => r.tabela)).toEqual(["chaves_de_acesso", "desafios_de_chave_de_acesso"]);
+    expect(remocoes().map(r => r.tabela)).toEqual(["chaves_de_acesso", "desafios_de_chave_de_acesso", "contas_google"]);
     for (const remocao of remocoes()) {
       expect(remocao.naTransacao).toBe(true);
       expect(consulta(remocao.filtro).sql).toMatch(/`userId` = \?$/);
@@ -453,6 +455,7 @@ describe("auth.resetPassword — apaga as chaves de acesso da conta, na transaç
       "tx.delete:chaves_de_acesso",
       "tx.delete:desafios_de_chave_de_acesso",
       "tx.insert:audit_logs",
+      "tx.delete:contas_google",
       "commit",
       "revogar",
       "auditar",

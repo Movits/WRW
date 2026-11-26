@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { analisarTermo, direcaoEfetiva, ehLugar, saoConcorrentes } from "@shared/direcao-do-termo";
 import { scoreMatch } from "./match-service";
 
@@ -431,13 +431,17 @@ describe("Revisão adversarial da PR-F (05/09) — o que a primeira rodada deixo
 describe("Etapa 11 — o critério semântico está desligado, e isso tem consequência", () => {
   it("nem a similaridade máxima possível chega a virar sugestão", () => {
     // TRIPWIRE. Este teste falha de propósito no dia em que alguém religar o
-    // critério semântico — e é aí que se deve reler o termo de consentimento:
-    // enquanto ele está desligado, `docs/termos/termo-smart-match.md` afirma
-    // que nenhum dado sai da plataforma, e o recálculo nem chama o provedor de
-    // embeddings. Religar sem republicar o termo transforma o documento numa
-    // afirmação falsa. Se você chegou aqui de propósito, atualize os dois.
+    // critério semântico POR PADRÃO — e é aí que se deve reler o termo de
+    // consentimento: enquanto ele está desligado, `docs/termos/termo-smart-match.md`
+    // afirma que nenhum dado sai da plataforma, e o recálculo nem chama o
+    // provedor de embeddings. Desde o N7 ele existe numa faixa estreita, mas só
+    // liga com MATCH_SEMANTICO_ESTREITO=1; o stub abaixo garante o padrão
+    // mesmo que o .env de quem roda a suíte o ligue. Religar sem republicar o
+    // termo transforma o documento numa afirmação falsa.
+    vi.stubEnv("MATCH_SEMANTICO_ESTREITO", "");
     expect(scoreMatch(possui("Câmaras frias em Santos", "Logística"),
                       possui("Terrenos licenciados", "Imóveis"), 1).score).toBeLessThan(50);
+    vi.unstubAllEnvs();
   });
 });
 

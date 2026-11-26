@@ -186,7 +186,7 @@ describe("Esqueci a senha — depois do pedido", () => {
   it("diz que o pedido chegou, sem afirmar que um link saiu, e repete o e-mail pedido", () => {
     pedirLink();
     expect(screen.getByRole("heading", { name: "Pedido recebido" })).toBeInTheDocument();
-    expect(screen.getByText(/Se existir uma conta WRW com o e-mail abaixo/)).toBeInTheDocument();
+    expect(screen.getByText(/Se existir uma conta Marquesa Global Match com o e-mail abaixo/)).toBeInTheDocument();
     expect(screen.getByTestId("email-digitado")).toHaveTextContent(EMAIL);
     expect(screen.getByTestId("email-digitado")).toHaveAttribute("dir", "ltr");
     expect(screen.queryByText(/Link enviado/)).not.toBeInTheDocument();
@@ -232,7 +232,7 @@ describe("Esqueci a senha — depois do pedido", () => {
     expect(screen.getByText(/Confira se o e-mail acima é o mesmo do seu cadastro/)).toBeInTheDocument();
     expect(screen.getByText(/Procure também nas pastas de spam/)).toBeInTheDocument();
     expect(screen.getByText(/cada pedido cancela o anterior/)).toBeInTheDocument();
-    expect(screen.getByText(/Ainda não tem conta na WRW\?/)).toBeInTheDocument();
+    expect(screen.getByText(/Ainda não tem conta na Marquesa Global Match\?/)).toBeInTheDocument();
   });
 
   it("'Corrigir o e-mail' volta ao formulário com o e-mail preservado e selecionado", () => {

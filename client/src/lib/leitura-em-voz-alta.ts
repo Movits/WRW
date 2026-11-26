@@ -1,4 +1,4 @@
-import type { IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import type { IdiomaFalado } from "@shared/idioma-da-reuniao";
 
 /**
  * Ler um texto em voz alta com a voz do próprio aparelho (a speechSynthesis
@@ -29,16 +29,16 @@ export type VozDoAparelho = Pick<SpeechSynthesisVoice, "name" | "lang" | "defaul
 const etiqueta = (lang: string) => lang.trim().replace(/_/g, "-").toLowerCase();
 
 // O mandarim às vezes vem como "cmn" em vez de "zh".
-const BASES: Partial<Record<IdiomaDaReuniao, readonly string[]>> = { zh: ["zh", "cmn"] };
+const BASES: Partial<Record<IdiomaFalado, readonly string[]>> = { zh: ["zh", "cmn"] };
 // A região que o texto pede: o resumo em pt-BR soa melhor numa voz do Brasil,
 // e o chinês simplificado numa voz do mandarim da China continental.
-const PREFERIDAS: Partial<Record<IdiomaDaReuniao, readonly string[]>> = {
+const PREFERIDAS: Partial<Record<IdiomaFalado, readonly string[]>> = {
   "pt-BR": ["pt-br"],
   zh: ["zh-cn", "zh-hans", "zh-hans-cn", "cmn-cn", "cmn-hans-cn"],
 };
 // As vozes do cantonês (Hong Kong e Macau) leem o chinês com outra pronúncia:
 // só quando não há outra.
-const POR_ULTIMO: Partial<Record<IdiomaDaReuniao, readonly string[]>> = { zh: ["zh-hk", "zh-mo", "zh-yue"] };
+const POR_ULTIMO: Partial<Record<IdiomaFalado, readonly string[]>> = { zh: ["zh-hk", "zh-mo", "zh-yue"] };
 // As vozes de brincadeira do macOS, que o Safari e o Chrome do Mac listam como
 // inglês dos EUA: nunca a primeira escolha.
 const VOZES_DE_BRINCADEIRA = new Set([
@@ -62,7 +62,7 @@ const vozDeSegunda = (voz: VozDoAparelho) => VOZES_DE_BRINCADEIRA.has(nomeDaVoz(
  * nem da Eloquence, depois a voz padrão do aparelho e, por fim, a ordem da
  * lista.
  */
-export function escolherVoz<V extends VozDoAparelho>(vozes: readonly V[], idioma: IdiomaDaReuniao): V | null {
+export function escolherVoz<V extends VozDoAparelho>(vozes: readonly V[], idioma: IdiomaFalado): V | null {
   const bases = BASES[idioma] ?? [idioma.split("-")[0].toLowerCase()];
   const regiao = (tag: string) => PREFERIDAS[idioma]?.includes(tag) ? 0
     : POR_ULTIMO[idioma]?.some(ultima => tag === ultima || tag.startsWith(`${ultima}-`)) ? 2 : 1;
@@ -108,7 +108,7 @@ function pontoDeCorte(janela: string): number {
  * numa fala só. No chinês e no japonês cada caractere leva mais tempo, e o
  * teto é menor.
  */
-export function falasCurtas(texto: string, idioma: IdiomaDaReuniao): string[] {
+export function falasCurtas(texto: string, idioma: IdiomaFalado): string[] {
   const teto = idioma === "zh" || idioma === "ja" ? 60 : 160;
   const falas: string[] = [];
   for (const frase of texto.match(FRASE) ?? []) {

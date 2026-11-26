@@ -197,3 +197,34 @@ describe("Rede — removeAsset / removeNeed: apagar o próprio dado não exige t
     }
   });
 });
+
+describe("Rede — addItem / editItem: a dona acrescenta e corrige na ficha, sem termo (T45, 24/11)", () => {
+  const rede = networkRouter.createCaller(ctx);
+  const gravacoes = () => estado.consultas.filter(c => /^(insert|update)/.test(c.sql));
+
+  it("contato de outra dona: NOT_FOUND, conferido com a dona no WHERE, e nada é gravado", async () => {
+    estado.contatoEhDaDona = false;
+    await expect(rede.addItem({ contactId: 42, tipo: "possui", rotulo: "Exportação de café" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(consultasEm("private_contacts")[0].params).toEqual(expect.arrayContaining([42, "dona-1"]));
+    expect(gravacoes()).toEqual([]);
+  });
+
+  it("o contato já tem o item: CONFLICT com o código, e nada é gravado", async () => {
+    await expect(rede.addItem({ contactId: 42, tipo: "possui", rotulo: "Vinho do Porto" })).rejects.toMatchObject({ code: "CONFLICT", message: "ITEM_DA_FICHA_REPETIDO" });
+    expect(gravacoes()).toEqual([]);
+  });
+
+  it("corrigir o item de outra dona: NOT_FOUND, e nada é gravado", async () => {
+    estado.itemEhDaDona = false;
+    await expect(rede.editItem({ id: 9, tipo: "procura", rotulo: "Outra coisa" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const leitura = consultasEm("contact_needs")[0];
+    expect(leitura.sql).toContain("`owner_id` = ?");
+    expect(leitura.params).toEqual(expect.arrayContaining([9, "dona-1"]));
+    expect(gravacoes()).toEqual([]);
+  });
+
+  it("o texto passa do teto da coluna: recusado na entrada", async () => {
+    await expect(rede.addItem({ contactId: 42, tipo: "procura", rotulo: "x".repeat(201) })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(estado.consultas).toEqual([]);
+  });
+});

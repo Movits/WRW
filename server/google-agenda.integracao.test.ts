@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -28,13 +29,17 @@ const { excluirConta } = await import("./exclusao-de-conta");
  */
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const DONA = `teste-google-${crypto.randomUUID()}`;
+// A conta Google de cada execução é única: os arquivos de integração rodam em paralelo no
+// mesmo banco, e "outra conta da WRW usa esta conta Google?" (outraContaUsa) via a dos outros.
+const SUFIXO_DA_CONTA_GOOGLE = crypto.randomUUID();
+const contaGoogle = (nome: string) => `${nome}-${SUFIXO_DA_CONTA_GOOGLE}`;
 const EXCLUIDA = `teste-google-${crypto.randomUUID()}`;
 const PROVA = { ipAddress: "203.0.113.9", userAgent: "Navegador de teste" };
 const ESCOPOS = ["openid", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/calendar.events"];
 let idDaDona = 0;
 let idDaExcluida = 0;
 
-const conexao = (refreshToken: string, sub = "sub-da-dona") => ({
+const conexao = (refreshToken: string, sub = contaGoogle("sub-da-dona")) => ({
   refreshToken, sub, email: "dona@exemplo.com", escopos: ESCOPOS, acesso: { token: `acesso-de-${refreshToken}`, expiraEm: Date.now() + 3_600_000 },
 });
 const lerJson = (valor: unknown) => (typeof valor === "string" ? JSON.parse(valor) : valor) as Record<string, unknown>;
@@ -67,8 +72,8 @@ describe.skipIf(!temBanco)("Google Agenda (integração)", () => {
     if (!db) return;
     const ids = [idDaDona, idDaExcluida].filter(Boolean);
     if (ids.length) {
-      await db.delete(googleAgendaConexoes).where(inArray(googleAgendaConexoes.userId, ids));
-      await db.delete(auditLogs).where(inArray(auditLogs.userId, ids));
+      await apagarPelaChave(db, googleAgendaConexoes, inArray(googleAgendaConexoes.userId, ids));
+      await apagarPelaChave(db, auditLogs, inArray(auditLogs.userId, ids));
     }
     await db.delete(users).where(inArray(users.openId, [DONA, EXCLUIDA]));
   });
@@ -87,13 +92,13 @@ describe.skipIf(!temBanco)("Google Agenda (integração)", () => {
     expect(outras).toEqual([]);
     expect(linha.refreshTokenCifrado).not.toContain("refresh-1");
     expect(decryptData(linha.refreshTokenCifrado)).toBe("refresh-1");
-    expect(linha).toMatchObject({ googleSub: "sub-da-dona", emailGoogle: "dona@exemplo.com", falha: null });
+    expect(linha).toMatchObject({ googleSub: contaGoogle("sub-da-dona"), emailGoogle: "dona@exemplo.com", falha: null });
     expect(linha.escopos.split(" ").sort()).toEqual([...ESCOPOS].sort());
     const [prova] = await provasDa(idDaDona, servico.ACAO_GOOGLE_CONECTADA);
     expect(lerJson(prova.details)).toMatchObject({ reconexao: false });
     expect(prova.ipAddress).toBe("203.0.113.9");
-    expect(await servico.contaGoogleEmUso("sub-da-dona")).toBe(true);
-    expect(await servico.contaGoogleEmUso("sub-que-ninguem-usa")).toBe(false);
+    expect(await servico.contaGoogleEmUso(contaGoogle("sub-da-dona"))).toBe(true);
+    expect(await servico.contaGoogleEmUso(contaGoogle("sub-que-ninguem-usa"))).toBe(false);
   });
 
   it("reconectar com a mesma conta Google troca a linha (uma por conta) e não devolve nada para revogar", async () => {
@@ -108,9 +113,9 @@ describe.skipIf(!temBanco)("Google Agenda (integração)", () => {
   });
 
   it("reconectar com outra conta Google devolve o token anterior para revogar", async () => {
-    expect(await servico.gravarConexaoGoogle(idDaDona, conexao("refresh-3", "sub-de-outra-conta"), PROVA)).toEqual({ anterior: "refresh-2" });
+    expect(await servico.gravarConexaoGoogle(idDaDona, conexao("refresh-3", contaGoogle("sub-de-outra-conta")), PROVA)).toEqual({ anterior: "refresh-2" });
     const [linha] = await linhasDa(idDaDona);
-    expect(linha.googleSub).toBe("sub-de-outra-conta");
+    expect(linha.googleSub).toBe(contaGoogle("sub-de-outra-conta"));
     const [prova] = await provasDa(idDaDona, servico.ACAO_GOOGLE_CONECTADA);
     expect(lerJson(prova.details)).toMatchObject({ reconexao: true, trocouDeContaGoogle: true });
   });
@@ -127,7 +132,7 @@ describe.skipIf(!temBanco)("Google Agenda (integração)", () => {
     expect((await linhasDa(idDaDona))[0].falha).toBe("revogada");
     expect(await servico.estadoDaGoogleAgenda(idDaDona)).toMatchObject({ conectada: true, falha: "revogada" });
     // "Reconectar" com a mesma conta Google: limpa a marca e não revoga nada.
-    expect(await servico.gravarConexaoGoogle(idDaDona, conexao("refresh-4", "sub-de-outra-conta"), PROVA)).toEqual({ anterior: null });
+    expect(await servico.gravarConexaoGoogle(idDaDona, conexao("refresh-4", contaGoogle("sub-de-outra-conta")), PROVA)).toEqual({ anterior: null });
     expect((await linhasDa(idDaDona))[0].falha).toBeNull();
   });
 
@@ -142,19 +147,19 @@ describe.skipIf(!temBanco)("Google Agenda (integração)", () => {
   });
 
   it("excluir a conta não revoga a conta Google que outra conta da WRW ainda usa, e leva só a linha dela", async () => {
-    await servico.gravarConexaoGoogle(idDaDona, conexao("refresh-da-dona", "sub-compartilhado"), PROVA);
-    await servico.gravarConexaoGoogle(idDaExcluida, conexao("refresh-da-excluida", "sub-compartilhado"), PROVA);
+    await servico.gravarConexaoGoogle(idDaDona, conexao("refresh-da-dona", contaGoogle("sub-compartilhado")), PROVA);
+    await servico.gravarConexaoGoogle(idDaExcluida, conexao("refresh-da-excluida", contaGoogle("sub-compartilhado")), PROVA);
     const revogacao = google();
     vi.stubGlobal("fetch", revogacao);
     expect(await servico.revogarGoogleDaConta((await getDb())!, idDaExcluida)).toBe("mantida-para-outra-conta");
     expect(revogacao).not.toHaveBeenCalled();
     // A conexão da outra conta continua lá; a da que exclui, também (sai pelo plano da exclusão).
     expect(await linhasDa(idDaDona)).toHaveLength(1);
-    await (await getDb())!.delete(googleAgendaConexoes).where(inArray(googleAgendaConexoes.userId, [idDaDona, idDaExcluida]));
+    await apagarPelaChave((await getDb())!, googleAgendaConexoes, inArray(googleAgendaConexoes.userId, [idDaDona, idDaExcluida]));
   });
 
   it("excluir a conta revoga o token na Google e leva a conexão junto", async () => {
-    await servico.gravarConexaoGoogle(idDaExcluida, conexao("refresh-da-excluida", "sub-da-excluida"), PROVA);
+    await servico.gravarConexaoGoogle(idDaExcluida, conexao("refresh-da-excluida", contaGoogle("sub-da-excluida")), PROVA);
     const revogacao = google(new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", revogacao);
     const relatorio = await excluirConta((await getDb())!, { id: idDaExcluida, openId: EXCLUIDA, email: null }, { apagarArquivo: async () => undefined });

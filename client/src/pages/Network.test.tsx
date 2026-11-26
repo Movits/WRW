@@ -60,6 +60,8 @@ vi.mock("@/lib/trpc", () => ({
       assetsNeeds: { useQuery: () => ({ data: { possui: [], procura: [] }, isLoading: false, isError: false, error: null, refetch: vi.fn() }) },
       removeAsset: duble.registrar("removeAsset"),
       removeNeed: duble.registrar("removeNeed"),
+      addItem: duble.registrar("addItem"),
+      editItem: duble.registrar("editItem"),
       create: duble.registrar("create"),
       update: duble.registrar("update"),
       delete: duble.registrar("delete"),

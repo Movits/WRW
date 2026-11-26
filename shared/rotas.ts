@@ -39,6 +39,18 @@ export function rotaDaReuniao(id: string, opcoes: { t?: number; q?: string; item
 }
 
 /**
+ * A lixeira das reuniões (H7d): a mesma página da lista, com `?lixeira=1`.
+ * Pela URL, e não por estado da tela: o voltar do celular sai da lixeira para
+ * a lista, e a lixeira abre mesmo quando a lista está vazia (todas as reuniões
+ * foram para lá).
+ */
+export const PARAMETRO_DA_LIXEIRA = "lixeira";
+
+export function rotaDaLixeira() {
+  return `${ROTA_DAS_REUNIOES}?${PARAMETRO_DA_LIXEIRA}=1`;
+}
+
+/**
  * A agenda de reuniões (H16a): as reuniões marcadas, com convite e .ics. O
  * "Gravar agora" de uma delas abre o gravador com `?agendada=<id>`: o título
  * vem preenchido, e a gravação fica ligada à reunião marcada (Meetings.tsx).
@@ -61,4 +73,46 @@ export const ROTA_DA_REUNIAO_ABERTA = "/r";
 
 export function rotaDaReuniaoAberta(token: string) {
   return `${ROTA_DA_REUNIAO_ABERTA}/${encodeURIComponent(token)}`;
+}
+
+/**
+ * O convite para participar de uma reunião (R1b): /convite/{token}, só logada.
+ * A página mostra o título, o nome da dona e o aviso, e "Entrar na reunião".
+ */
+export const ROTA_DO_CONVITE = "/convite";
+
+export function rotaDoConvite(token: string) {
+  return `${ROTA_DO_CONVITE}/${encodeURIComponent(token)}`;
+}
+
+/**
+ * A reunião compartilhada com a participante (R1b): a leitura dela, sem os
+ * controles da dona. Fica fora de /meetings/:id, que é o detalhe da dona.
+ */
+export const ROTA_DA_REUNIAO_COMPARTILHADA = "/reunioes-compartilhadas";
+
+export function rotaDaReuniaoCompartilhada(id: string) {
+  return `${ROTA_DA_REUNIAO_COMPARTILHADA}/${encodeURIComponent(id)}`;
+}
+
+/**
+ * O espaço de equipe (R2): /equipes/{id da pasta}, com as reuniões, as
+ * tarefas, a agenda e as membras, para a dona e para as membras.
+ */
+export const ROTA_DAS_EQUIPES = "/equipes";
+
+export function rotaDaEquipe(pastaId: string) {
+  return `${ROTA_DAS_EQUIPES}/${encodeURIComponent(pastaId)}`;
+}
+
+/** A reunião da equipe, lida pela membra (a mesma leitura da participante, R1b). */
+export function rotaDaReuniaoDaEquipe(pastaId: string, meetingId: string) {
+  return `${rotaDaEquipe(pastaId)}/reunioes/${encodeURIComponent(meetingId)}`;
+}
+
+/** O convite para uma equipe (R2): /convite-da-equipe/{token}, só logada. */
+export const ROTA_DO_CONVITE_DA_EQUIPE = "/convite-da-equipe";
+
+export function rotaDoConviteDaEquipe(token: string) {
+  return `${ROTA_DO_CONVITE_DA_EQUIPE}/${encodeURIComponent(token)}`;
 }

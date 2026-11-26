@@ -28,6 +28,10 @@ const naGoogle = vi.hoisted(() => ({
   depoisDeMexerNoItem: vi.fn(async (..._args: unknown[]) => ({ acaoId: null as string | null, naGoogle: null })),
 }));
 vi.mock("./acoes-na-google", () => naGoogle);
+// A guarda da lixeira (H7d) lê o banco antes do zod, em todo procedimento pelo id. Aqui o
+// router é provado com o banco dublado; a guarda tem os testes dela (guarda-da-lixeira.test.ts
+// e server/lixeira-de-reunioes.integracao.test.ts).
+vi.mock("./guarda-da-lixeira", async () => ({ procedimentoDaReuniao: (await import("./_core/trpc")).protectedProcedure }));
 vi.mock("./db", () => ({ getDb: async () => null, exigirDb: async () => { throw new Error("as rotas não leem o banco neste teste"); } }));
 
 const { meetingsRouter, tetoDaIADaReuniao, PEDIDOS_A_IA_DA_REUNIAO_POR_JANELA } = await import("./routers/meetings");
@@ -128,9 +132,9 @@ describe("os modelos do resumo (H4d)", () => {
     await rota.pedirResumo({ meetingId: ID, modelo: "sales" });
     await rota.pedirResumo({ meetingId: ID });
     await rota.refazerResumo({ meetingId: ID, modelo: "one_on_one" });
-    expect(servico.pedirResumoDaDona).toHaveBeenNthCalledWith(1, "dona-modelos", ID, expect.any(Function), "sales");
-    expect(servico.pedirResumoDaDona).toHaveBeenNthCalledWith(2, "dona-modelos", ID, expect.any(Function), undefined);
-    expect(servico.refazerResumoDaDona).toHaveBeenCalledWith("dona-modelos", ID, "one_on_one", expect.any(Function));
+    expect(servico.pedirResumoDaDona).toHaveBeenNthCalledWith(1, "dona-modelos", ID, expect.any(Function), { modelo: "sales", estilo: undefined, instrucoes: undefined });
+    expect(servico.pedirResumoDaDona).toHaveBeenNthCalledWith(2, "dona-modelos", ID, expect.any(Function), { modelo: undefined, estilo: undefined, instrucoes: undefined });
+    expect(servico.refazerResumoDaDona).toHaveBeenCalledWith("dona-modelos", ID, { modelo: "one_on_one", estilo: undefined, instrucoes: undefined }, expect.any(Function));
   });
 
   it("refazer gasta vaga do mesmo teto de pedidos à IA que pedir o resumo e perguntar", async () => {

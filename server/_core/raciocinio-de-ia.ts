@@ -39,6 +39,7 @@ export const VARIAVEL_DO_RACIOCINIO = {
   extracao: "LLM_RACIOCINIO_EXTRACAO",
   resumo: "LLM_RACIOCINIO_RESUMO",
   pergunta: "LLM_RACIOCINIO_PERGUNTA",
+  escolha_do_modelo: "LLM_RACIOCINIO_ESCOLHA_DO_MODELO",
 } as const satisfies Record<FuncaoDeTexto, string>;
 
 // No log só entra valor que não pode ser uma chave: letras, hífen e

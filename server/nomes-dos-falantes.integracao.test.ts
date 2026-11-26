@@ -1,12 +1,13 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
 const { getDb } = await import("./db");
 const { meetings, meetingSummaries, meetingTranscripts, users } = await import("../drizzle/schema");
-const { getPrivateMeeting, gravarResultadoDaReuniao, nomearFalante } = await import("./meeting-service");
+const { getPrivateMeeting, gravarResultadoDaReuniao, nomearFalante, NomesSoComReuniaoPronta } = await import("./meeting-service");
 const { appRouter } = await import("./routers");
 
 /**
@@ -30,9 +31,9 @@ describe.skipIf(!temBanco)("Nomes das vozes da reunião (integração)", () => {
     if (!db) return;
     // O reprocesso abaixo passa por gravarResultadoDaReuniao, que cria o pedido
     // do resumo guardado da reunião (H4c).
-    await db.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, DONA));
-    await db.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-    await db.delete(meetings).where(eq(meetings.ownerId, DONA));
+    await apagarPelaChave(db, meetingSummaries, eq(meetingSummaries.ownerId, DONA));
+    await apagarPelaChave(db, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+    await apagarPelaChave(db, meetings, eq(meetings.ownerId, DONA));
     for (const dona of [DONA, OUTRA]) await db.delete(users).where(eq(users.openId, dona));
   });
 
@@ -56,6 +57,45 @@ describe.skipIf(!temBanco)("Nomes das vozes da reunião (integração)", () => {
     const rota = appRouter.createCaller({ user: { openId: OUTRA, role: "silver", onboardingCompleted: true } } as never);
     await expect(rota.meetings.nomearFalante({ meetingId: REUNIAO, falante: "F1", nome: "Intrusa" })).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect((await getPrivateMeeting(DONA, REUNIAO))?.meeting.speakerNames?.F1).toBe("Ana");
+  });
+
+  it("nomear não toca em updated_at: a ficha de quem processa continua valendo", async () => {
+    const db = (await getDb())!;
+    const [antes] = await db.select({ updatedAt: meetings.updatedAt }).from(meetings).where(eq(meetings.id, REUNIAO));
+    await nomearFalante(DONA, REUNIAO, "F4", "Dora");
+    const [depois] = await db.select({ updatedAt: meetings.updatedAt }).from(meetings).where(eq(meetings.id, REUNIAO));
+    expect(depois.updatedAt).toBe(antes.updatedAt);
+    await nomearFalante(DONA, REUNIAO, "F4", "");
+  });
+
+  it("reunião fora de 'ready' recusa o nome (CONFLICT) e o processamento em curso conclui", async () => {
+    const db = (await getDb())!;
+    const rota = appRouter.createCaller({ user: { openId: DONA, role: "silver", onboardingCompleted: true } } as never);
+    for (const status of ["recording", "uploading", "processing", "failed"] as const) {
+      const reuniao = crypto.randomUUID();
+      const ficha = Date.now();
+      await db.insert(meetings).values({ id: reuniao, ownerId: DONA, title: `Em ${status}`, status, consentGranted: true, createdAt: ficha, updatedAt: ficha });
+      try {
+        await expect(nomearFalante(DONA, reuniao, "F1", "Ana")).rejects.toBeInstanceOf(NomesSoComReuniaoPronta);
+        await expect(rota.meetings.nomearFalante({ meetingId: reuniao, falante: "F1", nome: "Ana" })).rejects.toMatchObject({ code: "CONFLICT" });
+        const [linha] = await db.select({ nomes: meetings.speakerNames, updatedAt: meetings.updatedAt }).from(meetings).where(eq(meetings.id, reuniao));
+        expect(linha).toEqual({ nomes: null, updatedAt: ficha });
+        if (status === "processing") {
+          // O cenário do bug: a dona tenta nomear no meio do processamento e a
+          // execução, com a ficha intacta, ainda promove a reunião.
+          await gravarResultadoDaReuniao(db, {
+            meetingId: reuniao, ownerId: DONA, ficha, limparAntes: false, durationSeconds: 30,
+            transcription: { text: "Transcrição.", segments: [], language: "pt-BR" },
+            extraction: { entities: [], contacts: [] } as never,
+          });
+          const [pronta] = await db.select({ status: meetings.status }).from(meetings).where(eq(meetings.id, reuniao));
+          expect(pronta.status).toBe("ready");
+        }
+      } finally {
+        await db.delete(meetingTranscripts).where(eq(meetingTranscripts.meetingId, reuniao));
+        await db.delete(meetings).where(eq(meetings.id, reuniao));
+      }
+    }
   });
 
   it("reunião inexistente ou excluída não recebe nome", async () => {

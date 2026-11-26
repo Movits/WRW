@@ -161,6 +161,20 @@ export function trechoApareceNaTranscricao(trecho: unknown, transcricao: string)
 }
 
 /**
+ * A mesma conferência de trechoApareceNaTranscricao para muitos trechos contra
+ * uma transcrição só, normalizada uma vez (a de uma reunião longa tem até 400
+ * mil letras): os trechos dos itens do resumo pelo link aberto, contra a
+ * transcrição que a dona editou (H18, server/editar-transcricao.ts).
+ */
+export function conferidorDeTrechos(transcricao: string): (trecho: unknown) => boolean {
+  const fonte = normalizarParaComparar(transcricao);
+  return trecho => {
+    const pedacos = pedacosDoTrecho(trecho);
+    return !!pedacos && ondeNaFonte(pedacos, fonte) !== null;
+  };
+}
+
+/**
  * As falas com o que comparar: sem as lacunas (o trecho que não chegou) e sem
  * as que só têm pontuação ("...", "?"), que não têm letra para casar e
  * deixariam um espaço a mais entre as vizinhas.

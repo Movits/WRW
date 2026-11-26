@@ -26,7 +26,7 @@ import { textoDaOutraNecessidade } from "@shared/o-que-busca";
 
 const TITULO_CONCEDIDO = "Você agora é distribuidor do Smart Match";
 const CORPO_CONCEDIDO =
-  "Um membro Ouro da WRW concedeu a você o poder de distribuição: a partir de agora, " +
+  "Um membro Ouro da Marquesa Global Match concedeu a você o poder de distribuição: a partir de agora, " +
   "os pedidos de interesse do Smart Match passam pela sua análise antes de chegar à outra pessoa. " +
   "A fila de análise fica no Painel Ouro, na aba Distribuição.";
 const TITULO_REVOGADO = "Poder de distribuição revogado";
@@ -93,7 +93,7 @@ export const distribuicaoRouter = router({
       try {
         await createNotification({
           userId: input.userId, type: "system", title: TITULO_REVOGADO,
-          body: `Seu poder de distribuição do Smart Match foi revogado por um membro Ouro da WRW. Motivo: ${input.reason}`,
+          body: `Seu poder de distribuição do Smart Match foi revogado por um membro Ouro da Marquesa Global Match. Motivo: ${input.reason}`,
           actionUrl: "/dashboard",
         });
       } catch (_) { /* não bloquear se a notificação falhar */ }

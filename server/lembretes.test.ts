@@ -289,28 +289,38 @@ describe("agendar: a hora do lembrete anda com a origem", () => {
 });
 
 describe("esquecer e apagar os avisos", () => {
-  it("a ação apagada: o lembrete sai pela dona e pela origem, e os avisos do gravador com o link dela saem da conta dela", async () => {
+  it("a ação apagada: o lembrete sai pela dona e pela origem, e os avisos do gravador com o link dela saem da conta dela, pela chave", async () => {
     estado.tabelas.set(schema.users, [{ id: 7, openId: DONA }]);
+    estado.tabelas.set(schema.platformNotifications, [{ id: 41 }, { id: 42 }]);
     await lembretes.esquecerLembrete(db, DONA, "acao", ACAO);
     const [lembrete] = de("delete", schema.lembretes);
     expect(lembrete.sql).toBe("(`lembretes`.`owner_id` = ? and `lembretes`.`origem` = ? and `lembretes`.`origem_id` = ?)");
     expect(lembrete.params).toEqual([DONA, "acao", ACAO]);
     expect(de("select", schema.users)[0].params).toEqual([DONA]);
-    const [avisos] = de("delete", schema.platformNotifications);
-    expect(avisos.sql).toBe("(`platform_notifications`.`userId` = ? and `platform_notifications`.`type` in (?, ?) and `platform_notifications`.`actionUrl` = ?)");
-    expect(avisos.params).toEqual([7, "lembrete", "reuniao_pronta", `/proximas-acoes?acao=${ACAO}`]);
+    // Os avisos são achados numa leitura sem trava e saem pela chave: o DELETE
+    // pela conta travava o intervalo dela no índice e o vão até a vizinha
+    // (revisão do pacote do match, 20/11), como no aviso de pronta.
+    const [achados] = de("select", schema.platformNotifications);
+    expect(achados.sql).toBe("(`platform_notifications`.`userId` = ? and `platform_notifications`.`type` in (?, ?) and `platform_notifications`.`actionUrl` = ?)");
+    expect(achados.params).toEqual([7, "lembrete", "reuniao_pronta", `/proximas-acoes?acao=${ACAO}`]);
+    expect(de("delete", schema.platformNotifications).map(apagado => [apagado.sql, apagado.params])).toEqual([
+      ["`platform_notifications`.`id` = ?", [41]],
+      ["`platform_notifications`.`id` = ?", [42]],
+    ]);
   });
 
   it("a reunião tirada da agenda: o link dos avisos é o do gravador com ela", async () => {
     estado.tabelas.set(schema.users, [{ id: 7, openId: DONA }]);
     await lembretes.esquecerLembrete(db, DONA, "agenda", AGENDA);
-    expect(de("delete", schema.platformNotifications)[0].params.at(-1)).toBe(`/gravar?agendada=${AGENDA}`);
+    expect(de("select", schema.platformNotifications)[0].params.at(-1)).toBe(`/gravar?agendada=${AGENDA}`);
   });
 
   it("a reunião gravada excluída: os avisos dela saem, pelo link da reunião", async () => {
     estado.tabelas.set(schema.users, [{ id: 7, openId: DONA }]);
+    estado.tabelas.set(schema.platformNotifications, [{ id: 41 }]);
     await lembretes.apagarAvisosDaReuniao(db, DONA, REUNIAO);
-    expect(de("delete", schema.platformNotifications)[0].params).toEqual([7, "lembrete", "reuniao_pronta", `/meetings/${REUNIAO}`]);
+    expect(de("select", schema.platformNotifications)[0].params).toEqual([7, "lembrete", "reuniao_pronta", `/meetings/${REUNIAO}`]);
+    expect(de("delete", schema.platformNotifications).map(apagado => apagado.params)).toEqual([[41]]);
   });
 
   it("sem a conta (já excluída), só o lembrete sai", async () => {
@@ -321,19 +331,32 @@ describe("esquecer e apagar os avisos", () => {
 
 describe("o aviso de reunião pronta", () => {
   it("da reunião pronta da dona: tira o aviso anterior dela e grava o novo, com o título e como o resumo terminou", async () => {
-    estado.ler = operacao => operacao.tabela === schema.meetings ? [{ titulo: "Comitê de exportação ☕", contaId: 7 }] : undefined;
+    estado.ler = operacao => operacao.tabela === schema.meetings ? [{ titulo: "Comitê de exportação ☕", contaId: 7 }]
+      : operacao.tabela === schema.platformNotifications ? [{ id: 41 }] : undefined;
     expect(await lembretes.avisarReuniaoPronta(db, DONA, REUNIAO, "pronto")).toBe(true);
     const [leitura] = de("select", schema.meetings);
-    expect(leitura.sql).toBe("(`meetings`.`id` = ? and `meetings`.`owner_id` = ? and `meetings`.`status` = ?)");
+    // A reunião na lixeira (H7d) não avisa: fica fora da leitura.
+    expect(leitura.sql).toBe("(`meetings`.`id` = ? and `meetings`.`owner_id` = ? and `meetings`.`status` = ? and `meetings`.`trashed_at` is null)");
     expect(leitura.params).toEqual([REUNIAO, DONA, "ready"]);
+    // O anterior é achado numa leitura sem trava e sai pela chave: o DELETE
+    // pela conta travava o intervalo dela no índice e o vão até a vizinha.
+    const [achado] = de("select", schema.platformNotifications);
+    expect(achado.params).toEqual([7, "reuniao_pronta", `/meetings/${REUNIAO}`]);
     const [anterior] = de("delete", schema.platformNotifications);
-    expect(anterior.params).toEqual([7, "reuniao_pronta", `/meetings/${REUNIAO}`]);
+    expect(anterior.sql).toBe("`platform_notifications`.`id` = ?");
+    expect(anterior.params).toEqual([41]);
     const [aviso] = de("insert", schema.platformNotifications);
     expect(aviso.linhas?.[0]).toEqual({
       userId: 7, type: "reuniao_pronta", title: "Comitê de exportação ☕", body: null,
       actionUrl: `/meetings/${REUNIAO}`, parametros: { titulo: "Comitê de exportação ☕", resumo: "pronto" }, isRead: false,
     });
-    expect(estado.operacoes.map(o => o.tipo)).toEqual(["select", "delete", "insert"]);
+    expect(estado.operacoes.map(o => o.tipo)).toEqual(["select", "select", "delete", "insert"]);
+  });
+
+  it("sem aviso anterior da reunião, só grava o novo: nenhum DELETE", async () => {
+    estado.ler = operacao => operacao.tabela === schema.meetings ? [{ titulo: "Comitê", contaId: 7 }] : undefined;
+    expect(await lembretes.avisarReuniaoPronta(db, DONA, REUNIAO, "pronto")).toBe(true);
+    expect(estado.operacoes.map(o => o.tipo)).toEqual(["select", "select", "insert"]);
   });
 
   it("o resumo que falhou de vez também avisa: a transcrição está lá", async () => {

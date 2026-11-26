@@ -7,13 +7,14 @@ import {
   Shield, Users, FileText, AlertTriangle, Activity, Lock,
   Eye, CheckCircle, XCircle, RefreshCw, LogOut, Wifi, Ban,
   Trash2, Server, Clock, Globe, Monitor, Package, Star,
-  ShieldCheck, AlertCircle
+  ShieldCheck, AlertCircle, Building2
 } from "lucide-react";
+import { EntidadesAdmin } from "@/components/admin/EntidadesAdmin";
 import { toast } from "sonner";
 
 const playfairStyle = { fontFamily: '"Playfair Display", serif' };
 
-type TabType = "overview" | "users" | "audit" | "security" | "sessions" | "opportunities";
+type TabType = "overview" | "users" | "audit" | "security" | "sessions" | "opportunities" | "entidades";
 
 export default function AdminPanel() {
   const { user, loading, isAuthenticated, logout } = useAuth();
@@ -208,6 +209,7 @@ export default function AdminPanel() {
     { id: "opportunities" as TabType, label: "Oportunidades", icon: Package },
     { id: "audit" as TabType, label: "Auditoria", icon: FileText },
     { id: "security" as TabType, label: "Alertas", icon: AlertTriangle },
+    { id: "entidades" as TabType, label: "Entidades", icon: Building2 },
   ];
 
   return (
@@ -229,7 +231,7 @@ export default function AdminPanel() {
                 style={playfairStyle}
                 className="text-xl font-bold text-white hover:text-[#C98F70] transition-colors"
               >
-                WRW
+                Marquesa Global Match
               </button>
               <p className="text-xs text-gray-400 truncate">Painel Administrativo Seguro</p>
             </div>
@@ -276,6 +278,9 @@ export default function AdminPanel() {
             </button>
           ))}
         </div>
+
+        {/* A base das associações (N1): as entidades e o convênio de cada uma. */}
+        {activeTab === "entidades" && <EntidadesAdmin />}
 
         {/* ====================================================
             VISÃO GERAL

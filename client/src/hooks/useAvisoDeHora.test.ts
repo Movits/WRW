@@ -197,3 +197,31 @@ describe("useAvisoDeHora — os saltos do relógio e o mesmo tique", () => {
     expect(aoExpirar).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("useAvisoDeHora — sem microfone (G17)", () => {
+  it("a espera por um microfone não zera as horas: na volta dele, o aviso da hora já confirmada não abre de novo", () => {
+    const { result, rerender } = montar();
+    rerender({ estado: "gravando", segundos: HORA });
+    expect(result.current.aberto).toBe(true);
+    act(() => result.current.continuar());
+    rerender({ estado: "gravando", segundos: HORA + 100 });
+    // O fone caiu: a gravação espera outro microfone, com o relógio parado.
+    rerender({ estado: "semMicrofone", segundos: HORA + 100 });
+    rerender({ estado: "gravando", segundos: HORA + 101 });
+    expect(result.current.aberto).toBe(false);
+    // A hora seguinte abre, como sempre.
+    rerender({ estado: "gravando", segundos: 2 * HORA });
+    expect(result.current).toMatchObject({ aberto: true, horas: 2 });
+  });
+
+  it("o aviso aberto quando o microfone cai segue aberto, e o prazo dele vale", () => {
+    const { result, rerender, aoExpirar, retomar } = montar();
+    rerender({ estado: "gravando", segundos: HORA });
+    rerender({ estado: "semMicrofone", segundos: HORA });
+    expect(result.current.aberto).toBe(true);
+    andar(PRAZO_DO_AVISO_DE_HORA_MS);
+    expect(aoExpirar).toHaveBeenCalledTimes(1);
+    // O OK sem microfone não tenta retomar nada: não há pausa a desfazer.
+    expect(retomar).not.toHaveBeenCalled();
+  });
+});

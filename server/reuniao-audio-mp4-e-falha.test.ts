@@ -158,6 +158,11 @@ vi.mock("./_core/llm", () => ({
 // duracao-do-audio.test.ts com contêineres de verdade) é dublada.
 let duracaoMedida: number | null = 30;
 vi.mock("./duracao-do-audio", () => ({ medirDuracaoDoAudio: () => duracaoMedida }));
+// O pedido do primeiro resumo (H4e) lê meetings e as preferências da dona;
+// é provado em modelos-proprios.integracao.test.ts. Aqui ele é dublado para
+// que as leituras de meetings contadas sejam só as do processamento.
+const PEDIDO_DO_PRIMEIRO_RESUMO = { template: "general", customTemplateId: null, aiTemplate: null, style: "concise", instructions: "foco em prazos" };
+vi.mock("./modelos-proprios", () => ({ colunasDoPrimeiroResumo: vi.fn(async () => PEDIDO_DO_PRIMEIRO_RESUMO) }));
 
 const { decodeMeetingAudio, processMeetingRecording, LIMITE_SUGESTAO, LIMITE_VALOR_NORMALIZADO, ReuniaoForaDoEstado, ReuniaoTomadaPorOutraExecucao, MENSAGEM_DURACAO_ILEGIVEL, MENSAGEM_REUNIAO_LONGA_DEMAIS } = await import("./meeting-service");
 const { MENSAGEM_ERRO_DE_CONSULTA } = await import("./banco-indisponivel");
@@ -286,6 +291,8 @@ describe("processMeetingRecording — áudio recusado vira reunião com falha, n
     const [transcricao] = valoresDe(schema.meetingTranscripts);
     expect(valoresDe(schema.meetingSummaries)).toEqual([expect.objectContaining({
       meetingId: "reuniao-1", ownerId: "dona-1", status: "pending", transcriptId: transcricao.id,
+      // O modelo, o estilo e as instruções do pedido (H4e) entram na linha.
+      ...PEDIDO_DO_PRIMEIRO_RESUMO,
     })]);
     expect(String(transcricao.id)).toMatch(/^[0-9a-f-]{36}$/);
     // Idempotente: no conflito com a linha que já existir (índice único da
@@ -558,12 +565,15 @@ describe("processMeetingRecording — excluída no meio, a reunião não deixa �
     expect(atualizacoes.filter(a => "status" in a).map(a => a.status)).toEqual(["processing"]);
     // As outras escritas: as pendências que já são de um contato e não citam a
     // transcrição ficam com ele, desligadas da reunião (revisão do pacote P2B);
-    // e, como a compensação é a lista da exclusão (apagarDerivadosDaReuniao), a
-    // agenda (H16a) solta o ponteiro da reunião excluída, pela dona.
+    // e, como a compensação é a lista da exclusão (apagarDerivadosDaReuniao), o
+    // resumo por e-mail (H22) perde os endereços de quem recebeu e a agenda
+    // (H16a) solta o ponteiro da reunião excluída, os dois pela dona.
     expect(atualizacoes.filter(a => !("status" in a))).toEqual([
       expect.objectContaining({ meetingId: null, meetingSuggestionId: null }),
+      { destinatario: null, updatedAt: expect.any(Number) },
       { meetingId: null, updatedAt: expect.any(Number) },
     ]);
+    expect(escopos).toContainEqual({ sql: "(`resumo_por_email`.`owner_id` = ? and `resumo_por_email`.`meeting_id` = ?)", params: ["dona-1", "reuniao-1"] });
     expect(escopos).toContainEqual({ sql: "(`agenda_reunioes`.`owner_id` = ? and `agenda_reunioes`.`meeting_id` = ?)", params: ["dona-1", "reuniao-1"] });
   });
 
@@ -658,6 +668,8 @@ describe("processMeetingRecording — excluída no meio, a reunião não deixa �
       meeting_contact_suggestions: schema.meetingContactSuggestions, network_sugestoes: schema.networkSugestoes,
       meeting_entities: schema.meetingEntities, meeting_transcripts: schema.meetingTranscripts, meeting_transcript_translations: schema.meetingTranscriptTranslations,
       meeting_summary_translations: schema.meetingSummaryTranslations, meeting_summary_items: schema.meetingSummaryItems, meeting_summaries: schema.meetingSummaries,
+      // As participantes da reunião (R1b) saem com ela.
+      meeting_participants: schema.meetingParticipants,
     };
     for (const [nome, tabela] of Object.entries(derivadas)) {
       const delecao = delecoes.find(operacao => operacao.tabela === tabela);
@@ -706,7 +718,7 @@ describe("processMeetingRecording — excluída no meio, a reunião não deixa �
     // A gravação desta execução sai depois do arquivo; sem partes, não há DELETE de partes.
     expect(tabelasApagadas()).toEqual([
       schema.meetingContactSuggestions, schema.networkSugestoes, schema.meetingEntities, schema.meetingTranscripts,
-      schema.meetingTranscriptTranslations, schema.meetingSummaryTranslations, schema.meetingSummaryItems, schema.meetingSummaries, schema.meetingRecordings,
+      schema.meetingTranscriptTranslations, schema.meetingSummaryTranslations, schema.meetingSummaryItems, schema.meetingSummaries, schema.meetingParticipants, schema.meetingRecordings,
     ]);
     expect(apagarAudio).toHaveBeenCalledWith("k");
     expect(atualizacoes.map(a => a.status)).not.toContain("failed");

@@ -20,6 +20,7 @@ import {
   meetings, meetingContactSuggestions,
   networkSugestoes, conexoesParticipantes,
   proximasAcoes,
+  entidadeMembros,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import nodeCrypto from "node:crypto";
@@ -28,6 +29,7 @@ import { normalizar } from "@shared/direcao-do-termo";
 import { BancoIndisponivel } from "./banco-indisponivel";
 import { condicaoDeStatusNasListas } from "./oportunidade-acesso";
 import { consolidarPerfil } from "./perfil-consolidado";
+import { CAMPOS_DA_EDICAO_DO_PERFIL, mesclarOQueEntrouDepois, oQueEntrouDepois, PerfilMudouNoMeio, type ListasRecebidas } from "./listas-do-perfil";
 import { avaliarQualificacaoDoPerfil } from "@shared/qualificacao-do-perfil";
 import { contextoParaOferecer } from "./contexto-oferecido";
 import { nomeDoTipoDeContexto } from "./nome-do-tipo-de-contexto";
@@ -162,13 +164,47 @@ export function computeProfileCompleteness(profile: Record<string, unknown> | nu
   return Math.round((filled / CAMPOS_DA_COMPLETUDE_DO_PERFIL.length) * 100);
 }
 
-export async function upsertUserProfile(userId: number, data: Record<string, unknown>) {
+/** As colunas dos outros campos da edição do Perfil (server/listas-do-perfil.ts), para a conferência da versão. */
+const COLUNAS_DA_EDICAO_DO_PERFIL = Object.fromEntries(CAMPOS_DA_EDICAO_DO_PERFIL.map(campo => [campo, userProfiles[campo]])) as {
+  [Campo in (typeof CAMPOS_DA_EDICAO_DO_PERFIL)[number]]: (typeof userProfiles)[Campo];
+};
+
+/**
+ * Grava o perfil. Com `versaoDasListas` (o Meu Perfil, que devolve "O que
+ * tenho", "O que preciso" e os outros campos dele inteiros), a escrita confere
+ * antes, com a linha travada, que as listas e os outros campos gravados são os
+ * que a tela carregou, e acrescenta o que entrou depois no fim das listas
+ * (server/listas-do-perfil.ts). Lança PerfilMudouNoMeio, sem gravar nada,
+ * quando uma lista mudou de outro jeito ou outro campo mudou no banco.
+ * Sem a versão (o Perfil antigo em cache, o cadastro), grava como sempre.
+ */
+export async function upsertUserProfile(userId: number, data: Record<string, unknown>, versaoDasListas?: string) {
   const db = await exigirDb();
-  const existing = await getUserProfile(userId);
-  if (existing) {
-    await db.update(userProfiles).set({ ...data, updatedAt: new Date() } as any).where(eq(userProfiles.userId, userId));
+  if (versaoDasListas !== undefined) {
+    await db.transaction(async tx => {
+      // FOR UPDATE, como a confirmação que a reunião leva ao perfil (confirmarItemDaDona):
+      // a conferência e a escrita não deixam um item entrar no meio. Os outros campos da
+      // edição vêm junto, consolidados como o profile.get os leu (cargo e empresa).
+      const [gravadas] = await tx.select({
+        whatIHave: userProfiles.whatIHave, whatINeed: userProfiles.whatINeed, whatINeedDetails: userProfiles.whatINeedDetails,
+        ...COLUNAS_DA_EDICAO_DO_PERFIL,
+      }).from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1).for("update");
+      const entrou = oQueEntrouDepois(versaoDasListas, gravadas && consolidarPerfil(gravadas));
+      const listas = entrou && mesclarOQueEntrouDepois(data as ListasRecebidas, entrou);
+      if (!listas) throw new PerfilMudouNoMeio();
+      if (gravadas) {
+        await tx.update(userProfiles).set({ ...data, ...listas, updatedAt: new Date() } as any).where(eq(userProfiles.userId, userId));
+      } else {
+        await tx.insert(userProfiles).values({ userId, ...data, ...listas } as any);
+      }
+    });
   } else {
-    await db.insert(userProfiles).values({ userId, ...data } as any);
+    const existing = await getUserProfile(userId);
+    if (existing) {
+      await db.update(userProfiles).set({ ...data, updatedAt: new Date() } as any).where(eq(userProfiles.userId, userId));
+    } else {
+      await db.insert(userProfiles).values({ userId, ...data } as any);
+    }
   }
   const atual = await getUserProfile(userId);
   const completeness = computeProfileCompleteness(atual as Record<string, unknown> | null);
@@ -791,7 +827,17 @@ function comSouDestinatariaBooleana<T extends { souDestinataria: unknown }>(linh
   return linhas.map(linha => ({ ...linha, souDestinataria: Boolean(linha.souDestinataria) }));
 }
 
-export async function getMatchesForUser(userId: number, limit = 20) {
+/**
+ * As conexões sugeridas que a dona não dispensou, na ordem do motor de perfis
+ * (server/matching.ts, `ordemDasMelhores`): a nota mais alta primeiro e, na
+ * mesma nota, a outra usuária de id menor. Com o desempate a ordem é estável e as
+ * páginas (`pulo`) se emendam sem empate solto entre elas: o par (dona, outra) é
+ * único em `matches`. Uma rodada do motor que regrave notas no meio da leitura
+ * ainda mexe na ordem; quem lê em páginas descarta a linha repetida. As travas da
+ * leitura (o termo e o portão da demanda expressa) ficam com quem chama
+ * (routers/profileMatches.ts).
+ */
+export async function getMatchesForUser(userId: number, limit = 20, pulo = 0) {
   const db = await exigirDb();
   const linhas = await db.select({
     matchId: matches.id,
@@ -841,8 +887,9 @@ export async function getMatchesForUser(userId: number, limit = 20) {
       pedidoVisivelPara(userId),
     ))
     .where(and(eq(matches.userId, userId), eq(matches.userDismissed, false)))
-    .orderBy(desc(matches.overallScore))
-    .limit(limit);
+    .orderBy(desc(matches.overallScore), asc(matches.matchedUserId))
+    .limit(limit)
+    .offset(pulo);
   return comSouDestinatariaBooleana(linhas);
   // A13 (histórico): a `bio` era texto livre da OUTRA usuária chegando a esta, e
   // saía daqui mascarada contra telefone/e-mail. Ela deixou de ser lida — proteção
@@ -1254,6 +1301,18 @@ export async function apagarRastroDoContato(
   // As próximas ações (H5a) também são da dona: ficam, sem o contato.
   await db.update(proximasAcoes).set({ contactId: null, updatedAt: Date.now() })
     .where(and(eq(proximasAcoes.ownerId, ownerId), eq(proximasAcoes.contactId, contactId)));
+  // O associado de uma entidade (a base das associações, N1): apagar o contato pela Rede é
+  // tirar a empresa da base. O membro vira "removido" e perde o documento e o telefone e o
+  // e-mail cifrados, o CNAE e a referência; fica só o HMAC do documento, que é a lista de
+  // bloqueio: a reimportação do mesmo documento recusa com MEMBRO_REMOVIDO, em vez de
+  // devolver à rede quem pediu para sair. Sem isto, contatoDoMembro seguia decifrando o
+  // telefone e o e-mail de um contato que já não existia.
+  await db.update(entidadeMembros).set({
+    estado: "removido", contactId: null, documentoCifrado: null, contatoCifrado: null,
+    cnaePrincipal: null, cnaesSecundarios: null, referenciaDaEntidade: null,
+    precisoOrigem: null, precisoDeclaradoEm: null, ativacaoHash: null, ativacaoExpiraEm: null,
+    updatedAt: Date.now(),
+  }).where(and(eq(entidadeMembros.ownerId, ownerId), eq(entidadeMembros.contactId, contactId)));
 }
 
 export async function deletePrivateContact(
@@ -1560,23 +1619,33 @@ export async function deleteContext(ownerId: string, contextId: string): Promise
   // dona em context_media, e só depois o DELETE em contexts afetava 0 linhas —
   // a resposta dizia NOT_FOUND com as linhas já perdidas (reverificação de
   // 04/09, etapa 5).
-  const [r] = await db.delete(contexts)
-    .where(and(eq(contexts.id, contextId), eq(contexts.ownerId, ownerId), eq(contexts.isCustom, true)));
-  if (!((r as any).affectedRows > 0)) return false;
-  // Os registros de anexos saem junto: não há FK/cascade no schema herdado, e
-  // linha de mídia órfã esconderia arquivo que continua existindo no bucket.
-  await db.delete(contextMedia)
-    .where(and(eq(contextMedia.contextId, contextId), eq(contextMedia.ownerId, ownerId)));
-  // Fora de escopo (pendências registradas): (1) os vínculos em
-  // contact_contexts e os participantes em context_participants do contexto
-  // apagado continuam na base — listContextsByContact os esconde pelo
-  // innerJoin em contexts, mas as linhas não são limpas aqui; (2) os dois
-  // DELETEs não estão numa transação: se o de context_media falhar depois do
-  // de contexts, sobra registro de mídia sem contexto (e o arquivo no bucket,
-  // que o router só apaga depois). Transação seria padrão novo no repositório
-  // (nenhum helper usa db.transaction), por isso fica registrado em vez de
-  // introduzido aqui.
-  return true;
+  //
+  // Tudo numa transação (H7c do plano do gravador): o contexto, os registros
+  // dos anexos e o ponteiro das reuniões da dona que estavam nele. Com um
+  // commit por passo, a falha no meio deixava registro de mídia sem contexto,
+  // ou reunião apontando para um contexto que não existe mais.
+  return db.transaction(async tx => {
+    const [r] = await tx.delete(contexts)
+      .where(and(eq(contexts.id, contextId), eq(contexts.ownerId, ownerId), eq(contexts.isCustom, true)));
+    if (!((r as any).affectedRows > 0)) return false;
+    // Os registros de anexos saem junto: não há FK/cascade no schema herdado, e
+    // linha de mídia órfã esconderia arquivo que continua existindo no bucket.
+    await tx.delete(contextMedia)
+      .where(and(eq(contextMedia.contextId, contextId), eq(contextMedia.ownerId, ownerId)));
+    // A reunião fica, sem o contexto: é registro da própria dona, como no
+    // contato excluído (apagarRastroDoContato, acima). Só as reuniões DELA: o
+    // contexto personalizado é dela, e o índice (dona, contexto) acha as linhas.
+    // O updated_at da reunião não muda: é a ficha de quem a processa
+    // (server/meeting-service.ts).
+    await tx.update(meetings).set({ contextId: null })
+      .where(and(eq(meetings.ownerId, ownerId), eq(meetings.contextId, contextId)));
+    // Fora de escopo (pendência registrada): os vínculos em contact_contexts e
+    // os participantes em context_participants do contexto apagado continuam
+    // na base — listContextsByContact os esconde pelo innerJoin em contexts,
+    // mas as linhas não são limpas aqui. O arquivo no bucket o router só apaga
+    // depois do commit.
+    return true;
+  });
 }
 
 export async function listContextMediaByContext(ownerId: string, contextId: string) {
@@ -1770,10 +1839,16 @@ export async function getEnrichmentSessionById(sessionId: string, ownerId: strin
  * exige o valor que o chamador leu; quem chega depois não pega linha e recebe
  * null. O contador de puladas anda no próprio UPDATE, sem leitura antes.
  */
-export async function advanceEnrichmentSession(sessionId: string, ownerId: string, etapaEsperada: number, skipped = false) {
+/**
+ * Avança o roteiro da etapa lida (`etapaEsperada`) para `destino` (por padrão,
+ * a seguinte). O destino maior pula as perguntas que o contato já tem
+ * respondidas (T45, 24/11; ver proximaEtapaAPerguntar em
+ * server/routers/enrichment.ts): só a pergunta da vez conta como pulada.
+ */
+export async function advanceEnrichmentSession(sessionId: string, ownerId: string, etapaEsperada: number, skipped = false, destino = etapaEsperada + 1) {
   const db = await exigirDb();
   const now = Date.now();
-  const questionsAnswered = etapaEsperada + 1;
+  const questionsAnswered = Math.max(destino, etapaEsperada + 1);
   const [r] = await db.update(enrichmentSessions)
     .set({
       questionsAnswered,
@@ -1789,14 +1864,46 @@ export async function advanceEnrichmentSession(sessionId: string, ownerId: strin
   return { questionsAnswered };
 }
 
-export async function createEnrichmentSession(ownerId: string, contactId: number): Promise<string> {
+export async function createEnrichmentSession(ownerId: string, contactId: number, etapaInicial = 0): Promise<string> {
   const db = await exigirDb();
   const id = crypto.randomUUID();
   const now = Date.now();
-  await db.insert(enrichmentSessions).values({ id, ownerId, contactId, status: "active", questionsAnswered: 0, questionsSkipped: 0, lastActivityAt: now, createdAt: now, updatedAt: now });
+  await db.insert(enrichmentSessions).values({ id, ownerId, contactId, status: "active", questionsAnswered: etapaInicial, questionsSkipped: 0, lastActivityAt: now, createdAt: now, updatedAt: now });
   // Atualizar enrichment_status no contato
   await db.update(privateContacts).set({ enrichmentStatus: "active" }).where(and(eq(privateContacts.id, contactId), eq(privateContacts.ownerId, ownerId)));
   return id;
+}
+
+/**
+ * As perguntas do Chat de Enriquecimento que o contato já tem respondidas
+ * (T45, 24/11: o chat perguntava de novo o que a ficha já tinha). Os nomes são
+ * os do roteiro (server/enrichment-flow.ts): "phone" (o telefone ou o
+ * WhatsApp), "company", "assets" e "needs" (ao menos um item no possui ou no
+ * procura), "how_met" (a anotação "Como se conheceram:" que o chat grava, ou
+ * um contexto ligado) e "relationship_type" (a anotação "Relacionamento:").
+ * Só do contato da dona; o contato de outra dona, ou apagado, não tem nada.
+ */
+export async function camposPreenchidosDoContato(ownerId: string, contactId: number): Promise<string[]> {
+  const db = await exigirDb();
+  const [contato] = await db.select({ phone: privateContacts.phone, whatsapp: privateContacts.whatsapp, company: privateContacts.company, notes: privateContacts.notes })
+    .from(privateContacts).where(and(eq(privateContacts.id, contactId), eq(privateContacts.ownerId, ownerId))).limit(1);
+  if (!contato) return [];
+  const [possui] = await db.select({ id: contactAssets.id }).from(contactAssets)
+    .where(and(eq(contactAssets.ownerId, ownerId), eq(contactAssets.contactId, contactId))).limit(1);
+  const [procura] = await db.select({ id: contactNeeds.id }).from(contactNeeds)
+    .where(and(eq(contactNeeds.ownerId, ownerId), eq(contactNeeds.contactId, contactId))).limit(1);
+  const [contexto] = await db.select({ id: contactContexts.id }).from(contactContexts)
+    .where(and(eq(contactContexts.ownerId, ownerId), eq(contactContexts.contactId, contactId))).limit(1);
+  const preenchido = (valor: string | null | undefined) => !!valor && valor.trim().length > 0;
+  const notas = contato.notes ?? "";
+  const campos: string[] = [];
+  if (preenchido(contato.phone) || preenchido(contato.whatsapp)) campos.push("phone");
+  if (preenchido(contato.company)) campos.push("company");
+  if (possui) campos.push("assets");
+  if (procura) campos.push("needs");
+  if (notas.includes("Como se conheceram:") || contexto) campos.push("how_met");
+  if (notas.includes("Relacionamento:")) campos.push("relationship_type");
+  return campos;
 }
 
 export async function getEnrichmentMessages(sessionId: string, ownerId: string, limit = 10) {

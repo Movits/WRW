@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { MENSAGEM_BANCO_INDISPONIVEL } from "@shared/const";
-import { PergunteAReuniao } from "./ReuniaoComIA";
+import { PergunteAReuniao, Trecho } from "./ReuniaoComIA";
 
 /**
  * O "Pergunte à reunião" na tela. O tRPC vira um dublê com estado de verdade:
@@ -37,7 +37,7 @@ vi.mock("@/lib/trpc", async () => {
   });
   return {
     trpc: {
-      meetings: { perguntar: mutacao("perguntar") },
+      meetings: { perguntar: mutacao("perguntar"), perguntarDuranteAGravacao: mutacao("perguntarDuranteAGravacao") },
       // A página do link aberto pede pelo token, num router público à parte.
       reuniaoAberta: { perguntar: mutacao("perguntarPeloLink") },
     },
@@ -81,6 +81,17 @@ describe("Pergunte à reunião", () => {
     expect(screen.getByText("O contêiner sai do porto de Santos no dia 12 de março.")).toBeInTheDocument();
     expect(screen.getByText("Onde isso foi dito")).toBeInTheDocument();
     expect(screen.getByText("Quando sai o contêiner?")).toBeInTheDocument();
+  });
+
+  // Defeito 3 do teste manual T50 (23/11): a lista das ações vinha numa linha só, cortada.
+  it("a resposta que é uma lista mostra um item por linha, inteira", () => {
+    const lista = Array.from({ length: 12 }, (_, i) => `- Ação ${i + 1}: a Carla manda a proposta até sexta`).join("\n");
+    duble.respostas.perguntar = respondida(lista, semTempo("a Carla manda a proposta até sexta"));
+    render(<PergunteAReuniao meetingId={ID} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ações e responsáveis" }));
+    const resposta = document.querySelector("[data-resposta-da-reuniao]")!;
+    expect(resposta.textContent).toBe(lista);
+    expect(resposta).toHaveClass("whitespace-pre-line");
   });
 
   it("a transcrição não responde: a tela diz isso", () => {
@@ -214,6 +225,18 @@ describe("Pelo link aberto (pages/ReuniaoAberta.tsx)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Este link não existe ou não está mais disponível.");
   });
 
+  it("a pergunta recusada pela senha do link (a entrada venceu, H23): a frase traduzida, e a página é avisada para trazer a tela da senha", async () => {
+    await act(async () => { await i18n.changeLanguage("en"); });
+    const aoPedirSenha = vi.fn();
+    duble.respostas.perguntarPeloLink = erroDoServidor("UNAUTHORIZED", "Este link pede a senha de 6 dígitos.");
+    render(<PergunteAReuniao token={TOKEN} aoPedirSenha={aoPedirSenha} />);
+    expect(aoPedirSenha).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Your question about the meeting" }), { target: { value: "Who spoke?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Ask/ }));
+    expect(screen.getByRole("alert")).toHaveTextContent("This link asks for the 6-digit password.");
+    expect(aoPedirSenha).toHaveBeenCalledTimes(1);
+  });
+
   it("pela dona, NOT_FOUND continua 'reunião não encontrada'", () => {
     duble.respostas.perguntar = erroDoServidor("NOT_FOUND", "Reunião não encontrada.");
     render(<PergunteAReuniao meetingId={ID} />);
@@ -252,5 +275,143 @@ describe("O aviso de conferir fala com quem lê", () => {
     render(<PergunteAReuniao meetingId={ID} />);
     perguntarAgora();
     for (const texto of ["Resposta", "Qual o prazo?", "trecho citado"]) expect(screen.getByText(texto)).toHaveAttribute("dir", "auto");
+  });
+});
+
+// Conferência de tela de 20/11/2026 (captura 07a): na reunião de documento (H12),
+// o Pergunte falava "do que foi dito na reunião" e dos "trechos da transcrição".
+describe("Pergunte ao documento (H12)", () => {
+  const TOKEN = "AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+
+  it("da dona: o título, a introdução, a busca, a resposta e o aviso falam do documento", () => {
+    duble.respostas.perguntar = respondida("O prazo é 25/11.", semTempo("Ricardo Tavares | 25/11/2026"));
+    render(<PergunteAReuniao meetingId={ID} documento />);
+    expect(screen.getByRole("heading", { name: "Pergunte ao documento" })).toBeInTheDocument();
+    expect(screen.getByText("A resposta vem só do texto do documento, com os trechos que a sustentam.")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Sua pergunta sobre o documento" }), { target: { value: "Qual o prazo?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Perguntar/ }));
+    expect(screen.getByText("Onde isso está no documento")).toBeInTheDocument();
+    expect(screen.getByText("Sugestões da IA para você conferir com os trechos do documento. Nada disto foi gravado nem entra na sua rede sozinho.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/transcrição|foi dito|reunião/);
+  });
+
+  it("o documento que não responde: a tela diz que o texto do documento não responde", () => {
+    duble.respostas.perguntar = { respondida: false };
+    render(<PergunteAReuniao meetingId={ID} documento />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Sua pergunta sobre o documento" }), { target: { value: "Quem assinou?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Perguntar/ }));
+    expect(screen.getByText("O texto deste documento não responde a esta pergunta.")).toBeInTheDocument();
+  });
+
+  it("pelo link: o aviso de quem lê o link fala dos trechos do documento", () => {
+    duble.respostas.perguntarPeloLink = respondida("Na sexta.", semTempo("entrega na sexta"));
+    render(<PergunteAReuniao token={TOKEN} documento />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Sua pergunta sobre o documento" }), { target: { value: "Quando?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Perguntar/ }));
+    expect(screen.getByText("Sugestões da IA para conferir com os trechos do documento. Nada disto foi gravado.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/transcrição|foi dito/);
+  });
+
+  it("o trecho do item do resumo também fala do documento", () => {
+    render(<Trecho texto="a feira será em março" documento />);
+    expect(screen.getByText("Trecho do documento")).toBeInTheDocument();
+  });
+});
+
+describe("Pergunte durante a gravação (G15a)", () => {
+  it("pergunta pela rota da gravação, com os textos dela, e nunca pela pergunta de sempre", () => {
+    duble.respostas.perguntarDuranteAGravacao = respondida("O estande fica pronto em março.", { trecho: "O estande fica pronto em março.", inicioSegundos: 12 });
+    render(<PergunteAReuniao meetingId={ID} duranteAGravacao />);
+    expect(screen.getByRole("heading", { name: "Pergunte sobre o que já foi dito" })).toBeInTheDocument();
+    expect(screen.getByText(/A IA lê só o texto das partes já transcritas/)).toBeInTheDocument();
+    perguntarAgora("Quando fica pronto o estande?");
+    expect(duble.chamadas.perguntarDuranteAGravacao).toEqual([{ meetingId: ID, idioma: "pt-BR", pergunta: "Quando fica pronto o estande?" }]);
+    expect(duble.chamadas.perguntar).toBeUndefined();
+    expect(screen.getByText("O estande fica pronto em março.", { selector: "p" })).toBeInTheDocument();
+    // Sem player na gravação: o tempo do trecho é só informação.
+    expect(screen.getByText("00:12")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Ouvir a partir de/ })).not.toBeInTheDocument();
+  });
+
+  it("o texto até agora que não responde, e a recusa de quando nada foi transcrito ainda, falam da gravação em curso", () => {
+    duble.respostas.perguntarDuranteAGravacao = { respondida: false };
+    const { unmount } = render(<PergunteAReuniao meetingId={ID} duranteAGravacao />);
+    perguntarAgora();
+    expect(screen.getByText("O texto transcrito até agora não responde a esta pergunta.")).toBeInTheDocument();
+    unmount();
+    duble.respostas.perguntarDuranteAGravacao = erroDoServidor("PRECONDITION_FAILED", "Esta reunião ainda não tem transcrição pronta para a IA ler.");
+    render(<PergunteAReuniao meetingId={ID} duranteAGravacao />);
+    perguntarAgora();
+    expect(screen.getByRole("alert")).toHaveTextContent("Ainda não há texto transcrito para a IA ler. Espere a primeira parte ficar pronta.");
+  });
+});
+
+describe("H6b: as sugestões prontas do Pergunte", () => {
+  it("as cinco sugestões ficam num grupo com nome: decisões-chave, ações, revisão, e-mail e conceitos", () => {
+    render(<PergunteAReuniao meetingId={ID} />);
+    const grupo = screen.getByRole("group", { name: "Sugestões" });
+    expect(within(grupo).getAllByRole("button").map(botao => botao.textContent)).toEqual([
+      "Decisões-chave", "Ações e responsáveis", "Revisão rápida", "Rascunho de e-mail", "Conceitos citados",
+    ]);
+  });
+
+  it("a sugestão manda a pergunta dela, no idioma da tela, pelo mesmo procedimento da digitada, e mostra a pergunta feita", () => {
+    duble.respostas.perguntar = respondida("Decidiram não renovar com a transportadora.", semTempo("Decidimos não renovar o contrato com a transportadora."));
+    render(<PergunteAReuniao meetingId={ID} />);
+    fireEvent.click(screen.getByRole("button", { name: "Decisões-chave" }));
+    expect(duble.chamadas.perguntar).toEqual([{ meetingId: ID, idioma: "pt-BR", pergunta: "Quais foram as decisões-chave?" }]);
+    expect(screen.getByText("Quais foram as decisões-chave?")).toBeInTheDocument();
+    expect(screen.getByText("Decidiram não renovar com a transportadora.")).toBeInTheDocument();
+    // O campo fica como estava: a sugestão não apaga o que a dona digitava.
+    expect(screen.getByRole("textbox", { name: "Sua pergunta sobre a reunião" })).toHaveValue("");
+  });
+
+  it("pelo link aberto, a sugestão vai pelo token", () => {
+    duble.respostas.perguntarPeloLink = { respondida: false };
+    render(<PergunteAReuniao token="token-do-link" />);
+    fireEvent.click(screen.getByRole("button", { name: "Rascunho de e-mail" }));
+    expect(duble.chamadas.perguntarPeloLink).toEqual([{ token: "token-do-link", idioma: "pt-BR", pergunta: "Escreva um rascunho curto de e-mail de retorno com o que foi combinado." }]);
+    expect(duble.chamadas.perguntar).toBeUndefined();
+  });
+
+  it("com a tela em árabe, a sugestão e a pergunta vão em árabe", async () => {
+    await act(async () => { await i18n.changeLanguage("ar"); });
+    duble.respostas.perguntar = { respondida: false };
+    render(<PergunteAReuniao meetingId={ID} />);
+    fireEvent.click(screen.getByRole("button", { name: "القرارات الرئيسية" }));
+    expect(duble.chamadas.perguntar).toEqual([{ meetingId: ID, idioma: "ar", pergunta: "ما القرارات الرئيسية التي اتُّخذت؟" }]);
+  });
+});
+
+describe("H6d: a resposta em tabela ou gráfico", () => {
+  const tabela = { tipo: "tabela", titulo: "Prazos", colunas: ["Quem", "O quê"], linhas: [["{F1}", "fecha o contrato"], ["{F2}", "manda a minuta"]] };
+
+  it("a dona vê a tabela que o servidor conferiu, com as vozes trocadas pelos nomes dela", () => {
+    duble.respostas.perguntar = { ...respondida("{F1} fecha o contrato.", semTempo("Eu fecho o contrato até sexta-feira.")), visual: tabela };
+    render(<PergunteAReuniao meetingId={ID} nomes={{ F1: "Ana" }} />);
+    perguntarAgora("Monte uma tabela com quem faz o quê");
+    const figura = screen.getByRole("figure", { name: "Prazos" });
+    expect(within(figura).getByRole("rowheader", { name: "Ana" })).toBeInTheDocument();
+    expect(within(figura).getByRole("rowheader", { name: "Falante 2" })).toBeInTheDocument();
+    // O trecho que sustenta a resposta continua embaixo.
+    expect(screen.getByText("Eu fecho o contrato até sexta-feira.")).toBeInTheDocument();
+  });
+
+  it("pelo link, o gráfico também aparece, com o \"Ver como tabela\"", () => {
+    duble.respostas.perguntarPeloLink = {
+      ...respondida("O contêiner sai dia 12.", semTempo("O contêiner sai do porto de Santos no dia 12 de março.")),
+      visual: { tipo: "barras", titulo: "Contêineres", eixo: "Porto", unidade: "", rotulos: ["Santos"], series: [{ nome: "Contêineres", valores: [12] }] },
+    };
+    render(<PergunteAReuniao token="token-do-link" />);
+    perguntarAgora("Faça um gráfico");
+    expect(screen.getByRole("img", { name: "Santos: 12" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ver como tabela" })).toBeInTheDocument();
+  });
+
+  it("sem visual na resposta, nada de tabela nem gráfico", () => {
+    duble.respostas.perguntar = respondida("O contêiner sai dia 12.", semTempo("O contêiner sai do porto de Santos no dia 12 de março."));
+    render(<PergunteAReuniao meetingId={ID} />);
+    perguntarAgora();
+    expect(screen.queryByRole("figure")).not.toBeInTheDocument();
   });
 });

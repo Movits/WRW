@@ -12,7 +12,7 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
 const exigirReuniaoDoLink = vi.fn();
 const verReuniaoPeloLink = vi.fn();
-const ligarLinkAberto = vi.fn();
+const ligarLinkAbertoComOpcoes = vi.fn();
 const desligarLinkAberto = vi.fn();
 const pedirResumoPeloLink = vi.fn();
 const resumoGuardadoPeloLink = vi.fn();
@@ -20,6 +20,10 @@ const perguntarAReuniao = vi.fn();
 const translatePrivateMeetingTranscript = vi.fn();
 const createAuditLog = vi.fn();
 
+// A guarda da lixeira (H7d) lê o banco antes do zod, em todo procedimento pelo id. Aqui o
+// router é provado com o banco dublado; a guarda tem os testes dela (guarda-da-lixeira.test.ts
+// e server/lixeira-de-reunioes.integracao.test.ts).
+vi.mock("./guarda-da-lixeira", async () => ({ procedimentoDaReuniao: (await import("./_core/trpc")).protectedProcedure }));
 vi.mock("./db", () => ({
   getDb: async () => null,
   exigirDb: async () => { throw new Error("este teste não usa banco"); },
@@ -28,7 +32,7 @@ vi.mock("./link-aberto-da-reuniao", async importOriginal => ({
   ...await importOriginal<typeof import("./link-aberto-da-reuniao")>(),
   exigirReuniaoDoLink: (...args: unknown[]) => exigirReuniaoDoLink(...args),
   verReuniaoPeloLink: (...args: unknown[]) => verReuniaoPeloLink(...args),
-  ligarLinkAberto: (...args: unknown[]) => ligarLinkAberto(...args),
+  ligarLinkAbertoComOpcoes: (...args: unknown[]) => ligarLinkAbertoComOpcoes(...args),
   desligarLinkAberto: (...args: unknown[]) => desligarLinkAberto(...args),
 }));
 vi.mock("./reuniao-com-ia", async importOriginal => ({
@@ -91,7 +95,7 @@ const perguntar = (token = TOKEN, ip?: string) => semSessao(ip).reuniaoAberta.pe
 beforeEach(() => {
   tetoDaIADoLinkAberto.esquecer();
   tetoDaIADoVisitanteDoLink.esquecer();
-  for (const duble of [exigirReuniaoDoLink, verReuniaoPeloLink, ligarLinkAberto, desligarLinkAberto, pedirResumoPeloLink, resumoGuardadoPeloLink, perguntarAReuniao, translatePrivateMeetingTranscript, createAuditLog]) {
+  for (const duble of [exigirReuniaoDoLink, verReuniaoPeloLink, ligarLinkAbertoComOpcoes, desligarLinkAberto, pedirResumoPeloLink, resumoGuardadoPeloLink, perguntarAReuniao, translatePrivateMeetingTranscript, createAuditLog]) {
     duble.mockReset();
   }
   // TOKEN e OUTRO_TOKEN abrem a MESMA reunião: é o caso da variação de caixa
@@ -194,7 +198,7 @@ describe("reuniaoAberta — público, sem sessão", () => {
     await expect(semSessao().reuniaoAberta.ver({ token: TOKEN })).resolves.toEqual({});
     await expect(semSessao().meetings.ligarLinkAberto(LIGAR)).rejects.toMatchObject({ code: "UNAUTHORIZED" });
     await expect(semSessao().meetings.desligarLinkAberto({ meetingId: ID })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-    expect(ligarLinkAberto).not.toHaveBeenCalled();
+    expect(ligarLinkAbertoComOpcoes).not.toHaveBeenCalled();
     expect(desligarLinkAberto).not.toHaveBeenCalled();
   });
 });
@@ -271,36 +275,37 @@ describe("meetings.ligarLinkAberto e desligarLinkAberto — só a dona, com audi
     ]) {
       await expect(daDona().meetings.ligarLinkAberto(entrada as never)).rejects.toMatchObject({ code: "BAD_REQUEST" });
     }
-    expect(ligarLinkAberto).not.toHaveBeenCalled();
+    expect(ligarLinkAbertoComOpcoes).not.toHaveBeenCalled();
   });
 
   it("ligado, devolve o token; a prova (quem, IP, navegador) vai ao serviço, que a grava na mesma transação", async () => {
-    ligarLinkAberto.mockResolvedValue(TOKEN);
-    await expect(daDona().meetings.ligarLinkAberto(LIGAR)).resolves.toEqual({ token: TOKEN });
-    expect(ligarLinkAberto).toHaveBeenCalledWith("dona-1", ID, {
+    ligarLinkAbertoComOpcoes.mockResolvedValue({ token: TOKEN, senha: null });
+    await expect(daDona().meetings.ligarLinkAberto(LIGAR)).resolves.toEqual({ token: TOKEN, senha: null });
+    // A aba de antes da H23 não manda as escolhas do link: o serviço liga sem senha e com o áudio.
+    expect(ligarLinkAbertoComOpcoes).toHaveBeenCalledWith("dona-1", ID, {
       userId: 7, ipAddress: "198.51.100.7", userAgent: "Navegador de teste", idioma: "de", textoExibido: LIGAR.textoExibido,
-    });
+    }, { comSenha: undefined, incluirAudio: undefined });
     // A aba de antes da H3b não manda a versão: o serviço grava 1.
-    expect(ligarLinkAberto.mock.calls[0][2].versaoDaAutorizacao).toBeUndefined();
+    expect(ligarLinkAbertoComOpcoes.mock.calls[0][2].versaoDaAutorizacao).toBeUndefined();
     // Não há um segundo registro, que pudesse sumir em silêncio depois de o link ligar.
     expect(createAuditLog).not.toHaveBeenCalled();
   });
 
   it("a caixa que fala dos nomes das vozes manda a versão 2, e ela vai ao serviço com a prova (H3b)", async () => {
-    ligarLinkAberto.mockResolvedValue(TOKEN);
-    await expect(daDona().meetings.ligarLinkAberto({ ...LIGAR, versaoDaAutorizacao: 2 })).resolves.toEqual({ token: TOKEN });
-    expect(ligarLinkAberto).toHaveBeenCalledWith("dona-1", ID, expect.objectContaining({ versaoDaAutorizacao: 2, textoExibido: LIGAR.textoExibido }));
+    ligarLinkAbertoComOpcoes.mockResolvedValue({ token: TOKEN, senha: null });
+    await expect(daDona().meetings.ligarLinkAberto({ ...LIGAR, versaoDaAutorizacao: 2 })).resolves.toEqual({ token: TOKEN, senha: null });
+    expect(ligarLinkAbertoComOpcoes).toHaveBeenCalledWith("dona-1", ID, expect.objectContaining({ versaoDaAutorizacao: 2, textoExibido: LIGAR.textoExibido }), expect.anything());
   });
 
   it("versão que não é a 2 é BAD_REQUEST: a tela não inventa versão, e a aba velha não manda nenhuma", async () => {
     for (const versaoDaAutorizacao of [1, 3, "2", null]) {
       await expect(daDona().meetings.ligarLinkAberto({ ...LIGAR, versaoDaAutorizacao } as never)).rejects.toMatchObject({ code: "BAD_REQUEST" });
     }
-    expect(ligarLinkAberto).not.toHaveBeenCalled();
+    expect(ligarLinkAbertoComOpcoes).not.toHaveBeenCalled();
   });
 
   it("recusado pelo serviço, sai com o código que a tela traduz", async () => {
-    ligarLinkAberto.mockRejectedValue(new LinkAbertoRecusado("PRECONDITION_FAILED", "Só dá para compartilhar uma reunião pronta."));
+    ligarLinkAbertoComOpcoes.mockRejectedValue(new LinkAbertoRecusado("PRECONDITION_FAILED", "Só dá para compartilhar uma reunião pronta."));
     await expect(daDona().meetings.ligarLinkAberto(LIGAR)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
     desligarLinkAberto.mockRejectedValue(new LinkAbertoRecusado("NOT_FOUND", "Reunião não encontrada."));
     await expect(daDona("outra").meetings.desligarLinkAberto({ meetingId: ID })).rejects.toMatchObject({ code: "NOT_FOUND" });

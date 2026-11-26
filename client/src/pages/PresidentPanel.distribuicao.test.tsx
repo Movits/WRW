@@ -127,6 +127,19 @@ describe("quem entra no painel", () => {
     expect(duble.consultas).not.toContain("president.listAllUsers");
   });
 
+  it("a aba Reuniões (consulta da administração, R1a) é só de admin e presidente: Ouro sem cargo não a vê", () => {
+    for (const role of ["president", "admin"]) {
+      duble.usuaria = { id: 1, role, name: "Staff", isDistributor: false };
+      const { unmount } = render(<PresidentPanel />);
+      expect(screen.getByRole("button", { name: "Reuniões" })).toBeInTheDocument();
+      unmount();
+    }
+    duble.usuaria = { id: 3, role: "gold", name: "Ouro", isDistributor: false };
+    render(<PresidentPanel />);
+    expect(screen.queryByRole("button", { name: "Reuniões" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Conexões registradas" })).not.toBeInTheDocument();
+  });
+
   it("presidente vê as cinco abas de sempre mais Distribuição, e a badge Ouro", () => {
     render(<PresidentPanel />);
     expect(abas()).toEqual(["Visão Geral", "Gestão Ouro", "Líderes", "Validações", "Compliance", "Distribuição"]);

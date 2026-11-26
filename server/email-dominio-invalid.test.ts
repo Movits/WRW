@@ -57,6 +57,6 @@ describe("sendEmail para o domínio reservado .invalid", () => {
     expect(destinatarioNuncaEntrega("maria@exemplo.invalido")).toBe(false);
     expect(await sendEmail({ to: "maria@exemplo.com", subject: "s", html: "h" })).toBe(true);
     expect(enviar).toHaveBeenCalledTimes(1);
-    expect(enviar.mock.calls[0]?.[0]).toMatchObject({ to: "maria@exemplo.com", from: "WRW <no-reply@exemplo.test>" });
+    expect(enviar.mock.calls[0]?.[0]).toMatchObject({ to: "maria@exemplo.com", from: "Marquesa Global Match <no-reply@exemplo.test>" });
   });
 });

@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { meetings, meetingSummaries, meetingSummaryItems } from "../drizzle/schema";
-import { idiomaDaReuniao, nomeDoIdioma, type IdiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { idiomaFalado, nomeDoIdioma, type IdiomaDaReuniao, type IdiomaFalado } from "@shared/idioma-da-reuniao";
 import {
   MARCA_DO_DESTINATARIO,
   MENSAGEM_EMAIL_SEM_ITEM_CONFIRMADO,
@@ -10,6 +10,7 @@ import {
   type TomDoEmail,
 } from "@shared/email-de-retorno";
 import { exigirDb } from "./db";
+import { reuniaoVisivel } from "./reuniao-visivel";
 import { FalhaDaIA, pedirJsonAIA } from "./ia-em-json";
 import { MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
 import { MENSAGEM_IA_INDISPONIVEL } from "./reuniao-com-ia";
@@ -76,7 +77,7 @@ const TOM: Record<TomDoEmail, string> = {
 };
 
 /** As instruções do rascunho. Exportada para os testes conferirem o que vai à IA. */
-export function instrucoesDoEmail(pedido: PedidoDoRascunho, idiomaDosItens: IdiomaDaReuniao | null): string {
+export function instrucoesDoEmail(pedido: PedidoDoRascunho, idiomaDosItens: IdiomaFalado | null): string {
   const idioma = nomeDoIdioma(pedido.idioma);
   const voz = pedido.vozDoDestinatario;
   return [
@@ -170,7 +171,7 @@ export function conferirRascunho(dados: Record<string, unknown>, vozes: Readonly
 export async function rascunharEmailDeRetorno(ownerId: string, meetingId: string, pedido: PedidoDoRascunho): Promise<RascunhoDoEmail> {
   const db = await exigirDb();
   const [reuniao] = await db.select({ status: meetings.status }).from(meetings)
-    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), ne(meetings.status, "deleted"))).limit(1);
+    .where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId), reuniaoVisivel())).limit(1);
   if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
   // Em processamento, o resumo é da transcrição anterior e vai ser refeito.
   if (reuniao.status !== "ready") throw new TRPCError({ code: "PRECONDITION_FAILED", message: MENSAGEM_EMAIL_SEM_RESUMO_PRONTO });
@@ -196,7 +197,7 @@ export async function rascunharEmailDeRetorno(ownerId: string, meetingId: string
   if (pedido.vozDoDestinatario) vozes.add(pedido.vozDoDestinatario);
   try {
     const resposta = await pedirJsonAIA({
-      sistema: instrucoesDoEmail(pedido, idiomaDaReuniao(resumo.language)),
+      sistema: instrucoesDoEmail(pedido, idiomaFalado(resumo.language)),
       usuario: entradaDoEmail(itens),
       nome: "email_de_retorno",
       schema: SCHEMA_DO_EMAIL,

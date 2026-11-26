@@ -3,9 +3,11 @@ import { and, eq, lt, sql } from "drizzle-orm";
 import { meetingAudioSlices, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { storageApagarTodasAsVersoes, storagePut } from "./storage";
-import { medirDuracaoDoAudio } from "./duracao-do-audio";
+import { analisarAudio, medirDuracaoDoAudio } from "./duracao-do-audio";
+import { converterParteEmMp3 } from "./conversao-do-audio";
+import { esperarVagaDeConversao } from "./baixar-audio-da-reuniao";
 import { ALLOWED_MEETING_AUDIO_TYPES, MEETING_AUDIO_TTL_MS, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA } from "./meeting-service";
-import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX, type CodigoDaRecusaDaParte } from "@shared/const";
+import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX, PARTE_NO_SERVIDOR_BYTES_MAX, PARTE_NO_SERVIDOR_SEGUNDOS_MAX, PARTES_POR_REUNIAO_MAX, type CodigoDaRecusaDaParte } from "@shared/const";
 
 /**
  * A reunião gravada em partes (G5 do desenho do gravador,
@@ -21,14 +23,15 @@ import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX, type CodigoDaRecusaDaParte } from "@sh
  * diferente na mesma posição é recusado.
  */
 
-export const TAMANHO_MAXIMO_DA_PARTE = 16 * 1024 * 1024;
+export const TAMANHO_MAXIMO_DA_PARTE = PARTE_NO_SERVIDOR_BYTES_MAX;
 // 10 min de parte, com 2 min de folga: a tela troca de parte pelo relógio dela,
 // e a aba em segundo plano atrasa esse relógio (o navegador espaça os timers),
 // então a parte de 10 min pode chegar com mais.
-export const DURACAO_MAXIMA_DA_PARTE_SEGUNDOS = 12 * 60;
+export const DURACAO_MAXIMA_DA_PARTE_SEGUNDOS = PARTE_NO_SERVIDOR_SEGUNDOS_MAX;
 // 12 h em partes de 10 min são 72; 200 deixam folga para partes mais curtas sem
-// deixar uma reunião acumular linhas e objetos no bucket sem fim.
-export const PARTES_NO_MAXIMO = 200;
+// deixar uma reunião acumular linhas e objetos no bucket sem fim. O número mora
+// em shared/const.ts, porque a importação em partes confere o mesmo na tela.
+export const PARTES_NO_MAXIMO = PARTES_POR_REUNIAO_MAX;
 /**
  * A folga sobre as 12 h da gravação em partes, só aqui no servidor: a tela para
  * nas 12 h pelo relógio dela, e a soma é das durações MEDIDAS nos bytes, que não
@@ -50,20 +53,89 @@ export class RecusaDaParte extends Error {
 /** Falha passageira (bucket fora): a mesma parte pode ser reenviada depois. */
 export class FalhaPassageiraDaParte extends Error {}
 
-const EXTENSAO: Record<string, string> = { "audio/mp4": "m4a", "audio/m4a": "m4a", "audio/aac": "aac", "audio/mpeg": "mp3", "audio/webm": "webm", "audio/ogg": "ogg", "audio/wav": "wav", "audio/x-wav": "wav" };
+const EXTENSAO: Record<string, string> = { "audio/mp4": "m4a", "audio/m4a": "m4a", "audio/aac": "aac", "audio/flac": "flac", "audio/mpeg": "mp3", "audio/webm": "webm", "audio/ogg": "ogg", "audio/wav": "wav", "audio/x-wav": "wav" };
 
-export async function receberParte(entrada: { ownerId: string; meetingId: string; seq: number; mimeType: string; bytes: Buffer }) {
-  const { ownerId, meetingId, seq, bytes } = entrada;
-  const mimeType = entrada.mimeType.split(";")[0].trim().toLowerCase();
+/**
+ * Os tipos que uma parte pode ter: os do envio único e, só aqui, o FLAC e o
+ * AAC em ADTS, que chegam pela importação em partes (H9b): a tela corta o
+ * arquivo sem recodificar, e a parte vai ao Gemini no formato dela (os dois
+ * estão entre os que ele aceita). Cada parte continua medida nos bytes
+ * (server/duracao-do-audio.ts), o que recusa a que não se mede.
+ */
+export const TIPOS_DAS_PARTES: readonly string[] = [...ALLOWED_MEETING_AUDIO_TYPES, "audio/flac", "audio/aac"];
+
+/**
+ * Os codecs que vão ao Gemini como chegaram. A lista dele (a página de áudio
+ * da documentação, lida em 25/11/2026) é de TIPOS: WAV, MP3, AIFF, AAC, OGG,
+ * FLAC, MPEG, M4A, Opus, WebM e alguns crus; ela não diz que codec cabe em
+ * cada contêiner. Ficam como chegaram os que o app sempre mandou e que a
+ * transcrição já lê: o Opus no WebM e no Ogg (o Chrome, o Android, o Firefox),
+ * o AAC no MP4 (o Safari e o iPhone), o Vorbis no Ogg, o MP3, o AAC em ADTS, o
+ * FLAC e o WAV em PCM. O resto, que só chega pelo recuo do corte (o ALAC do
+ * Gravador do iPhone, o AC-3 e o Vorbis no WebM, o ADPCM no WAV...), não está
+ * na lista, e a parte é convertida em MP3 antes de guardar.
+ */
+const CODECS_QUE_VAO_COMO_CHEGARAM: ReadonlySet<string> = new Set(["A_OPUS", "Opus", "opus", "mp4a", "vorbis", "mpeg", "flac", "wav:1", "wav:3"]);
+
+/** Se a parte tem uma faixa de áudio num codec fora de CODECS_QUE_VAO_COMO_CHEGARAM (e por isso vai em MP3). */
+export function precisaConverterParaOGemini(codecs: readonly string[]): boolean {
+  return codecs.some(codec => !CODECS_QUE_VAO_COMO_CHEGARAM.has(codec));
+}
+
+export type DependenciasDoRecebimento = {
+  converter: typeof converterParteEmMp3;
+  /** A vaga de ffmpeg da instância, a mesma do "Baixar o áudio" (null: nenhuma no prazo da fila curta). */
+  vagaDeConversao: () => Promise<(() => void) | null>;
+};
+
+export async function receberParte(
+  entrada: { ownerId: string; meetingId: string; seq: number; mimeType: string; bytes: Buffer },
+  deps: Partial<DependenciasDoRecebimento> = {},
+) {
+  const { ownerId, meetingId, seq } = entrada;
+  const recebidos = entrada.bytes;
+  const tipoRecebido = entrada.mimeType.split(";")[0].trim().toLowerCase();
   if (!Number.isInteger(seq) || seq < 0 || seq >= PARTES_NO_MAXIMO) throw new RecusaDaParte("POSICAO", "Parte fora de ordem.");
-  if (!(ALLOWED_MEETING_AUDIO_TYPES as readonly string[]).includes(mimeType)) throw new RecusaDaParte("FORMATO", "Formato de áudio não suportado.");
-  if (!bytes.length || bytes.length > TAMANHO_MAXIMO_DA_PARTE) throw new RecusaDaParte("GRANDE_DEMAIS", "Parte de áudio vazia ou grande demais.");
-  const duracao = medirDuracaoDoAudio(bytes);
-  if (duracao === null || duracao <= 0) throw new RecusaDaParte("SEM_DURACAO", "Não foi possível ler a duração desta parte do áudio.");
-  if (duracao > DURACAO_MAXIMA_DA_PARTE_SEGUNDOS) throw new RecusaDaParte("LONGA_DEMAIS", "Parte de áudio longa demais.");
+  if (!TIPOS_DAS_PARTES.includes(tipoRecebido)) throw new RecusaDaParte("FORMATO", "Formato de áudio não suportado.");
+  if (!recebidos.length || recebidos.length > TAMANHO_MAXIMO_DA_PARTE) throw new RecusaDaParte("GRANDE_DEMAIS", "Parte de áudio vazia ou grande demais.");
+  const analise = analisarAudio(recebidos);
+  if (analise.segundos === null || analise.segundos <= 0) throw new RecusaDaParte("SEM_DURACAO", "Não foi possível ler a duração desta parte do áudio.");
+  if (analise.segundos > DURACAO_MAXIMA_DA_PARTE_SEGUNDOS) throw new RecusaDaParte("LONGA_DEMAIS", "Parte de áudio longa demais.");
+
+  // O recuo do corte (G14, parte 2): o arquivo curto que o corte do navegador
+  // não lê chega inteiro, como uma parte só, no formato original. O codec que
+  // o Gemini não lista vira MP3 aqui, antes da linha e do bucket: a fila, o
+  // player, o "Baixar o áudio" e o reprocesso leem o MP3. O que o ffmpeg não
+  // converte é recusa de vez (FORMATO, que a tela traduz): reenviar o mesmo
+  // arquivo daria o mesmo resultado. O sha256 é o dos bytes RECEBIDOS, para o
+  // reenvio da mesma parte continuar se reconhecendo.
+  let bytes = recebidos;
+  let mimeType = tipoRecebido;
+  let duracao = analise.segundos;
+  if (precisaConverterParaOGemini(analise.codecs)) {
+    const { converter = converterParteEmMp3, vagaDeConversao = () => esperarVagaDeConversao() } = deps;
+    // A instância tem 1 CPU: a conversão toma uma vaga do mesmo balcão dos
+    // ffmpeg do "Baixar o áudio" (CONVERSOES_DE_AUDIO_SIMULTANEAS), numa fila
+    // curta. Sem vaga, a recusa é passageira, e a tela manda a parte de novo.
+    const soltarVaga = await vagaDeConversao();
+    if (!soltarVaga) throw new FalhaPassageiraDaParte("Os conversores de áudio estão ocupados; envie esta parte de novo.");
+    try {
+      bytes = await converter(recebidos, tipoRecebido, DURACAO_MAXIMA_DA_PARTE_SEGUNDOS);
+    } catch (erro) {
+      console.error(`[Reuniões] a parte ${seq} (${tipoRecebido}, ${analise.codecs.join("+")}) não foi convertida em MP3:`, erro instanceof Error ? erro.message : erro);
+      throw new RecusaDaParte("FORMATO", "Formato de áudio não suportado.");
+    } finally {
+      soltarVaga();
+    }
+    mimeType = "audio/mpeg";
+    const medida = medirDuracaoDoAudio(bytes);
+    if (medida === null) throw new RecusaDaParte("FORMATO", "Formato de áudio não suportado.");
+    duracao = medida;
+    console.info(`[Reuniões] a parte ${seq} chegou em ${tipoRecebido} (${analise.codecs.join("+")}) e foi guardada em MP3.`);
+  }
 
   const db = await exigirDb();
-  const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+  const sha256 = crypto.createHash("sha256").update(recebidos).digest("hex");
   const agora = Date.now();
   // O prazo do áudio da reunião em partes: 30 dias depois da chegada da ÚLTIMA
   // parte, a mesma regra do envio único (30 dias contados do envio, que lá manda
@@ -81,7 +153,20 @@ export async function receberParte(entrada: { ownerId: string; meetingId: string
     const [reuniao] = await tx.select({
       status: meetings.status, pipeline: meetings.audioPipeline, consentimento: meetings.consentGranted, esperadas: meetings.expectedSlices,
     }).from(meetings).where(and(eq(meetings.id, meetingId), eq(meetings.ownerId, ownerId))).limit(1).for("update");
-    // Reunião de outra dona e reunião que não existe respondem igual.
+    // Reunião de outra dona e reunião que não existe respondem igual: a tela
+    // recebe SEM_REUNIAO (404) e apaga a cópia da parte, porque reenviar não
+    // muda nada.
+    //
+    // A reunião da LIXEIRA (H7d) aceita a parte atrasada: é exclusão adiada, e
+    // restaurar devolve a reunião como estava, com o áudio que já tinha sido
+    // gravado. A gravação ainda no ar não vai para a lixeira
+    // (podeIrParaALixeira), então isto só alcança a reunião em 'uploading',
+    // cujo fim já veio e cuja parte ficou no aparelho (a retomada a manda
+    // depois). Recusar aqui fazia a tela apagar a única cópia daquele trecho
+    // (o 404 é recusa definitiva para ela), e a reunião restaurada era montada
+    // com lacuna. Na lixeira, a fila não a transcreve (foraDaLixeira, em
+    // server/fila-de-transcricao.ts); apagar de vez, e o fim dos 30 dias,
+    // levam a parte com a reunião (deletePrivateMeeting).
     if (!reuniao) throw new RecusaDaParte("SEM_REUNIAO", "Reunião não encontrada.");
     if (reuniao.pipeline !== "slices" || !reuniao.consentimento || !["recording", "uploading"].includes(reuniao.status)) {
       throw new RecusaDaParte("FORA_DO_ESTADO", "Esta reunião não está recebendo áudio.");

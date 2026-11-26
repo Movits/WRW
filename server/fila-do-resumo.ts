@@ -1,18 +1,25 @@
 import crypto from "crypto";
 import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
-import { meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } from "../drizzle/schema";
-import { idiomaDaReuniao, IDIOMA_DA_REUNIAO_PADRAO } from "@shared/idioma-da-reuniao";
-import { MODELO_DE_RESUMO_PADRAO, modeloDeResumo } from "@shared/modelos-de-resumo";
+import { meetingAudioSlices, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } from "../drizzle/schema";
+import { idiomaFalado, IDIOMA_DA_REUNIAO_PADRAO } from "@shared/idioma-da-reuniao";
+import { sugestaoDoResumoNovo } from "@shared/titulo-sugerido";
+import { ESTILO_DO_RESUMO_PADRAO, MODELO_DE_RESUMO_PADRAO, estiloDoResumo, modeloDeResumo, type EscolhaDoModelo, type ModeloDeResumo } from "@shared/modelos-de-resumo";
 import { conferirMapaMental, type MapaMental } from "@shared/mapa-mental";
 import { descreverErroDeBanco } from "./banco-indisponivel";
 import { exigirDb } from "./db";
+import { transcricaoEstaEditada } from "./editar-transcricao";
+import { foraDaLixeira } from "./reuniao-visivel";
 import { FalhaDaIA } from "./ia-em-json";
 import { avisarReuniaoPronta } from "./lembretes";
 import { segmentosDoContrato } from "./link-aberto-da-reuniao";
 import { soltarAcoesDaReuniao } from "./proximas-acoes";
 import { gerarMapaMental } from "./mapa-mental";
 import { gerarResumoDaReuniao } from "./resumo-da-reuniao";
+import { escolherModeloDoResumo } from "./escolha-do-modelo";
+import { contextoDaGeracao } from "./modelos-proprios";
 import { numeracaoDoResumoRefeito } from "./resumo-refeito";
+import { envioAutomaticoDoResumo } from "./resumo-por-email";
+import { iniciosDasReunioesJuntadas } from "./transcricao-de-fatia";
 
 /**
  * A fila do resumo guardado da reunião (H4 do desenho do gravador,
@@ -48,8 +55,9 @@ type Banco = Awaited<ReturnType<typeof exigirDb>>;
 // arquivos em paralelo no mesmo banco.
 type Escopo = { ownerId?: string };
 
-// Os tokens das reservas desta instância: o SIGTERM devolve exatamente estes.
-const tokensVivos = new Set<string>();
+// As reservas desta instância, do token para a linha: o SIGTERM devolve
+// exatamente estas, pela chave de cada linha.
+const tokensVivos = new Map<string, string>();
 let parada = false;
 
 function linhas(resultado: unknown): number {
@@ -66,7 +74,16 @@ function codigoDoErro(erro: unknown): string {
 // As duas fases do trabalho de uma linha: o resumo, e depois o mapa mental.
 // O modelo do resumo (H4d) vai junto: a fase do resumo escreve nele.
 type Fase = "resumo" | "mapa";
-type Alvo = { id: string; meetingId: string; ownerId: string; template: string };
+// O pedido da dona (H4e) também: o modelo dela, "a IA escolhe", o estilo e as instruções.
+type Alvo = {
+  id: string; meetingId: string; ownerId: string; template: string;
+  customTemplateId: string | null; aiTemplate: string | null; style: string; instructions: string | null;
+};
+const COLUNAS_DO_ALVO = {
+  id: meetingSummaries.id, meetingId: meetingSummaries.meetingId, ownerId: meetingSummaries.ownerId, template: meetingSummaries.template,
+  customTemplateId: meetingSummaries.customTemplateId, aiTemplate: meetingSummaries.aiTemplate, style: meetingSummaries.style, instructions: meetingSummaries.instructions,
+  updatedAt: meetingSummaries.updatedAt,
+};
 
 /** A linha que é trabalho da fase: o resumo pendente, ou o mapa pendente de um resumo pronto. */
 function naFila(fase: Fase) {
@@ -83,6 +100,14 @@ const semReservaViva = (agora: number) => or(isNull(meetingSummaries.lockedUntil
  * tela oferece tentar de novo. O mapa esgotado falha sozinho: o resumo
  * continua pronto. Aqui não sai o aviso de reunião pronta no sino (H15), que
  * registrarFalha dá: é o caso raro, e a varredura é em lote.
+ *
+ * Trava só pela chave: os esgotados saem de uma leitura sem trava, e cada um
+ * vira falha num UPDATE pelo id que repete as condições (a linha que mudou no
+ * meio, reservada ou pedida de novo, não casa mais e fica). O UPDATE pelo
+ * intervalo do índice (estado, locked_until) travava o vão inteiro, com os
+ * resumos de outras donas; a reserva, a gravação do resumo e o pedido movem a
+ * linha dentro desse índice e se travavam com ele (deadlock no CI de 18/11,
+ * com os arquivos de integração em paralelo no mesmo banco).
  */
 async function desistirDosEsgotados(db: Banco, agora: number, escopo: Escopo) {
   const esgotado = (fase: Fase) => and(
@@ -91,15 +116,26 @@ async function desistirDosEsgotados(db: Banco, agora: number, escopo: Escopo) {
     semReservaViva(agora),
     escopo.ownerId ? eq(meetingSummaries.ownerId, escopo.ownerId) : undefined,
   );
-  await db.update(meetingSummaries).set({ status: "failed", lastError: "TENTATIVAS_ESGOTADAS", lockToken: null, lockedUntil: null, updatedAt: agora })
-    .where(esgotado("resumo"));
-  await db.update(meetingSummaries).set({ mindMapStatus: "failed", mindMapError: "TENTATIVAS_ESGOTADAS", lockToken: null, lockedUntil: null, updatedAt: agora })
-    .where(esgotado("mapa"));
+  const desistencia = {
+    resumo: { status: "failed" as const, lastError: "TENTATIVAS_ESGOTADAS" },
+    mapa: { mindMapStatus: "failed" as const, mindMapError: "TENTATIVAS_ESGOTADAS" },
+  };
+  for (const fase of ["resumo", "mapa"] as const) {
+    const esgotados = await db.select({ id: meetingSummaries.id }).from(meetingSummaries).where(esgotado(fase));
+    for (const { id } of esgotados) {
+      await db.update(meetingSummaries).set({ ...desistencia[fase], lockToken: null, lockedUntil: null, updatedAt: agora })
+        .where(and(eq(meetingSummaries.id, id), esgotado(fase)));
+    }
+  }
 }
 
-/** O trabalho mais antigo da fase, sem reserva viva, de reunião pronta de conta ativa. */
+/**
+ * O trabalho mais antigo da fase, sem reserva viva, de reunião pronta de conta
+ * ativa. A reunião na lixeira (H7d) fica fora da fila: o resumo dela espera, e
+ * a fila o faz se a dona a restaurar.
+ */
 async function maisAntigo(db: Banco, agora: number, escopo: Escopo, fase: Fase) {
-  const [alvo] = await db.select({ id: meetingSummaries.id, meetingId: meetingSummaries.meetingId, ownerId: meetingSummaries.ownerId, template: meetingSummaries.template, updatedAt: meetingSummaries.updatedAt })
+  const [alvo] = await db.select(COLUNAS_DO_ALVO)
     .from(meetingSummaries)
     .innerJoin(meetings, and(eq(meetings.id, meetingSummaries.meetingId), eq(meetings.ownerId, meetingSummaries.ownerId)))
     .innerJoin(users, eq(users.openId, meetingSummaries.ownerId))
@@ -108,12 +144,13 @@ async function maisAntigo(db: Banco, agora: number, escopo: Escopo, fase: Fase) 
       semReservaViva(agora),
       lt(meetingSummaries.attempts, TENTATIVAS_DO_RESUMO),
       eq(meetings.status, "ready"),
+      foraDaLixeira(),
       eq(users.isActive, true),
       escopo.ownerId ? eq(meetingSummaries.ownerId, escopo.ownerId) : undefined,
     ))
     .orderBy(asc(meetingSummaries.updatedAt))
     .limit(1);
-  return alvo ? { id: alvo.id, meetingId: alvo.meetingId, ownerId: alvo.ownerId, template: alvo.template, updatedAt: Number(alvo.updatedAt), fase } : undefined;
+  return alvo ? { ...alvo, updatedAt: Number(alvo.updatedAt), fase } : undefined;
 }
 
 /**
@@ -126,12 +163,15 @@ async function proximoTrabalho(db: Banco, agora: number, escopo: Escopo): Promis
   const resumo = await maisAntigo(db, agora, escopo, "resumo");
   const mapa = await maisAntigo(db, agora, escopo, "mapa");
   const alvo = resumo && mapa ? (mapa.updatedAt < resumo.updatedAt ? mapa : resumo) : resumo ?? mapa;
-  return alvo && { id: alvo.id, meetingId: alvo.meetingId, ownerId: alvo.ownerId, template: alvo.template, fase: alvo.fase };
+  if (!alvo) return undefined;
+  const { updatedAt: _ordem, ...trabalho } = alvo;
+  void _ordem;
+  return trabalho;
 }
 
 async function reservar(db: Banco, id: string, agora: number, fase: Fase): Promise<string | null> {
   const token = crypto.randomUUID();
-  tokensVivos.add(token);
+  tokensVivos.set(token, id);
   const r = await db.update(meetingSummaries).set({
     lockToken: token, lockedUntil: agora + DURACAO_DA_RESERVA_MS,
     attempts: sql`${meetingSummaries.attempts} + 1`, updatedAt: agora,
@@ -199,17 +239,53 @@ type ItemAtual = { status: string; done: boolean; origin: string; editedAt: numb
 const escritoPelaDona = (item: ItemAtual) => item.origin === "owner" || item.editedAt !== null;
 const itemQueFica = (item: ItemAtual) => item.status === "confirmed" || item.done || escritoPelaDona(item);
 
+/**
+ * O mapa mental gravado antes da última edição da transcrição (H18): saiu de
+ * outra versão dela. O mapa que a IA escreveu sobre uma revisão anterior (a
+ * dona editou durante a geração) é gravado com a hora de antes da edição
+ * (horaDaVersao), então também conta como de outra versão.
+ */
+export function mapaDeOutraVersao(mapaGravadoEm: number | null, transcricaoEditadaEm: number | null): boolean {
+  if (transcricaoEditadaEm === null) return false;
+  return mapaGravadoEm === null || Number(transcricaoEditadaEm) > Number(mapaGravadoEm);
+}
+
+/**
+ * A hora que o resumo (generated_at) e o mapa (mind_map_generated_at) gravam: a
+ * da versão da transcrição de que saíram, que é o que a tela compara com o
+ * edited_at para dizer "de outra versão" (server/resumo-guardado.ts). Na mesma
+ * revisão que a IA leu, é agora: a edição que chegar depois espera a gravação
+ * (as duas travam a reunião) e fica com a hora maior. Numa revisão nova (a dona
+ * editou durante a geração, H18), é um instante antes da última edição: o que a
+ * IA escreveu é gravado assim mesmo, como de outra versão, e a tela oferece
+ * "Refazer o resumo". Descartar e devolver a reserva fazia a fila refazer o
+ * trabalho a cada edição, sem gastar tentativa nem vaga do teto de IA: uma
+ * chamada paga jogada fora por edição, sem limite.
+ */
+export function horaDaVersao(agora: number, revisaoLida: number, atual: { revisao: number; editadaEm: number | null }): number {
+  if (Number(atual.revisao) === revisaoLida || atual.editadaEm === null) return agora;
+  return Math.min(agora, Number(atual.editadaEm) - 1);
+}
+
 /** A fase do resumo; true quando ele foi gravado (e o mapa vem em seguida). */
 async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
+  // A versão que a dona vê, editada ou não (H18), com a revisão: o resumo
+  // escrito sobre uma revisão anterior é gravado como de outra versão. E se ela
+  // está editada (a coluna da versão da IA preenchida, sem ler esse texto): o
+  // resumo grava a marca (transcript_edited), e a tela sabe se ele leu a versão
+  // da IA (server/resumo-guardado.ts).
   const [transcricao] = await db.select({
-    id: meetingTranscripts.id, texto: meetingTranscripts.transcript, segmentos: meetingTranscripts.segments, idioma: meetingTranscripts.language,
+    id: meetingTranscripts.id, revisao: meetingTranscripts.revision, texto: meetingTranscripts.transcript, segmentos: meetingTranscripts.segments, idioma: meetingTranscripts.language,
+    editada: transcricaoEstaEditada,
   }).from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
   if (!transcricao) {
     await registrarFalha(db, alvo, token, "SEM_TRANSCRICAO", true);
     return false;
   }
-  const idioma = idiomaDaReuniao(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // O resumo sai no idioma da transcrição: o escolhido ou, com "Detectar
+  // sozinho" (G16), o que mais aparece nela; qualquer um que a IA transcreve.
+  const idioma = idiomaFalado(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
   // O resumo refeito (H4d) leva à IA os itens que ficam, para ela não os
   // escrever de novo. No primeiro resumo não há item nenhum. O item da dona
   // que ela ignorou fica no resumo, recolhido, mas não vai à IA como
@@ -223,11 +299,41 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
   const itensQueFicam = itensAtuais.filter(item => itemQueFica(item) && item.status !== "ignored")
     .map(({ section, subject, text }) => ({ section, subject, text }));
 
+  // O pedido da dona (H4e): o modelo dela, o ajuste do tamanho que as
+  // respostas a "O resumo teve o tamanho certo?" acumularam e, com "a IA
+  // escolhe", a escolha pelo modelo Lite. A escolha que falha não derruba o
+  // resumo: ele sai no Geral, e a tela diz que a IA escolheu.
+  const contexto = await contextoDaGeracao(db, alvo.ownerId, alvo);
+  let modelo: ModeloDeResumo = modeloDeResumo(alvo.template) ?? MODELO_DE_RESUMO_PADRAO;
+  let modeloProprio = contexto.modeloProprio;
+  let escolhaDaIA: { template: ModeloDeResumo; customTemplateId: string | null } | null = null;
+  if (alvo.aiTemplate === "pending") {
+    const escolha = await escolhaPelaIA(transcricao.texto, contexto.proprios);
+    modelo = escolha.tipo === "pronto" ? escolha.modelo : MODELO_DE_RESUMO_PADRAO;
+    modeloProprio = escolha.tipo === "proprio" ? contexto.proprios.find(proprio => proprio.id === escolha.id) ?? null : null;
+    escolhaDaIA = { template: modelo, customTemplateId: modeloProprio?.id ?? null };
+  }
+
+  // A reunião juntada (H17): onde começa cada reunião depois da primeira,
+  // pelas partes com a marca de outra conversa. O resumo as separa e cobre
+  // todas (defeito 2 do teste manual T50, 23/11).
+  const partes = await db.select({ seq: meetingAudioSlices.seq, durationMs: meetingAudioSlices.durationMs, result: meetingAudioSlices.result })
+    .from(meetingAudioSlices)
+    .where(and(eq(meetingAudioSlices.meetingId, alvo.meetingId), eq(meetingAudioSlices.ownerId, alvo.ownerId)));
+  const iniciosDeReuniao = iniciosDasReunioesJuntadas(partes);
+
   let resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>;
   try {
     resumo = await gerarResumoDaReuniao({
+      iniciosDeReuniao,
       transcricao: transcricao.texto, segmentos: segmentosDoContrato(transcricao.segmentos), idioma,
-      modelo: modeloDeResumo(alvo.template) ?? MODELO_DE_RESUMO_PADRAO, itensQueFicam,
+      modelo, itensQueFicam,
+      preferencias: {
+        modeloProprio: modeloProprio ? { nome: modeloProprio.nome, instrucoes: modeloProprio.instrucoes } : null,
+        estilo: estiloDoResumo(alvo.style) ?? ESTILO_DO_RESUMO_PADRAO,
+        ajusteDoTamanho: contexto.ajusteDoTamanho,
+        instrucoesDoPedido: alvo.instructions,
+      },
     });
   } catch (erro) {
     // Resposta cortada no teto de saída se repetiria com a mesma entrada: é
@@ -245,7 +351,7 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
   const agora = Date.now();
   let resultado: "gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada";
   try {
-    resultado = await gravarResumo(db, alvo, token, transcricao, idioma, resumo, agora);
+    resultado = await gravarResumo(db, alvo, token, { id: transcricao.id, revisao: transcricao.revisao, editada: Number(transcricao.editada) === 1 }, idioma, resumo, agora, escolhaDaIA);
   } catch (erro) {
     // A IA já respondeu e o banco recusou (queda, deadlock): conta como falha
     // passageira, com espera, em vez de prender a linha até a reserva vencer.
@@ -258,12 +364,27 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
     return false;
   }
   if (resultado === "reuniao_fora" || resultado === "transcricao_trocada") {
-    console.warn(`[Resumo] descartado: ${resultado === "reuniao_fora" ? "a reunião saiu de 'ready'" : "a transcrição foi trocada"} durante a geração; a reserva volta à fila.`);
+    console.warn(`[Resumo] descartado: ${resultado === "reuniao_fora" ? "a reunião saiu de 'ready'" : "a transcrição foi trocada (reprocesso)"} durante a geração; a reserva volta à fila.`);
     await devolverReserva(db, alvo.id, token);
   } else if (resultado === "sem_reserva") {
     console.warn("[Resumo] descartado: a reserva não é mais desta rodada (reunião excluída ou reprocessada, ou outra rodada a retomou).");
   }
   return resultado === "gravou";
+}
+
+/**
+ * "A IA escolhe o modelo" (H4e): a escolha do modelo Lite, ou o Geral quando
+ * ela falha ou devolve um código que não é da lista. Só o código vai ao log.
+ */
+export async function escolhaPelaIA(transcricao: string, proprios: Parameters<typeof escolherModeloDoResumo>[0]["proprios"]): Promise<EscolhaDoModelo> {
+  try {
+    const escolha = await escolherModeloDoResumo({ transcricao, proprios });
+    if (escolha) return escolha;
+    console.warn("[Resumo] a escolha do modelo pela IA não veio da lista; fica o Geral.");
+  } catch (erro) {
+    console.warn("[Resumo] a escolha do modelo pela IA falhou; fica o Geral:", erro instanceof FalhaDaIA ? erro.codigo : erro instanceof Error ? erro.name : typeof erro);
+  }
+  return { tipo: "pronto", modelo: MODELO_DE_RESUMO_PADRAO };
 }
 
 /**
@@ -277,23 +398,35 @@ async function gerarUm(db: Banco, alvo: Alvo, token: string): Promise<boolean> {
  */
 async function gravarResumo(
   db: Banco, alvo: { id: string; meetingId: string; ownerId: string }, token: string,
-  transcricao: { id: string }, idioma: string, resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>, agora: number,
+  transcricao: { id: string; revisao: number; editada: boolean }, idioma: string, resumo: Awaited<ReturnType<typeof gerarResumoDaReuniao>>, agora: number,
+  escolhaDaIA: { template: ModeloDeResumo; customTemplateId: string | null } | null = null,
 ): Promise<"gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada"> {
   return db.transaction(async tx => {
     // A reunião travada até o fim: a exclusão (que marca 'deleted' antes de
     // apagar) espera esta transação, e o que ela gravar sai junto.
     const [reuniao] = await tx.select({ status: meetings.status }).from(meetings)
       .where(and(eq(meetings.id, alvo.meetingId), eq(meetings.ownerId, alvo.ownerId))).for("update");
-    const [ainda] = await tx.select({ id: meetingSummaries.id, mindMapStatus: meetingSummaries.mindMapStatus, mindMap: meetingSummaries.mindMap }).from(meetingSummaries)
+    const [ainda] = await tx.select({
+      id: meetingSummaries.id, mindMapStatus: meetingSummaries.mindMapStatus, mindMap: meetingSummaries.mindMap,
+      mindMapGeneratedAt: meetingSummaries.mindMapGeneratedAt, mindMapEdited: meetingSummaries.mindMapEdited,
+      suggestedTitle: meetingSummaries.suggestedTitle, suggestedTitleStatus: meetingSummaries.suggestedTitleStatus,
+    }).from(meetingSummaries)
       .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).for("update");
     // Sem a linha com o meu token: a reunião foi reprocessada ou excluída, ou a
     // reserva venceu e outra rodada a tomou.
     if (!ainda) return "sem_reserva";
     if (reuniao?.status !== "ready") return "reuniao_fora";
-    // A transcrição tem de ser a mesma que a IA leu.
-    const [atual] = await tx.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
+    // A transcrição tem de ser a mesma linha que a IA leu: a trocada (o
+    // reprocesso) descarta o resumo, e a reserva volta à fila. Na mesma linha
+    // com outra revisão (a dona editou no meio, H18), o resumo é gravado com a
+    // hora de antes da edição (horaDaVersao), e a tela o mostra como de outra
+    // versão, com "Refazer o resumo". A edição trava a reunião antes da
+    // transcrição, como aqui: a que chega depois desta leitura espera o fim
+    // desta transação e fica com a hora maior que a do resumo.
+    const [atual] = await tx.select({ id: meetingTranscripts.id, revisao: meetingTranscripts.revision, editadaEm: meetingTranscripts.editedAt }).from(meetingTranscripts)
       .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
-    if (atual?.id !== transcricao.id) return "transcricao_trocada";
+    if (!atual || atual.id !== transcricao.id) return "transcricao_trocada";
+    const geradoEm = horaDaVersao(agora, transcricao.revisao, { revisao: Number(atual.revisao), editadaEm: atual.editadaEm === null ? null : Number(atual.editadaEm) });
     // Os itens de agora, lidos sem trava, e os que saem apagados pela chave:
     // travar a faixa do resumo no índice prende também o vão vizinho, e duas
     // gravações de resumos vizinhos se travam uma à outra (deadlock). A linha
@@ -322,7 +455,10 @@ async function gravarResumo(
         eq(meetingSummaryItems.origin, "ai"), isNull(meetingSummaryItems.editedAt),
       ));
     }
-    const numeracao = numeracaoDoResumoRefeito(queFicam, resumo.itens);
+    // O ignorado da IA que sai e que a IA repete volta pendente, com a marca
+    // de que a dona o tinha ignorado (decisão 3 da PR #217; defeito do T29).
+    const ignoradosQueSaem = itensAtuais.filter(item => !itemQueFica(item) && item.status === "ignored");
+    const numeracao = numeracaoDoResumoRefeito(queFicam, resumo.itens, ignoradosQueSaem);
     for (const { id, position } of numeracao.queFicam) {
       if (queFicam.find(item => item.id === id)?.position === position) continue;
       await tx.update(meetingSummaryItems).set({ position })
@@ -334,19 +470,40 @@ async function gravarResumo(
         section: item.section, position: item.position, subject: item.subject, text: item.text, assignee: item.assignee, due: item.due,
         excerpt: item.excerpt, startSeconds: item.startSeconds, confidence: item.confidence.toFixed(3),
         status: "pending" as const, done: false, createdAt: agora, updatedAt: agora,
+        // O pendente com o estado de antes do Ignorar preenchido é o que a dona
+        // ignorou e a IA trouxe de volta (drizzle/schema.ts): a tela o avisa.
+        // A marca só vale enquanto o item está pendente.
+        statusBeforeIgnore: item.voltouDoIgnorado ? "pending" as const : null,
       })));
     }
     const r = await tx.update(meetingSummaries).set({
       status: "ready", transcriptId: transcricao.id, language: idioma, emoji: resumo.emoji, model: resumo.modelo,
-      version: sql`${meetingSummaries.version} + 1`, generatedAt: agora,
+      // O título que a IA sugere espera a dona (nada extraído por IA entra
+      // sozinho). O resumo refeito com o mesmo título não pede de novo o que
+      // ela já decidiu (sugestaoDoResumoNovo).
+      ...sugestaoDoResumoNovo(ainda, resumo.titulo ?? null),
+      version: sql`${meetingSummaries.version} + 1`, generatedAt: geradoEm,
+      // O modelo que a IA escolheu (H4e) fica gravado, e a tela diz que foi
+      // ela. A resposta a "O resumo teve o tamanho certo?" era da versão
+      // anterior: a nova começa sem ela.
+      ...(escolhaDaIA ? { template: escolhaDaIA.template, customTemplateId: escolhaDaIA.customTemplateId, aiTemplate: "chosen" as const } : {}),
+      lengthFeedback: null,
+      // A transcrição que a IA leu estava editada (H18)? É a da leitura do
+      // começo, como a revisão do horaDaVersao: a edição no meio da geração não
+      // muda o que a IA leu.
+      transcriptEdited: transcricao.editada,
       // A IA devolveu itens e a conferência tirou todos: fica registrado, e a
       // tela mostra o resumo vazio sem fingir que a reunião não teve conteúdo.
       lastError: !resumo.itens.length && resumo.recebidos ? "CONFERENCIA_TIROU_TUDO" : null,
       // A fase seguinte do mesmo trabalho (H10): o mapa entra na fila, do zero
       // e com as tentativas dele. O mapa pronto que ainda passa na conferência
       // fica: o resumo refeito em outro modelo (H4d) não muda a transcrição de
-      // que ele saiu.
-      ...(ainda.mindMapStatus === "ready" && conferirMapaMental(ainda.mindMap)
+      // que ele saiu. O mapa gravado antes de a dona editar a transcrição
+      // (H18) é de outra versão, e é refeito com o resumo. O mapa que a dona
+      // editou (H10b) fica como está, em qualquer estado: refazê-lo sozinho
+      // apagaria o trabalho dela, e ela pode pedir o "Refazer pela IA".
+      ...(conferirMapaMental(ainda.mindMapEdited)
+        || (ainda.mindMapStatus === "ready" && conferirMapaMental(ainda.mindMap) && !mapaDeOutraVersao(ainda.mindMapGeneratedAt, atual.editadaEm))
         ? {}
         : { mindMap: null, mindMapStatus: "pending" as const, mindMapGeneratedAt: null, mindMapError: null }),
       attempts: 0,
@@ -368,15 +525,20 @@ async function gravarResumo(
  * pedir de novo.
  */
 async function gerarMapa(db: Banco, alvo: Alvo, token: string): Promise<void> {
-  const [transcricao] = await db.select({ id: meetingTranscripts.id, texto: meetingTranscripts.transcript, idioma: meetingTranscripts.language })
+  const [transcricao] = await db.select({ id: meetingTranscripts.id, revisao: meetingTranscripts.revision, texto: meetingTranscripts.transcript, idioma: meetingTranscripts.language })
     .from(meetingTranscripts)
     .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
   if (!transcricao?.texto?.trim()) return registrarFalha(db, alvo, token, "SEM_TRANSCRICAO", true, "mapa");
-  const idioma = idiomaDaReuniao(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  const idioma = idiomaFalado(transcricao.idioma) ?? IDIOMA_DA_REUNIAO_PADRAO;
+  // O estilo que a dona pediu no "Refazer em outro estilo" (H10b); nulo é a
+  // visão geral da H10, e o pedido vai como sempre foi.
+  const [daLinha] = await db.select({ estilo: meetingSummaries.mindMapStyle }).from(meetingSummaries)
+    .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.ownerId, alvo.ownerId))).limit(1);
+  const estilo = daLinha?.estilo ?? null;
 
   let mapa: MapaMental | null;
   try {
-    mapa = await gerarMapaMental({ transcricao: transcricao.texto, idioma });
+    mapa = await gerarMapaMental({ transcricao: transcricao.texto, idioma, ...(estilo ? { estilo } : {}) });
   } catch (erro) {
     const definitiva = erro instanceof FalhaDaIA && erro.codigo === "RESPOSTA_CORTADA";
     console.error(`[Mapa] a geração falhou (${definitiva ? "sem nova tentativa" : "volta à fila"}):`, erro instanceof FalhaDaIA ? erro.codigo : erro instanceof Error ? erro.stack ?? descreverErroDeBanco(erro) : descreverErroDeBanco(erro));
@@ -399,7 +561,7 @@ async function gerarMapa(db: Banco, alvo: Alvo, token: string): Promise<void> {
     return;
   }
   if (resultado === "reuniao_fora" || resultado === "transcricao_trocada") {
-    console.warn(`[Mapa] descartado: ${resultado === "reuniao_fora" ? "a reunião saiu de 'ready'" : "a transcrição foi trocada"} durante a geração; a reserva volta à fila.`);
+    console.warn(`[Mapa] descartado: ${resultado === "reuniao_fora" ? "a reunião saiu de 'ready'" : "a transcrição foi trocada (reprocesso)"} durante a geração; a reserva volta à fila.`);
     await devolverReserva(db, alvo.id, token);
   } else if (resultado === "sem_reserva") {
     console.warn("[Mapa] descartado: a reserva não é mais desta rodada (reunião excluída ou reprocessada, ou outra rodada a retomou).");
@@ -412,7 +574,7 @@ async function gerarMapa(db: Banco, alvo: Alvo, token: string): Promise<void> {
  * transcrição que a IA leu.
  */
 async function gravarMapa(
-  db: Banco, alvo: Alvo, token: string, transcricao: { id: string }, mapa: MapaMental, agora: number,
+  db: Banco, alvo: Alvo, token: string, transcricao: { id: string; revisao: number }, mapa: MapaMental, agora: number,
 ): Promise<"gravou" | "sem_reserva" | "reuniao_fora" | "transcricao_trocada"> {
   return db.transaction(async tx => {
     const [reuniao] = await tx.select({ status: meetings.status }).from(meetings)
@@ -421,11 +583,23 @@ async function gravarMapa(
       .where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token))).for("update");
     if (!ainda) return "sem_reserva";
     if (reuniao?.status !== "ready") return "reuniao_fora";
-    const [atual] = await tx.select({ id: meetingTranscripts.id }).from(meetingTranscripts)
+    // A mesma linha da transcrição (a trocada, o reprocesso, volta à fila). Na
+    // revisão nova (a dona editou no meio, H18), o mapa é gravado com a hora de
+    // antes da edição, como o resumo: de outra versão, e o "Refazer o resumo"
+    // o refaz.
+    const [atual] = await tx.select({ id: meetingTranscripts.id, revisao: meetingTranscripts.revision, editadaEm: meetingTranscripts.editedAt }).from(meetingTranscripts)
       .where(and(eq(meetingTranscripts.meetingId, alvo.meetingId), eq(meetingTranscripts.ownerId, alvo.ownerId))).limit(1);
-    if (atual?.id !== transcricao.id) return "transcricao_trocada";
+    if (!atual || atual.id !== transcricao.id) return "transcricao_trocada";
+    const geradoEm = horaDaVersao(agora, transcricao.revisao, { revisao: Number(atual.revisao), editadaEm: atual.editadaEm === null ? null : Number(atual.editadaEm) });
     const r = await tx.update(meetingSummaries).set({
-      mindMap: mapa, mindMapStatus: "ready", mindMapGeneratedAt: agora, mindMapError: null,
+      mindMap: mapa, mindMapStatus: "ready", mindMapGeneratedAt: geradoEm, mindMapError: null,
+      // H10b: o mapa novo da IA é o que a dona pediu (o primeiro, o que tinha
+      // falhado ou o "Refazer em outro estilo", que ela confirmou sabendo que
+      // a edição sai). A edição de antes não vale sobre ele, e a revisão sobe:
+      // a aba que ainda edita o mapa velho é recusada.
+      mindMapEdited: null, mindMapEditedAt: null, mindMapRevision: sql`${meetingSummaries.mindMapRevision} + 1`,
+      // O mapa novo chegou: o estilo do mapa de antes não vale mais (ver mindMapPreviousStyle).
+      mindMapPreviousStyle: null,
       lockToken: null, lockedUntil: null, updatedAt: agora,
     }).where(and(eq(meetingSummaries.id, alvo.id), eq(meetingSummaries.lockToken, token), naFila("mapa")));
     return linhas(r) > 0 ? "gravou" : "sem_reserva";
@@ -470,6 +644,10 @@ export async function rodarUmaVez(escopo: Escopo = {}): Promise<void> {
   const alvo = await proximoTrabalho(db, agora, escopo);
   if (!alvo || parada) return;
   const resumoGravado = await executar(db, alvo, alvo.fase, agora);
+  // O e-mail automático do resumo (H22), desligado por padrão: só para a dona
+  // que o ligou, e só no primeiro resumo da reunião. Sem await: a Resend lenta
+  // não segura o mapa nem o próximo resumo. Nunca rejeita (o erro vai ao log).
+  if (resumoGravado) void envioAutomaticoDoResumo(alvo.ownerId, alvo.meetingId);
   if (resumoGravado && !parada) await executar(db, alvo, "mapa", Date.now());
 }
 
@@ -497,12 +675,18 @@ export function iniciarFilaDoResumo(intervaloMs = INTERVALO_DA_RODADA_MS) {
  * as reservas desta instância, sem gastar a tentativa, para o próximo processo
  * retomar na hora. O trabalho em curso é abandonado: a gravação dele confere o
  * token, que já não vale.
+ *
+ * Cada reserva volta pela chave da linha, com o token no WHERE. O UPDATE por
+ * `lock_token IN (...)` não tem índice para a coluna e varria os resumos na
+ * fila de todas as donas, travando cada um: a gravação de um resumo vizinho,
+ * que trava a linha dele e depois a move no índice, se travava com ele
+ * (deadlock no CI de 18/11).
  */
 export async function pararFilaDoResumo(): Promise<{ resumos: number }> {
   parada = true;
   clearTimeout(timer);
-  const tokens = Array.from(tokensVivos);
-  if (!tokens.length) return { resumos: 0 };
+  const reservas = Array.from(tokensVivos);
+  if (!reservas.length) return { resumos: 0 };
   let db: Banco;
   try {
     db = await exigirDb();
@@ -511,10 +695,14 @@ export async function pararFilaDoResumo(): Promise<{ resumos: number }> {
     return { resumos: 0 };
   }
   // As duas fases: o resumo pendente e o mapa pendente de um resumo pronto.
-  const r = await db.update(meetingSummaries).set({ lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetingSummaries.attempts} - 1, 0)` })
-    .where(and(inArray(meetingSummaries.lockToken, tokens), or(naFila("resumo"), naFila("mapa"))));
+  let resumos = 0;
+  for (const [token, id] of reservas) {
+    const r = await db.update(meetingSummaries).set({ lockToken: null, lockedUntil: null, attempts: sql`greatest(${meetingSummaries.attempts} - 1, 0)` })
+      .where(and(eq(meetingSummaries.id, id), eq(meetingSummaries.lockToken, token), or(naFila("resumo"), naFila("mapa"))));
+    resumos += linhas(r);
+  }
   tokensVivos.clear();
-  return { resumos: linhas(r) };
+  return { resumos };
 }
 
 /** Só para os testes: a fila volta a aceitar rodadas. */

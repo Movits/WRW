@@ -7,6 +7,9 @@ import { exigirDb } from "../db";
 import { ehErroDeBancoIndisponivel } from "../banco-indisponivel";
 import { exigirTextoSemContato } from "../bloqueio-de-contato";
 import { users } from "../../drizzle/schema";
+import { veAsConexoesSugeridas } from "@shared/qualificacao-do-perfil";
+// U3: a frase mora em shared/const.ts para a tela a traduzir (client/src/lib/mensagem-de-erro.ts).
+import { MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO } from "@shared/const";
 
 // ============================================================
 // CONEXÕES ENTRE USUÁRIOS
@@ -114,6 +117,14 @@ export const connectionsRouter = router({
   send: protectedProcedure
     .input(z.object({ matchId: z.number().int() }))
     .mutation(async ({ ctx, input }) => {
+      // U3: a Bronze não vê os cartões (matches.list sai vazio para ela), e o
+      // interesse por um cartão que ela não vê também espera o cadastro
+      // completo — senão um `matchId` adivinhado furaria a trava pela API e
+      // revelaria o nome com o aceite. Antes do banco: nada é lido nem gravado.
+      // O pedido que ela RECEBE continua respondível (`respond`), como antes.
+      if (!veAsConexoesSugeridas(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: MENSAGEM_INTERESSE_ESPERA_O_CADASTRO_COMPLETO });
+      }
       const { resolverAlvoDoMatch, sendConnectionRequest } = await import("../db");
       const { createAuditLog } = await import("../security");
       const alvo = await resolverAlvoDoMatch(ctx.user.id, input.matchId);

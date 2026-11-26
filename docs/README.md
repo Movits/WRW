@@ -10,6 +10,9 @@ estão no [CLAUDE.md](../CLAUDE.md). Cada pasta de código (`client/`, `server/`
 - [guia-de-entrada.md](./guia-de-entrada.md): como trabalhamos, acessos, preparar a
   máquina, banco local, `.env`, o Claude neste repositório e os erros comuns.
 
+- [medir-o-match.md](./medir-o-match.md): a rede de teste com armadilhas (N8) e como ler a
+  precisão e a cobertura de cada motor de match.
+
 ## Desenho do sistema
 
 `arquitetura/` é a referência de projeto, não o retrato do código: descreve para onde o
@@ -34,6 +37,15 @@ diverge do código, vale o código.
   gravador sem teto de tempo, o link `/gravar`, as passkeys, as funções de resumo e a
   agenda, em ondas de PRs, com os contratos entre elas (plano de 30/10/2026, atualizado
   em 10/11, 12/11 e 15/11).
+- [arquitetura/entidades.md](./arquitetura/entidades.md): a base das associações
+  (DOC-4): a entidade como conta, o ID interno de cada associado, o CNPJ só em HMAC e
+  cifrado, a CNAE só como oferta, o convênio, a importação de 30 mil cadastros e as
+  pendências de LGPD do Dr. Ronei (decisões de 22/11/2026; o código é a N1).
+- [arquitetura/sala-de-video.md](./arquitetura/sala-de-video.md): a sala de vídeo dentro
+  do app, estudada e decidida pelo Roberto em 24/11/2026 (Daily em São Paulo, depois da
+  R1b): opções, custo por hora de reunião e o orçamento, o que muda no Render, gravação
+  na fila de partes, quem entra (com visitante sem conta), LGPD, app das lojas e PRs.
+  Nada dele está no código ainda.
 
 ## Operação
 

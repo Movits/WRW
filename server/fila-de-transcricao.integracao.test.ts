@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
+import { apagarPelaChave } from "./test/apagar-pela-chave";
 
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
@@ -18,12 +19,13 @@ const invokeLLM = vi.hoisted(() => vi.fn());
 vi.mock("./_core/llm", () => ({ invokeLLM: (...a: unknown[]) => invokeLLM(...a) }));
 
 const { getDb } = await import("./db");
-const { meetingAudioSlices, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
+const { meetingAudioSlices, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users, voiceProfiles } = await import("../drizzle/schema");
 const fila = await import("./fila-de-transcricao");
 const { ObjetoAusenteNoStorageError } = await import("./storage");
-const { GeminiIndisponivelError } = await import("./gemini");
-const { TemposForaDaParteError } = await import("./transcricao-de-fatia");
+const { GeminiIndisponivelError, GeminiRecusouChamadaError } = await import("./gemini");
+const { TemposForaDaParteError, MARCA_DE_OUTRA_REUNIAO } = await import("./transcricao-de-fatia");
 const { marcarReunioesInterrompidas, iniciarReprocessamento, REGRA_DOS_ROTULOS_NA_EXTRACAO, ReprocessamentoRecusado } = await import("./meeting-service");
+const { terminaComALinhaPresa: comALinhaPresa } = await import("./test/linha-presa");
 
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 // A rodada só olha as reuniões desta dona: o Vitest roda os arquivos em
@@ -43,14 +45,21 @@ async function reuniao(status: "recording" | "uploading", esperadas: number | nu
   return id;
 }
 
+const linhaDaParte = (meetingId: string, seq: number, extra: Record<string, unknown> = {}) => ({
+  id: crypto.randomUUID(), meetingId, ownerId: DONA, seq, status: "received" as const, storageKey: `meetings/${DONA}/${meetingId}/partes/${seq}.m4a`,
+  storageUrl: `/manus-storage/meetings/${DONA}/${meetingId}/partes/${seq}.m4a`, mimeType: "audio/mp4", sizeBytes: 10,
+  sha256: crypto.randomUUID().replace(/-/g, "").padEnd(64, "0"), durationMs: 600_000, expiresAt: AGORA() + 86_400_000,
+  createdAt: AGORA() + seq, updatedAt: AGORA(), ...extra,
+});
+
 async function parte(meetingId: string, seq: number, extra: Record<string, unknown> = {}) {
-  await (await db()).insert(meetingAudioSlices).values({
-    id: crypto.randomUUID(), meetingId, ownerId: DONA, seq, status: "received", storageKey: `meetings/${DONA}/${meetingId}/partes/${seq}.m4a`,
-    storageUrl: `/manus-storage/meetings/${DONA}/${meetingId}/partes/${seq}.m4a`, mimeType: "audio/mp4", sizeBytes: 10,
-    sha256: crypto.randomUUID().replace(/-/g, "").padEnd(64, "0"), durationMs: 600_000, expiresAt: AGORA() + 86_400_000,
-    createdAt: AGORA() + seq, updatedAt: AGORA(), ...extra,
-  });
+  await (await db()).insert(meetingAudioSlices).values(linhaDaParte(meetingId, seq, extra));
 }
+
+type Transacao = import("./test/linha-presa").Transacao;
+/** O trabalho terminou com a linha de `segurar` presa por outra transação, sem commit (server/test/linha-presa.ts)? */
+const terminaComALinhaPresa = async (segurar: (tx: Transacao) => Promise<unknown>, trabalho: () => Promise<unknown>) =>
+  comALinhaPresa(await db(), segurar, trabalho);
 
 const partesDe = async (meetingId: string) => (await db()).select().from(meetingAudioSlices).where(eq(meetingAudioSlices.meetingId, meetingId)).orderBy(meetingAudioSlices.seq);
 const reuniaoDe = async (meetingId: string) => (await (await db()).select().from(meetings).where(eq(meetings.id, meetingId)))[0];
@@ -61,20 +70,22 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     const banco = await getDb();
     if (!banco) return;
     // A reunião que fica pronta ganha o pedido do resumo guardado (H4c).
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, DONA));
-    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, DONA));
-    await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-    await banco.delete(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, DONA));
-    await banco.delete(meetings).where(eq(meetings.ownerId, DONA));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.ownerId, DONA));
+    await apagarPelaChave(banco, meetingSummaries, eq(meetingSummaries.ownerId, DONA));
+    await apagarPelaChave(banco, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+    await apagarPelaChave(banco, meetingAudioSlices, eq(meetingAudioSlices.ownerId, DONA));
+    await apagarPelaChave(banco, meetings, eq(meetings.ownerId, DONA));
+    await banco.delete(voiceProfiles).where(eq(voiceProfiles.ownerId, DONA));
     await banco.delete(users).where(eq(users.openId, DONA));
   });
   beforeEach(async () => {
     const banco = await db();
-    await banco.delete(meetingSummaryItems).where(eq(meetingSummaryItems.ownerId, DONA));
-    await banco.delete(meetingSummaries).where(eq(meetingSummaries.ownerId, DONA));
-    await banco.delete(meetingTranscripts).where(eq(meetingTranscripts.ownerId, DONA));
-    await banco.delete(meetingAudioSlices).where(eq(meetingAudioSlices.ownerId, DONA));
-    await banco.delete(meetings).where(eq(meetings.ownerId, DONA));
+    await apagarPelaChave(banco, meetingSummaryItems, eq(meetingSummaryItems.ownerId, DONA));
+    await apagarPelaChave(banco, meetingSummaries, eq(meetingSummaries.ownerId, DONA));
+    await apagarPelaChave(banco, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
+    await apagarPelaChave(banco, meetingAudioSlices, eq(meetingAudioSlices.ownerId, DONA));
+    await apagarPelaChave(banco, meetings, eq(meetings.ownerId, DONA));
+    await banco.delete(voiceProfiles).where(eq(voiceProfiles.ownerId, DONA));
     fila.religarParaTestes();
     transcreverFatia.mockReset();
     storageGetBytes.mockReset();
@@ -83,6 +94,164 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     invokeLLM.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ entities: [], contacts: [] }) } }] });
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  // ── O perfil de voz da dona (H3d) ──────────────────────────────────────────
+  const AMOSTRA = Buffer.from("amostra-da-voz-da-dona");
+  async function perfilDeVoz() {
+    await (await db()).insert(voiceProfiles).values({
+      id: crypto.randomUUID(), ownerId: DONA, storageKey: `perfis-de-voz/${DONA}/amostra.webm`, mimeType: "audio/webm", bytes: AMOSTRA.length,
+      durationMs: 30_000, createdAt: AGORA(), updatedAt: AGORA(),
+    });
+    storageGetBytes.mockImplementation(async (chave: string) => (chave.startsWith("perfis-de-voz/") ? AMOSTRA : Buffer.from("audio")));
+  }
+
+  it("H3d: com o perfil de voz, cada parte leva a amostra, e a montagem liga a voz da dona à conta dela", async () => {
+    await perfilDeVoz();
+    const id = await reuniao("uploading", 2);
+    await parte(id, 0);
+    await parte(id, 1);
+    transcreverFatia.mockImplementation(async ({ inicioSegundos }: { inicioSegundos: number }) => ({
+      segmentos: [
+        { inicio: inicioSegundos + 1, fim: inicioSegundos + 2, falante: "F1", texto: "fala da dona" },
+        { inicio: inicioSegundos + 3, fim: inicioSegundos + 4, falante: "F2", texto: "fala de outra pessoa" },
+      ], idioma: "pt-BR", modelo: "gemini-teste",
+    }));
+    await rodar();
+    await rodar();
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(2);
+    for (const [pedido] of transcreverFatia.mock.calls) expect(pedido.amostraDaVoz).toEqual({ audio: AMOSTRA, mimeType: "audio/webm" });
+    expect((await partesDe(id)).every(p => (p.result as { vozDaDona?: boolean }).vozDaDona === true)).toBe(true);
+    const r = await reuniaoDe(id);
+    expect(r.status).toBe("ready");
+    expect(r.speakerAccounts).toEqual({ F1: "owner" });
+  });
+
+  it("H3d: sem perfil, a parte vai sem a amostra e nenhuma voz é ligada", async () => {
+    const id = await reuniao("uploading", 1);
+    await parte(id, 0);
+    transcreverFatia.mockResolvedValue({ segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "fala" }], idioma: "pt-BR", modelo: "gemini-teste" });
+    await rodar();
+    await rodar();
+    expect(transcreverFatia.mock.calls[0][0].amostraDaVoz).toBeUndefined();
+    expect((await reuniaoDe(id)).speakerAccounts).toBeNull();
+  });
+
+  it("H3d: o perfil gravado no meio da reunião não entra nas partes seguintes (o F1 de antes pode ser outra pessoa)", async () => {
+    const id = await reuniao("recording", null);
+    await parte(id, 0);
+    transcreverFatia.mockResolvedValue({ segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "fala" }], idioma: "pt-BR", modelo: "gemini-teste" });
+    await rodar();
+    await perfilDeVoz();
+    await parte(id, 1);
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(2);
+    expect(transcreverFatia.mock.calls[1][0].amostraDaVoz).toBeUndefined();
+  });
+
+  it("H3d: a IA recusou o pedido com a amostra: a parte vai de novo, na mesma tentativa, sem ela, e fica sem a marca", async () => {
+    await perfilDeVoz();
+    const id = await reuniao("uploading", 1);
+    await parte(id, 0);
+    transcreverFatia.mockImplementation(async ({ amostraDaVoz }: { amostraDaVoz?: unknown }) => {
+      if (amostraDaVoz) throw new GeminiRecusouChamadaError(400, "a amostra veio corrompida");
+      return { segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "fala" }], idioma: "pt-BR", modelo: "gemini-teste" };
+    });
+    await rodar();
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(2);
+    expect(transcreverFatia.mock.calls[0][0].amostraDaVoz).toBeDefined();
+    expect(transcreverFatia.mock.calls[1][0].amostraDaVoz).toBeUndefined();
+    const [p0] = await partesDe(id);
+    expect(p0).toMatchObject({ status: "transcribed", attempts: 1, lastError: null });
+    expect((p0.result as { vozDaDona?: boolean }).vozDaDona).toBeUndefined();
+    const r = await reuniaoDe(id);
+    expect(r.status).toBe("ready");
+    // Sem a marca, o F1 não é ligado à dona.
+    expect(r.speakerAccounts).toBeNull();
+  });
+
+  it("H3d: a recusa SEM a amostra continua definitiva (nada de segunda chamada)", async () => {
+    const id = await reuniao("uploading", 1);
+    await parte(id, 0);
+    transcreverFatia.mockRejectedValue(new GeminiRecusouChamadaError(400));
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(1);
+    expect((await partesDe(id))[0]).toMatchObject({ status: "failed", lastError: "IA_RECUSOU" });
+  });
+
+  it("H3d: a amostra que sumiu do bucket não derruba a parte: ela vai sem a amostra", async () => {
+    await perfilDeVoz();
+    storageGetBytes.mockImplementation(async (chave: string) => {
+      if (chave.startsWith("perfis-de-voz/")) throw new ObjetoAusenteNoStorageError(chave);
+      return Buffer.from("audio");
+    });
+    const id = await reuniao("uploading", 1);
+    await parte(id, 0);
+    transcreverFatia.mockResolvedValue({ segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "fala" }], idioma: "pt-BR", modelo: "gemini-teste" });
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(1);
+    expect(transcreverFatia.mock.calls[0][0].amostraDaVoz).toBeUndefined();
+    const [p0] = await partesDe(id);
+    expect(p0.status).toBe("transcribed");
+    expect((p0.result as { vozDaDona?: boolean }).vozDaDona).toBeUndefined();
+  });
+
+  it("H3d: na reunião juntada que retranscreve, com todas as partes de antes marcadas, a dona fica no F1 e as outras vozes vão para depois das usadas", async () => {
+    await perfilDeVoz();
+    const id = await reuniao("uploading", 2);
+    await parte(id, 0, {
+      status: "transcribed", offsetMs: 0,
+      result: { vozDaDona: true, segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "dona na primeira" }, { inicio: 3, fim: 4, falante: "F2", texto: "outra na primeira" }], contexto: { falantes: ["F1", "F2"], ultimasFalas: [] } },
+    });
+    await parte(id, 1, { result: { [MARCA_DE_OUTRA_REUNIAO]: true } });
+    transcreverFatia.mockResolvedValue({
+      segmentos: [{ inicio: 601, fim: 602, falante: "F1", texto: "dona na segunda" }, { inicio: 603, fim: 604, falante: "F2", texto: "terceira pessoa" }],
+      idioma: "pt-BR", modelo: "gemini-teste",
+    });
+    await rodar();
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(1);
+    const pedido = transcreverFatia.mock.calls[0][0];
+    expect(pedido.amostraDaVoz).toBeDefined();
+    expect(pedido.anterior).toBeUndefined();
+    const [, p1] = await partesDe(id);
+    // maiorUsado 2: o F1 fica (a dona), o F2 da IA vai a F3 (deslocamento 2 - 1).
+    expect((p1.result as { segmentos: Array<{ falante: string }> }).segmentos.map(s => s.falante)).toEqual(["F1", "F3"]);
+    expect((p1.result as { vozDaDona?: boolean }).vozDaDona).toBe(true);
+    expect((await reuniaoDe(id)).speakerAccounts).toEqual({ F1: "owner" });
+  });
+
+  it("H3d: na reunião juntada que retranscreve, com uma parte de antes SEM a marca, a amostra não vai, tudo desloca e o F1 não é ligado", async () => {
+    await perfilDeVoz();
+    const id = await reuniao("uploading", 2);
+    await parte(id, 0, {
+      status: "transcribed", offsetMs: 0,
+      result: { segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "alguém na primeira" }], contexto: { falantes: ["F1"], ultimasFalas: [] } },
+    });
+    await parte(id, 1, { result: { [MARCA_DE_OUTRA_REUNIAO]: true } });
+    transcreverFatia.mockResolvedValue({
+      segmentos: [{ inicio: 601, fim: 602, falante: "F1", texto: "alguém na segunda" }], idioma: "pt-BR", modelo: "gemini-teste",
+    });
+    await rodar();
+    await rodar();
+    expect(transcreverFatia.mock.calls[0][0].amostraDaVoz).toBeUndefined();
+    const [, p1] = await partesDe(id);
+    expect((p1.result as { segmentos: Array<{ falante: string }> }).segmentos.map(s => s.falante)).toEqual(["F2"]);
+    expect((await reuniaoDe(id)).speakerAccounts).toBeNull();
+  });
+
+  it("H3d: a montagem não liga o F1 a que a dona deu nome livre (a junção zera as contas e mantém os nomes)", async () => {
+    const id = await reuniao("uploading", 1, { speakerNames: { F1: "Ana" } });
+    await parte(id, 0, {
+      status: "transcribed", offsetMs: 0,
+      result: { vozDaDona: true, segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "fala" }] },
+    });
+    await rodar();
+    const r = await reuniaoDe(id);
+    expect(r.status).toBe("ready");
+    expect(r.speakerAccounts).toBeNull();
   });
 
   it("transcreve na ordem: a parte 1 espera a 0, e leva o contexto e o início dela", async () => {
@@ -137,6 +306,35 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     // transcrição montada: a fila do resumo o gera em segundo plano (H4c).
     const resumos = await (await db()).select().from(meetingSummaries).where(eq(meetingSummaries.meetingId, id));
     expect(resumos).toEqual([expect.objectContaining({ ownerId: DONA, status: "pending", transcriptId: transcricao.id, attempts: 0, lockToken: null })]);
+  });
+
+  it("G16: com \"Detectar sozinho\", a parte vai à IA como \"auto\" e a transcrição montada fica com o idioma que mais aparece, com o de cada fala", async () => {
+    const id = await reuniao("recording", null, { language: "auto" });
+    await parte(id, 0);
+    transcreverFatia.mockResolvedValue({ segmentos: [{ inicio: 1, fim: 100, falante: "F1", texto: "Good morning, let's review the contract.", idioma: "en" }], idioma: "auto", modelo: "gemini-teste" });
+    await rodar();
+    expect(transcreverFatia.mock.calls[0][0]).toMatchObject({ idioma: "auto" });
+    await (await db()).update(meetings).set({ status: "uploading", expectedSlices: 2 }).where(eq(meetings.id, id));
+    await parte(id, 1, { status: "transcribed", offsetMs: 600_000, result: { segmentos: [
+      { inicio: 601, fim: 640, falante: "F2", texto: "Então combinado, eu mando hoje.", idioma: "pt-BR" },
+    ] } });
+    await rodar();
+    expect(await reuniaoDe(id)).toMatchObject({ status: "ready", language: "auto" });
+    const [transcricao] = await (await db()).select().from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, id));
+    // 99 s em inglês contra 39 s em português: o resumo sai em inglês.
+    expect(transcricao.language).toBe("en");
+    expect((transcricao.segments as Array<{ idioma?: string }>).map(segmento => segmento.idioma)).toEqual(["en", "pt-BR"]);
+  });
+
+  it("G16: com \"Detectar sozinho\" e nenhum idioma reconhecido, a transcrição fica com o padrão; com o idioma escolhido, com ele", async () => {
+    const auto = await reuniao("uploading", 1, { language: "auto" });
+    await parte(auto, 0, { status: "transcribed", offsetMs: 0, result: { segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "Oi." }] } });
+    const italiano = await reuniao("uploading", 1, { language: "it" });
+    await parte(italiano, 0, { status: "transcribed", offsetMs: 0, result: { segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "Ciao.", idioma: "en" }] } });
+    await rodar();
+    const idiomaDe = async (meetingId: string) => (await (await db()).select().from(meetingTranscripts).where(eq(meetingTranscripts.meetingId, meetingId)))[0]?.language;
+    expect(await idiomaDe(auto)).toBe("pt-BR");
+    expect(await idiomaDe(italiano)).toBe("it");
   });
 
   it("áudio que sumiu do bucket é falha definitiva: a parte vira lacuna, e a reunião monta com o que chegou", async () => {
@@ -274,12 +472,29 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     for (const id of ids) await parte(id, 0);
     let simultaneas = 0;
     let pico = 0;
+    // A primeira chamada da rodada só termina quando a segunda já entrou, sem
+    // prazo fixo: com os 30 ms de antes, a primeira terminava antes de a
+    // segunda começar quando outro CI rodava na mesma máquina ("expected 1 to
+    // be 2", 18/11). Se a fila deixasse uma só, a primeira esperaria a segunda
+    // para sempre e o teste venceria o prazo, em vez de passar.
+    let abrir = () => {};
+    let segundaEntrou = Promise.resolve();
     transcreverFatia.mockImplementation(async () => {
+      if (simultaneas === 0) segundaEntrou = new Promise<void>(resolve => { abrir = resolve; });
       simultaneas += 1;
       pico = Math.max(pico, simultaneas);
-      await new Promise(resolve => setTimeout(resolve, 30));
+      if (simultaneas === 2) abrir();
+      await segundaEntrou;
       simultaneas -= 1;
       return { segmentos: [], idioma: "pt-BR", modelo: "m" };
+    });
+    // A segunda leitura do áudio de cada rodada demora, como com a máquina
+    // carregada: com o prazo fixo de antes, este teste falhava sempre assim.
+    let leituras = 0;
+    storageGetBytes.mockImplementation(async () => {
+      leituras += 1;
+      if (leituras % 2 === 0) await new Promise(resolve => setTimeout(resolve, 100));
+      return Buffer.from("audio");
     });
     // Duas por rodada (as vagas de IA), e nunca mais de duas ao mesmo tempo.
     await rodar();
@@ -338,6 +553,42 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     expect(transcreverFatia).not.toHaveBeenCalled();
   });
 
+  // Os três abaixo provam que as varreduras da fila travam só pela chave das
+  // linhas delas. Os arquivos de integração rodam em paralelo no mesmo banco, e
+  // os UPDATEs por intervalo do índice travavam partes e reuniões de outras
+  // reuniões e donas (deadlock da desistência das partes no laço de 19/11).
+  it("a desistência das partes esgotadas vai pela chave: não espera pela parte que outra transação acabou de criar", async () => {
+    const id = await reuniao("recording", null);
+    await parte(id, 0, { attempts: fila.TENTATIVAS_POR_PARTE });
+    const outra = await reuniao("recording", null);
+    expect(await terminaComALinhaPresa(tx => tx.insert(meetingAudioSlices).values(linhaDaParte(outra, 0)), rodar)).toBe(true);
+    expect((await partesDe(id))[0]).toMatchObject({ status: "failed", lastError: "TENTATIVAS_ESGOTADAS" });
+    expect(transcreverFatia).not.toHaveBeenCalled();
+  });
+
+  it("a montagem presa volta pela chave: não espera pela reunião em montagem que outra transação acabou de criar", async () => {
+    const presa = await reuniao("uploading", null, { status: "processing", lockToken: "processo-morto".padEnd(36, "x"), lockedUntil: AGORA() - 1, attempts: 1 });
+    const outra = {
+      id: crypto.randomUUID(), ownerId: DONA, title: "Outra em montagem", status: "processing" as const, consentGranted: true, audioPipeline: "slices" as const,
+      lockedUntil: AGORA() - 1, attempts: 1, createdAt: AGORA(), updatedAt: AGORA(),
+    };
+    expect(await terminaComALinhaPresa(tx => tx.insert(meetings).values(outra), rodar)).toBe(true);
+    expect(await reuniaoDe(presa)).toMatchObject({ status: "uploading", lockToken: null, lockedUntil: null });
+    // A da outra transação foi desfeita, e nada dela ficou.
+    expect(await reuniaoDe(outra.id)).toBeUndefined();
+  });
+
+  it("o desligamento devolve as reservas pela chave: não espera pela parte que outra transação acabou de criar", async () => {
+    const id = await reuniao("recording", null);
+    await parte(id, 0, { lockToken: fila._paraTestes.novoToken(), lockedUntil: AGORA() + 600_000, attempts: 1 });
+    const outra = await reuniao("recording", null);
+    const reservadaPorOutra = linhaDaParte(outra, 0, { lockToken: crypto.randomUUID(), lockedUntil: AGORA() + 600_000, attempts: 1 });
+    let devolvidas: unknown;
+    expect(await terminaComALinhaPresa(tx => tx.insert(meetingAudioSlices).values(reservadaPorOutra), async () => { devolvidas = await fila.pararFila(); })).toBe(true);
+    expect(devolvidas).toEqual({ partes: 1, reunioes: 0 });
+    expect((await partesDe(id))[0]).toMatchObject({ lockToken: null, lockedUntil: null, attempts: 0, status: "received" });
+  });
+
   it("montagem presa (o processo caiu sem SIGTERM e a reserva venceu) volta a 'uploading' e é retomada", async () => {
     const id = await reuniao("uploading", 1, { status: "processing", lockToken: "processo-morto".padEnd(36, "x"), lockedUntil: AGORA() - 1 });
     await parte(id, 0, { status: "transcribed", offsetMs: 0, result: { segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "Retomada." }] } });
@@ -350,5 +601,35 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     await marcarReunioesInterrompidas();
     expect(await reuniaoDe(id)).toMatchObject({ status: "processing" });
     await (await db()).update(meetings).set({ status: "failed" }).where(and(eq(meetings.id, id), eq(meetings.ownerId, DONA)));
+  });
+
+  it("a reunião na lixeira (H7d) fica fora da fila: a parte dela não vai à IA e a reunião não é montada; restaurada, a fila a retoma", async () => {
+    const naLixeira = AGORA();
+    // A parte que chegou (a retomada do aparelho manda a parte atrasada mesmo
+    // com a reunião na lixeira) e a reunião já toda transcrita, à espera da montagem.
+    const comParte = await reuniao("uploading", 1, { trashedAt: naLixeira });
+    await parte(comParte, 0);
+    const paraMontar = await reuniao("uploading", 1, { trashedAt: naLixeira });
+    await parte(paraMontar, 0, { status: "transcribed", offsetMs: 0, result: { segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "Fechado o frete." }] } });
+    transcreverFatia.mockResolvedValue({ segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "Bom dia." }], idioma: "pt-BR", modelo: "gemini-teste" });
+
+    await rodar();
+    expect(transcreverFatia).not.toHaveBeenCalled();
+    expect(invokeLLM).not.toHaveBeenCalled();
+    expect((await partesDe(comParte))[0]).toMatchObject({ status: "received", attempts: 0, lockToken: null });
+    expect(await reuniaoDe(paraMontar)).toMatchObject({ status: "uploading", attempts: 0, lockToken: null });
+
+    // A tomada confere a lixeira de novo: a reunião que foi para lá entre a
+    // seleção e a tomada não é tomada (a seleção acima já a deixou de fora).
+    await fila._paraTestes.montarUmaReuniao(await db(), { id: paraMontar, ownerId: DONA, esperadas: 1 });
+    expect(invokeLLM).not.toHaveBeenCalled();
+    expect(await reuniaoDe(paraMontar)).toMatchObject({ status: "uploading", attempts: 0, lockToken: null });
+
+    // Restauradas, a fila transcreve a parte e monta a reunião.
+    await (await db()).update(meetings).set({ trashedAt: null }).where(and(eq(meetings.ownerId, DONA), inArray(meetings.id, [comParte, paraMontar])));
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(1);
+    expect((await partesDe(comParte))[0]).toMatchObject({ status: "transcribed" });
+    expect(await reuniaoDe(paraMontar)).toMatchObject({ status: "ready" });
   });
 });

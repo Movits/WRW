@@ -228,29 +228,44 @@ describe("deleteContext — a posse decide antes de qualquer outra escrita (reve
   // NOT_FOUND com os anexos já perdidos.
   beforeEach(() => { estado.consultas = []; estado.respostas = []; });
 
+  // Desde a H7c tudo vai numa transação: o cliente falso vê o begin e o commit
+  // (cada um consome uma resposta da fila), e o que fica entre os dois.
+  const semTransacao = () => estado.consultas.filter(c => c.sql !== "begin" && c.sql !== "commit" && c.sql !== "rollback");
+
   it("contexto que não é dela (catálogo): o PRIMEIRO SQL é o delete em contexts com id, dona e is_custom; 0 linhas → false e context_media intocada", async () => {
-    estado.respostas = [{ affectedRows: 0 }];
+    estado.respostas = [[], { affectedRows: 0 }, []];
     const ok = await deleteContext("dona-1", "ctx-catalogo");
 
     expect(ok).toBe(false);
-    expect(estado.consultas).toHaveLength(1);
-    expect(estado.consultas[0].sql).toBe(
+    expect(estado.consultas.map(c => c.sql)[0]).toBe("begin");
+    expect(semTransacao()).toHaveLength(1);
+    expect(semTransacao()[0].sql).toBe(
       "delete from `contexts` where (`contexts`.`id` = ? and `contexts`.`owner_id` = ? and `contexts`.`is_custom` = ?)",
     );
-    expect(estado.consultas[0].params).toEqual(["ctx-catalogo", "dona-1", true]);
+    expect(semTransacao()[0].params).toEqual(["ctx-catalogo", "dona-1", true]);
     expect(estado.consultas.some(c => c.sql.startsWith("delete from `context_media`"))).toBe(false);
+    expect(estado.consultas.some(c => c.sql.startsWith("update `meetings`"))).toBe(false);
   });
 
-  it("contexto dela: apaga o contexto e SÓ ENTÃO os registros de anexo, ambos com a dona no WHERE", async () => {
-    estado.respostas = [{ affectedRows: 1 }, { affectedRows: 2 }];
+  it("contexto dela: apaga o contexto e SÓ ENTÃO os registros de anexo e o ponteiro das reuniões dela, tudo com a dona no WHERE e numa transação", async () => {
+    estado.respostas = [[], { affectedRows: 1 }, { affectedRows: 2 }, { affectedRows: 3 }, []];
     const ok = await deleteContext("dona-1", "ctx-1");
 
     expect(ok).toBe(true);
-    expect(estado.consultas).toHaveLength(2);
-    expect(estado.consultas[0].sql).toMatch(/^delete from `contexts` /);
-    expect(estado.consultas[1].sql).toBe(
+    expect(estado.consultas.map(c => c.sql)[0]).toBe("begin");
+    expect(estado.consultas.map(c => c.sql).at(-1)).toBe("commit");
+    const escritas = semTransacao();
+    expect(escritas).toHaveLength(3);
+    expect(escritas[0].sql).toMatch(/^delete from `contexts` /);
+    expect(escritas[1].sql).toBe(
       "delete from `context_media` where (`context_media`.`context_id` = ? and `context_media`.`owner_id` = ?)",
     );
-    expect(estado.consultas[1].params).toEqual(["ctx-1", "dona-1"]);
+    expect(escritas[1].params).toEqual(["ctx-1", "dona-1"]);
+    // H7c: a reunião da dona fica, sem o contexto excluído (e o updated_at,
+    // que é a ficha de quem a processa, não muda).
+    expect(escritas[2].sql).toBe(
+      "update `meetings` set `context_id` = ? where (`meetings`.`owner_id` = ? and `meetings`.`context_id` = ?)",
+    );
+    expect(escritas[2].params).toEqual([null, "dona-1", "ctx-1"]);
   });
 });

@@ -2,49 +2,179 @@ import crypto from "crypto";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
+import { CONTA_DA_DONA, FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
 import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
-import { IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO, idiomaDaReuniao } from "@shared/idioma-da-reuniao";
+import { VERSOES_DO_AVISO_DO_DOCUMENTO } from "@shared/aviso-do-documento";
+import { ORIGENS_DE_DOCUMENTO } from "@shared/documento-da-reuniao";
+import { iniciarDocumento, tetoDosDocumentos } from "../documento-da-reuniao";
+import { escolhaDoIdioma, IDIOMA_DA_REUNIAO_PADRAO, IDIOMAS_DA_REUNIAO } from "@shared/idioma-da-reuniao";
 import { createPrivateContact, exigirDb } from "../db";
 import { meetingContactSuggestions, meetingEntities, meetings, privateContacts, userProfiles } from "../../drizzle/schema";
 import { protectedProcedure, router } from "../_core/trpc";
+import { procedimentoDaReuniao } from "../guarda-da-lixeira";
+import {
+  aceitarConvite, compartilhadasComigo, convidarConexao, criarConvite, participantesDaReuniao, removerParticipante,
+  responderConviteDeConexao, sairDaReuniao, verConvite,
+} from "../participantes-da-reuniao";
+import { juntarVozes, ligarVozAConta, separarVoz } from "../vozes-da-reuniao";
 import { createAuditLog } from "../security";
 import { decidirPendenciasDaPessoaSugerida } from "../network-extracao";
 import { candidatosParaVincular, conexoesDaReuniao } from "../reuniao-no-match";
 import { hasValidConsent } from "./consent";
 import {
-  ALLOWED_MEETING_AUDIO_TYPES,
   deletePrivateMeeting,
   getPrivateMeeting,
   iniciarReprocessamento,
   listPrivateMeetings,
-  MAX_MEETING_DURATION_SECONDS,
   MEETING_TRANSCRIPT_LANGUAGES,
-  processMeetingRecording,
   ReprocessamentoRecusado,
-  ReuniaoForaDoEstado,
-  ReuniaoTomadaPorOutraExecucao,
   translatePrivateMeetingTranscript,
   nomearFalante,
+  NomesSoComReuniaoPronta,
 } from "../meeting-service";
-import { perguntarAReuniao, RecusaDaReuniaoComIA, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
+import { perguntarAReuniao, perguntarDuranteAGravacao, RecusaDaReuniaoComIA, TAMANHO_MAXIMO_DA_PERGUNTA } from "../reuniao-com-ia";
+import { transcricaoDuranteAGravacao } from "../transcricao-durante-a-gravacao";
 import { criarTeto } from "../assistente-de-texto";
-import { desligarLinkAberto, LinkAbertoRecusado, ligarLinkAberto } from "../link-aberto-da-reuniao";
+import { audioDoResumoDaDona } from "../resumo-em-audio";
+import { decidirComplemento, pedirComplemento } from "../complemento-pela-busca";
+import {
+  desligarLinkAberto,
+  LinkAbertoRecusado,
+  ligarLinkAbertoComOpcoes,
+  mudarAudioDoLink,
+  novaSenhaDoLink,
+  tirarSenhaDoLink,
+} from "../link-aberto-da-reuniao";
 import { ipDaCliente } from "../ip-da-cliente";
 import { encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, PARTES_NO_MAXIMO, RecusaDaParte } from "../fatias-de-reuniao";
 import { acrescentarItemDoResumo, confirmarItensDoResumo, decidirItemDoResumo, editarItemDoResumo, marcarAcaoFeita, pedirResumoDaDona, refazerResumoDaDona, resumoGuardadoDaDona } from "../resumo-guardado";
 import { depoisDeMexerNoItem, prepararAcaoDoItem } from "../acoes-na-google";
+import { decidirTituloSugerido } from "../decidir-titulo-sugerido";
 import { ROTULO_DA_AGENDA_MAX } from "@shared/acoes-na-agenda";
 import { FUSO_MAX } from "@shared/agenda";
 import type { ResultadoNaGoogle } from "@shared/google-agenda-eventos";
-import { MODELOS_DE_RESUMO } from "@shared/modelos-de-resumo";
+import {
+  ESTILOS_DO_RESUMO, ICONES_DOS_MODELOS, INSTRUCOES_DO_MODELO_MAX, INSTRUCOES_DO_PEDIDO_MAX, NOME_DO_MODELO_MAX, RECUSAS_DOS_MODELOS, RESPOSTAS_DO_TAMANHO, escolhaDoTexto,
+} from "@shared/modelos-de-resumo";
+import {
+  apagarModeloProprio, criarModeloProprio, definirPedidoDoResumo, definirPreferencias, editarModeloProprio, modelosEPreferenciasDaDona,
+  refazeresQueRestam, responderTamanhoDoResumo,
+} from "../modelos-proprios";
 import { mapaMentalDaDona, pedirMapaDaDona } from "../mapa-mental-guardado";
+import { mudarMapaDaDona, RecusaDoMapa, refazerMapaNoEstilo } from "../mapa-mental-edicao";
+import {
+  EDICOES_DO_MAPA_POR_JANELA, ESTILOS_DO_MAPA, JANELA_DA_EDICAO_DO_MAPA_MS, JANELA_DO_REFAZER_DO_MAPA_MS, RECUSAS_DO_MAPA, REFAZERES_DO_MAPA_POR_JANELA,
+} from "@shared/mapa-mental-edicao";
 import { traduzirResumoDaDona } from "../traducao-do-resumo";
+import { consultasDaAdministracaoDaDona } from "../consulta-da-administracao";
 import { rascunharEmailDeRetorno } from "../email-de-retorno";
 import { RELACOES_DO_EMAIL, TONS_DO_EMAIL } from "@shared/email-de-retorno";
 import { CAMPO_DO_ITEM_DO_RESUMO_MAX, SECOES_DO_RESUMO, TEXTO_DO_ITEM_DO_RESUMO_MAX } from "@shared/item-do-resumo";
 import { EXPORTACOES_POR_JANELA, FORMATOS_DA_EXPORTACAO, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS } from "@shared/exportar-reuniao";
 import { exportarReuniao } from "../exportar-reuniao";
+import { EMAIL_DO_PARTICIPANTE_MAX, PARTICIPANTES_DA_AGENDADA_MAX } from "@shared/agenda";
+import { definirEnvioAutomaticoDoResumo, mandarResumoPorEmail, mandarResumoPorEmailDeNovo, painelDoResumoPorEmail } from "../resumo-por-email";
+import {
+  AUDIOS_POR_JANELA, FORMATOS_DO_AUDIO, JANELA_DO_AUDIO_MS, RECUSAS_DO_AUDIO, ROTA_DO_AUDIO_BAIXADO, VALIDADE_DO_ENDERECO_DO_AUDIO_MS,
+  nomeDoArquivoDoAudio, tamanhoEstimadoDoAudio,
+} from "@shared/baixar-audio";
+import { balcaoDoAudio, ffmpegDisponivel, prepararAudioDaReuniao } from "../baixar-audio-da-reuniao";
+import { TAMANHO_MAXIMO_DO_LINK_DO_YOUTUBE, VERSOES_DO_AVISO_DO_YOUTUBE } from "@shared/youtube";
+import { pedirResumoDoVideo, RecusaDoVideo, refazerResumoDoVideo, type ContaQuePede } from "../youtube";
+import { atualizarDetalhesDaReuniao, conferirContatoEContexto } from "../detalhes-da-reuniao";
+import { ETIQUETA_MAX, ETIQUETAS_POR_REUNIAO_MAX, ONDE_FOI_MAX } from "@shared/detalhes-da-reuniao";
+import { buscarNasReunioes } from "../busca-de-reunioes";
+import {
+  BUSCAS_POR_JANELA, JANELA_DA_BUSCA_MS, MENSAGEM_BUSCAS_DEMAIS, ORIGENS_DO_FILTRO, PERIODOS_DO_FILTRO, TERMO_DA_BUSCA_MAX, TERMO_DA_BUSCA_MIN,
+} from "@shared/busca-de-reunioes";
+import { juntarReunioes, RecusaDaJuncao } from "../juntar-reunioes";
+import { JANELA_DA_JUNCAO_MS, JUNCOES_POR_JANELA, RECUSAS_DA_JUNCAO, REUNIOES_POR_JUNCAO_MAX } from "@shared/juntar-reunioes";
+import { registrarLegendaLigada } from "../legenda-ao-vivo";
+import { JANELA_DA_LEGENDA_MS, LEGENDAS_POR_JANELA, RECUSAS_DA_LEGENDA, TEXTO_DO_AVISO_DA_LEGENDA_MAX, VERSOES_DO_AVISO_DA_LEGENDA } from "@shared/legenda-ao-vivo";
+import { editarTranscricao, RecusaDaEdicao } from "../editar-transcricao";
+import {
+  EDICOES_POR_JANELA, JANELA_DA_EDICAO_MS, LOCALIZAR_MAX, RECUSAS_DA_EDICAO, SUBSTITUIR_POR_MAX, TEXTO_CORRIDO_MAX, TEXTO_DO_TRECHO_MAX,
+} from "@shared/editar-transcricao";
+import { apagarPasta, criarPasta, editarPasta, listarPastas, moverParaPasta, RecusaDaPasta } from "../pastas-de-reunioes";
+import { CORES_DA_PASTA, ICONES_DA_PASTA, NOME_DA_PASTA_MAX, REUNIOES_POR_ACAO_MAX } from "@shared/pastas-de-reunioes";
+import { apagarDeVez, esvaziarLixeira, listarLixeira, mandarParaALixeira, RecusaDaLixeira, restaurarDaLixeira, type ProvaDaLixeira } from "../lixeira-de-reunioes";
+import { REUNIOES_POR_EXCLUSAO_MAX } from "@shared/lixeira-de-reunioes";
+import { anexarAoResumo, anexosDaDona, apagarAnexo, RecusaDoAnexo } from "../anexos-do-resumo";
+import { ANEXO_BYTES_MAX, TIPOS_DE_ANEXO } from "@shared/anexos-do-resumo";
+
+// O que a dona pede ao editar a transcrição (H18): o zod barra a forma e o
+// tamanho; quem confere a posição do trecho, a voz e o texto vazio, e recusa
+// com o código traduzível, é o serviço (server/editar-transcricao.ts). A
+// posição conta as falas da transcrição, como a lista da tela.
+const posicaoDoTrecho = z.number().int().min(0).max(1_000_000);
+const operacaoDaEdicao = z.discriminatedUnion("tipo", [
+  z.object({ tipo: z.literal("texto"), indice: posicaoDoTrecho, texto: z.string().max(TEXTO_DO_TRECHO_MAX) }),
+  z.object({ tipo: z.literal("voz"), indice: posicaoDoTrecho, falante: z.string().regex(FORMATO_DO_FALANTE) }),
+  z.object({
+    tipo: z.literal("substituir"),
+    // Sem aparar: "R$ " e " ," são o que a dona quer achar; só espaço sozinho não.
+    localizar: z.string().min(1).max(LOCALIZAR_MAX).refine(valor => valor.trim().length > 0),
+    substituirPor: z.string().max(SUBSTITUIR_POR_MAX),
+    diferenciarMaiusculas: z.boolean().optional(),
+  }),
+  z.object({ tipo: z.literal("textoCorrido"), texto: z.string().max(TEXTO_CORRIDO_MAX) }),
+  z.object({ tipo: z.literal("restaurar"), indice: posicaoDoTrecho }),
+  z.object({ tipo: z.literal("restaurarTudo") }),
+]);
+
+// H7d: as reuniões de uma ação de várias (mover, mandar para a lixeira,
+// restaurar) e o nome da pasta, que o serviço apara, junta os espaços e corta
+// (shared/pastas-de-reunioes.ts); aqui só o teto do pedido.
+const idsDaAcao = z.array(z.string().uuid()).min(1).max(REUNIOES_POR_ACAO_MAX);
+const nomeDaPastaNoPedido = z.string().max(NOME_DA_PASTA_MAX * 4);
+
+/** As recusas das pastas saem com o código tRPC e o código que a tela traduz. */
+async function comRecusaDaPasta<T>(trabalho: () => Promise<T>): Promise<T> {
+  try {
+    return await trabalho();
+  } catch (erro) {
+    if (erro instanceof RecusaDaPasta) throw new TRPCError({ code: erro.codigoTrpc, message: erro.message });
+    throw erro;
+  }
+}
+
+/** As recusas da lixeira, pela mesma regra. */
+async function comRecusaDaLixeira<T>(trabalho: () => Promise<T>): Promise<T> {
+  try {
+    return await trabalho();
+  } catch (erro) {
+    if (erro instanceof RecusaDaLixeira) throw new TRPCError({ code: erro.codigoTrpc, message: erro.message });
+    throw erro;
+  }
+}
+
+/** As recusas dos anexos do resumo (H4g e H4h), pela mesma regra: o código tRPC e o código que a tela traduz. */
+async function comRecusaDoAnexo<T>(trabalho: () => Promise<T>): Promise<T> {
+  try {
+    return await trabalho();
+  } catch (erro) {
+    if (erro instanceof RecusaDoAnexo) throw new TRPCError({ code: erro.codigoTrpc, message: erro.codigo });
+    throw erro;
+  }
+}
+
+// A confirmação da dona de que as pessoas que falaram autorizaram (R1b), uma
+// vez por reunião: a frase que ela viu, no idioma da tela, vai para a prova.
+const autorizacaoDasParticipantes = z.object({
+  idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
+  textoExibido: z.string().trim().min(1).max(1000),
+}).optional();
+
+/** Quem pede, para a auditoria da lixeira. */
+function provaDaDona(ctx: { user: { id: number }; req: Parameters<typeof ipDaCliente>[0] & { headers: Record<string, unknown> } }): ProvaDaLixeira {
+  const agente = ctx.req.headers["user-agent"];
+  return { userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: typeof agente === "string" ? agente : null };
+}
+
+// Os e-mails que a tela manda ao resumo por e-mail (H22): o zod só barra o
+// tamanho; quem conta, valida e recusa com a frase traduzível é o serviço
+// (server/resumo-por-email.ts).
+const emailsDoPedido = z.array(z.string().trim().max(EMAIL_DO_PARTICIPANTE_MAX)).max(PARTICIPANTES_DA_AGENDADA_MAX);
 
 // O que a dona escreve num item do resumo (H4f): o texto é obrigatório; o
 // assunto, o responsável e o prazo, vazios ou ausentes, viram nulos.
@@ -134,6 +264,88 @@ export const tetoDaTraducaoDoResumo = criarTeto(
 // ar, auditoria que não entrou) devolvem a vaga.
 export const tetoDaExportacao = criarTeto(EXPORTACOES_POR_JANELA, JANELA_DA_EXPORTACAO_MS, MENSAGEM_EXPORTACOES_DEMAIS);
 
+// Cada senha nova do link aberto (H23) é um scrypt e uma linha de auditoria:
+// teto próprio por dona, em memória como os outros, de 20 a cada 10 minutos,
+// somando a senha nova e o ligar com senha. Só conta a senha que saiu: a
+// recusa (outra conta, link desligado), a falha e o ligar do link que já
+// estava ligado devolvem a vaga.
+export const SENHAS_DO_LINK_POR_JANELA = 20;
+export const tetoDasSenhasDoLink = criarTeto(
+  SENHAS_DO_LINK_POR_JANELA,
+  10 * 60_000,
+  "Muitas senhas novas em sequência. Aguarde alguns minutos e tente de novo.",
+);
+// Baixar o áudio (H8c) converte a reunião inteira com o ffmpeg, na instância de
+// 1 CPU: teto próprio por dona, de 10 áudios a cada hora, em memória como os
+// outros. Só conta o áudio preparado: a recusa (outra conta, ainda gravando,
+// áudio vencido, instância ocupada) e a falha (banco fora do ar, auditoria que
+// não entrou) devolvem a vaga. A recusa sai como código (RECUSAS_DO_AUDIO), que
+// a tela traduz.
+export const tetoDoAudio = criarTeto(AUDIOS_POR_JANELA, JANELA_DO_AUDIO_MS, RECUSAS_DO_AUDIO.demais);
+
+// A busca entre as reuniões (H7b) lê as transcrições da dona a cada pedido:
+// teto próprio por dona, de 120 buscas a cada 10 minutos, em memória como os
+// outros. A tela só pergunta a partir de 3 letras, e espera a dona parar de
+// digitar. A recusa sai como código (MENSAGEM_BUSCAS_DEMAIS), que a tela traduz.
+export const tetoDaBusca = criarTeto(BUSCAS_POR_JANELA, JANELA_DA_BUSCA_MS, MENSAGEM_BUSCAS_DEMAIS);
+
+// Juntar reuniões (H17) refaz a extração e o resumo pela IA (e transcreve de
+// novo o que veio do envio único): teto próprio por dona, de 3 junções a cada
+// 10 minutos. Só conta a junção que entrou; a recusa devolve a vaga.
+export const tetoDaJuncao = criarTeto(JUNCOES_POR_JANELA, JANELA_DA_JUNCAO_MS, RECUSAS_DA_JUNCAO.demais);
+
+// Ligar a legenda ao vivo (G15b) grava uma linha de auditoria a cada vez: teto
+// próprio por dona, de 30 a cada hora, em memória como os outros (a tela pede
+// uma vez por gravação). Só conta o ligar aceito; a recusa e a falha devolvem
+// a vaga. A recusa sai como código (RECUSAS_DA_LEGENDA), que a tela traduz.
+export const tetoDaLegenda = criarTeto(LEGENDAS_POR_JANELA, JANELA_DA_LEGENDA_MS, RECUSAS_DA_LEGENDA.demais);
+// Editar a transcrição (H18) regrava as falas da reunião e uma linha de
+// auditoria a cada mudança: teto próprio por dona, de 200 edições a cada 10
+// minutos, em memória como os outros. Só conta a edição aceita; a recusa e o
+// pedido que não mudou nada devolvem a vaga.
+// Os modelos de resumo da dona e as preferências dela (H4e): sem IA, mas cada
+// mudança grava no banco. Teto próprio por dona, de 60 mudanças a cada 10
+// minutos, em memória como os outros.
+export const tetoDosModelosDeResumo = criarTeto(60, 10 * 60_000, RECUSAS_DOS_MODELOS.mudancasDemais);
+
+// O texto do modelo no pedido (H4e): o código do pronto, "ia" ou "proprio:<id>".
+const escolhaNaEntrada = z.string().max(60).refine(valor => escolhaDoTexto(valor) !== null);
+const instrucoesDoPedidoNaEntrada = z.string().max(INSTRUCOES_DO_PEDIDO_MAX * 2).nullable().optional();
+const dadosDoModeloNaEntrada = z.object({
+  nome: z.string().trim().min(1).max(NOME_DO_MODELO_MAX * 2),
+  icone: z.enum(ICONES_DOS_MODELOS),
+  instrucoes: z.string().trim().min(1).max(INSTRUCOES_DO_MODELO_MAX * 2),
+});
+
+export const tetoDaEdicao = criarTeto(EDICOES_POR_JANELA, JANELA_DA_EDICAO_MS, RECUSAS_DA_EDICAO.demais);
+
+// O mapa mental editável (H10b): o teto das edições (cada uma regrava o mapa e
+// uma linha de auditoria) e o de custo do "Refazer em outro estilo" (cada um
+// manda a transcrição inteira à IA), este além do teto comum de pedidos à IA.
+export const tetoDaEdicaoDoMapa = criarTeto(EDICOES_DO_MAPA_POR_JANELA, JANELA_DA_EDICAO_DO_MAPA_MS, RECUSAS_DO_MAPA.edicoesDemais);
+export const tetoDoRefazerDoMapa = criarTeto(REFAZERES_DO_MAPA_POR_JANELA, JANELA_DO_REFAZER_DO_MAPA_MS, RECUSAS_DO_MAPA.refazeresDemais);
+
+// A forma do mapa que a dona salva: o zod barra só o tamanho do pedido, com
+// folga; as quantidades e os rótulos são conferidos com o código traduzível
+// em conferirMapaEditado (shared/mapa-mental-edicao.ts).
+const rotuloDoMapaNoPedido = z.string().max(400);
+const mapaNoPedido = z.object({
+  ramos: z.array(z.object({
+    rotulo: rotuloDoMapaNoPedido,
+    folhas: z.array(z.object({ rotulo: rotuloDoMapaNoPedido, filhos: z.array(rotuloDoMapaNoPedido).max(20) })).max(40),
+  })).max(40),
+});
+
+/** A recusa do mapa vira o erro do tRPC com o código que a tela traduz. */
+async function comRecusaDoMapa<T>(fazer: () => Promise<T>): Promise<T> {
+  try {
+    return await fazer();
+  } catch (erro) {
+    if (erro instanceof RecusaDoMapa) throw new TRPCError({ code: erro.codigoTrpc, message: erro.message });
+    throw erro;
+  }
+}
+
 /** Devolve a vaga de um pedido que não foi aceito. */
 function devolverVagaDeReprocesso(openId: string, momento: number) {
   const vagas = reprocessosPorDona.get(openId);
@@ -156,6 +368,22 @@ async function recusarSeReuniaoProcessando(db: Awaited<ReturnType<typeof exigirD
   if (reuniao?.status === "processing") throw new TRPCError({ code: "CONFLICT", message: MENSAGEM_REUNIAO_PROCESSANDO });
 }
 
+/** A conta que pede o vídeo do YouTube, para a trava, o teto e a auditoria do pedido (server/youtube.ts). */
+function contaQuePede(ctx: { user: { id: number; openId: string }; req: Parameters<typeof ipDaCliente>[0] }): ContaQuePede {
+  const agente = ctx.req.headers["user-agent"];
+  return { userId: ctx.user.id, openId: ctx.user.openId, ipAddress: ipDaCliente(ctx.req), userAgent: typeof agente === "string" ? agente : null };
+}
+
+/** As recusas do vídeo do YouTube saem com o código tRPC e o código do erro, que a tela traduz. */
+async function comRecusaDoVideo<T>(trabalho: () => Promise<T>): Promise<T> {
+  try {
+    return await trabalho();
+  } catch (erro) {
+    if (erro instanceof RecusaDoVideo) throw new TRPCError({ code: erro.codigoTrpc, message: erro.message });
+    throw erro;
+  }
+}
+
 /**
  * As recusas da pergunta e do link aberto saem com o código que a tela
  * traduz. O router do link aberto (reuniaoAberta.ts) usa a mesma.
@@ -173,11 +401,12 @@ export async function comRecusaTraduzida<T>(trabalho: () => Promise<T>): Promise
 
 // O idioma falado na reunião, normalizado pela função única ('pt' e 'pt-PT'
 // viram 'pt-BR', 'en-US' vira 'en'). A tela antiga, ainda aberta depois do
-// deploy, manda 'pt'; sem idioma vale o padrão. Fora dos 10, recusa: o código
-// é gravado e decide o original da tradução.
+// deploy, manda 'pt'; sem idioma vale o padrão. G16: vale todo idioma que a IA
+// transcreve (os 10 da tela e os outros) e "auto" ("Detectar sozinho"); fora
+// disso, recusa: o código é gravado e decide o original da tradução.
 export const idiomaDaReuniaoNaEntrada = z.string().max(12).optional().transform((valor, ctx) => {
   if (valor === undefined) return IDIOMA_DA_REUNIAO_PADRAO;
-  const idioma = idiomaDaReuniao(valor);
+  const idioma = escolhaDoIdioma(valor);
   if (!idioma) {
     ctx.addIssue({ code: "custom", message: "Idioma da reunião não suportado." });
     return z.NEVER;
@@ -198,16 +427,26 @@ const createMeetingInput = z.object({
 });
 
 export const meetingsRouter = router({
-  list: protectedProcedure.query(({ ctx }) => listPrivateMeetings(ctx.user.openId)),
+  list: procedimentoDaReuniao.query(({ ctx }) => listPrivateMeetings(ctx.user.openId)),
 
-  get: protectedProcedure.input(z.object({ meetingId: z.string().uuid() })).query(async ({ ctx, input }) => {
+  get: procedimentoDaReuniao.input(z.object({ meetingId: z.string().uuid() })).query(async ({ ctx, input }) => {
     const data = await getPrivateMeeting(ctx.user.openId, input.meetingId);
     if (!data) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });
     return data;
   }),
 
-  create: protectedProcedure.input(createMeetingInput).mutation(async ({ ctx, input }) => {
+  // A reunião do envio único nascia aqui, e o áudio vinha depois pelo
+  // meetings.submitRecording, que saiu na G14, parte 2 (25/11/2026): a tela não
+  // chama mais este procedimento, e toda reunião com áudio nasce pelo
+  // iniciarGravacao. Ele fica por enquanto (os testes de detalhes e de idioma
+  // ainda o usam); a reunião que nasce aqui não recebe áudio.
+  create: procedimentoDaReuniao.input(createMeetingInput.extend({
+    origem: z.enum(["gravacao", "arquivo"]).optional(),
+  })).mutation(async ({ ctx, input }) => {
     const db = await exigirDb();
+    // O contato e o contexto têm de ser da dona (o contexto: dela ou do
+    // catálogo), antes de gravar o ponteiro (H7c).
+    await conferirContatoEContexto(ctx.user.openId, input, db);
     const timestamp = Date.now();
     const id = crypto.randomUUID();
     await db.insert(meetings).values({
@@ -221,6 +460,7 @@ export const meetingsRouter = router({
       consentAt: timestamp,
       consentNoticeVersion: input.consentNoticeVersion ?? null,
       language: input.language,
+      origem: input.origem ?? null,
       createdAt: timestamp,
       updatedAt: timestamp,
     });
@@ -230,14 +470,38 @@ export const meetingsRouter = router({
   // A reunião gravada em partes (G5): nasce no início da gravação, cada parte
   // chega pela rota binária (server/_core/rota-das-partes.ts) e o fim diz
   // quantas partes houve. A tela que grava em partes é a G9.
-  iniciarGravacao: protectedProcedure.input(createMeetingInput.extend({
+  iniciarGravacao: procedimentoDaReuniao.input(createMeetingInput.extend({
     origem: z.enum(["gravacao", "arquivo", "aba"]).default("gravacao"),
-  })).mutation(({ ctx, input }) => iniciarReuniaoEmPartes(ctx.user.openId, {
-    title: input.title, language: input.language, consentNoticeVersion: input.consentNoticeVersion ?? null,
-    origem: input.origem, contactId: input.contactId, contextId: input.contextId,
-  })),
+  })).mutation(async ({ ctx, input }) => {
+    await conferirContatoEContexto(ctx.user.openId, input);
+    return iniciarReuniaoEmPartes(ctx.user.openId, {
+      title: input.title, language: input.language, consentNoticeVersion: input.consentNoticeVersion ?? null,
+      origem: input.origem, contactId: input.contactId, contextId: input.contextId,
+    });
+  }),
 
-  encerrarGravacao: protectedProcedure
+  // A reunião que nasce de um documento (H12 e H12b): um PDF, ou as fotos de um
+  // texto, que a tela junta num PDF. Nasce em 'uploading', com o consentimento
+  // e a versão do aviso do documento (obrigatória: não há aba antiga sem ela);
+  // o arquivo chega depois pela rota binária (server/_core/rota-do-documento.ts),
+  // e a leitura segue em segundo plano (server/documento-da-reuniao.ts). Com o
+  // teto da hora já cheio, nada nasce (TOO_MANY_REQUESTS): a reunião criada para
+  // uma tentativa que a rota recusaria pelo teto ficava "recebendo o documento"
+  // na lista quando a dona saía da tela (conferência de tela de 20/11/2026). Só
+  // confere, sem gastar: a vaga é da rota, e só o documento aceito a gasta.
+  iniciarDocumento: procedimentoDaReuniao.input(createMeetingInput.omit({ consentNoticeVersion: true }).extend({
+    consentNoticeVersion: z.enum(VERSOES_DO_AVISO_DO_DOCUMENTO),
+    origem: z.enum(ORIGENS_DE_DOCUMENTO),
+  })).mutation(async ({ ctx, input }) => {
+    tetoDosDocumentos.conferir(ctx.user.openId);
+    await conferirContatoEContexto(ctx.user.openId, input);
+    return iniciarDocumento(ctx.user.openId, {
+      title: input.title, language: input.language, consentNoticeVersion: input.consentNoticeVersion,
+      origem: input.origem, contactId: input.contactId, contextId: input.contextId,
+    });
+  }),
+
+  encerrarGravacao: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid(), partes: z.number().int().min(1).max(PARTES_NO_MAXIMO) }))
     .mutation(async ({ ctx, input }) => {
       try {
@@ -250,33 +514,51 @@ export const meetingsRouter = router({
       }
     }),
 
-  submitRecording: protectedProcedure
+  // O resumo de um vídeo do YouTube (H13, server/youtube.ts): a dona cola o
+  // link de um vídeo público, a IA o lê pela própria URL (só a primeira hora)
+  // e a reunião segue o caminho de sempre. Responde com o id assim que a
+  // reunião nasce, em 'processing'; a tela acompanha por meetings.get. O
+  // servidor nunca busca a URL. Recusas: BAD_REQUEST com YOUTUBE_LINK_INVALIDO
+  // e TOO_MANY_REQUESTS com YOUTUBE_TETO_DIARIO (5 vídeos a cada 24 h, contados
+  // no banco). A versão do aviso do YouTube é obrigatória: a tela que pede
+  // vídeo já nasceu com ela.
+  resumirVideoDoYoutube: procedimentoDaReuniao
     .input(z.object({
-      meetingId: z.string().uuid(),
-      audioBase64: z.string().min(20).max(14_000_000),
-      mimeType: z.enum(ALLOWED_MEETING_AUDIO_TYPES),
-      durationSeconds: z.number().positive().max(MAX_MEETING_DURATION_SECONDS),
+      title: z.string().trim().min(TITULO_DA_REUNIAO_MIN).max(TITULO_DA_REUNIAO_MAX),
+      url: z.string().trim().min(1).max(TAMANHO_MAXIMO_DO_LINK_DO_YOUTUBE),
       language: idiomaDaReuniaoNaEntrada,
+      consentGranted: z.literal(true),
+      consentNoticeVersion: z.enum(VERSOES_DO_AVISO_DO_YOUTUBE),
     }))
-    .mutation(async ({ ctx, input }) => {
-      let result: Awaited<ReturnType<typeof processMeetingRecording>>;
-      try {
-        result = await processMeetingRecording({ ...input, ownerId: ctx.user.openId });
-      } catch (erro) {
-        if (erro instanceof ReuniaoForaDoEstado || erro instanceof ReuniaoTomadaPorOutraExecucao) {
-          throw new TRPCError({ code: "CONFLICT", message: erro.message });
-        }
-        throw erro;
-      }
-      return { success: true, transcriptLength: result.transcript.length, entities: result.extraction.entities.length, contacts: result.extraction.contacts.length };
-    }),
+    .mutation(({ ctx, input }) => comRecusaDoVideo(async () => {
+      const { id, trabalho } = await pedirResumoDoVideo(contaQuePede(ctx), {
+        titulo: input.title, url: input.url, idioma: input.language, versaoDoAviso: input.consentNoticeVersion,
+      });
+      // `trabalho` nunca rejeita: executarVideoDoYoutube termina todo erro em log.
+      void trabalho;
+      return { id };
+    })),
+
+  // O "Tentar de novo" da reunião do YouTube com falha: lê o vídeo outra vez
+  // pela URL guardada e gasta uma vaga do mesmo teto. NOT_FOUND, CONFLICT (não
+  // está com falha, ou alguém chegou antes), PRECONDITION_FAILED (não é do
+  // YouTube, ou a falha se repete com o mesmo vídeo: a mensagem é o código
+  // dela) e TOO_MANY_REQUESTS (o teto).
+  refazerVideoDoYoutube: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => comRecusaDoVideo(async () => {
+      const { trabalho } = await refazerResumoDoVideo(contaQuePede(ctx), input.meetingId);
+      void trabalho;
+      return { status: "processing" as const };
+    })),
 
   // Reprocessa uma reunião com falha a partir do áudio que ficou guardado.
   // Devolve assim que a reunião é tomada ('processing'); o resultado aparece em
   // meetings.get e meetings.list. Recusas saem com o código que a tela traduz:
   // NOT_FOUND, CONFLICT (não está com falha, ou alguém chegou antes),
-  // PRECONDITION_FAILED (sem áudio guardado utilizável) e TOO_MANY_REQUESTS.
-  reprocess: protectedProcedure
+  // PRECONDITION_FAILED (sem áudio ou documento guardado utilizável, ou o
+  // documento que falha igual com o mesmo arquivo) e TOO_MANY_REQUESTS.
+  reprocess: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       // A vaga é reservada ANTES do await. Conferir antes e registrar depois
@@ -307,11 +589,18 @@ export const meetingsRouter = router({
       return { status: "processing" as const };
     }),
 
-  translateTranscript: protectedProcedure
+  translateTranscript: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid(), language: z.enum(IDIOMAS_DA_REUNIAO) }))
     .mutation(async ({ ctx, input }) => {
       return translatePrivateMeetingTranscript(ctx.user.openId, input.meetingId, input.language);
     }),
+
+  // As datas em que a administração consultou a reunião (R1a): só a data,
+  // nunca o motivo nem quem consultou. Só a dona, com a dona no WHERE
+  // (server/consulta-da-administracao.ts).
+  consultasDaAdministracao: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(({ ctx, input }) => consultasDaAdministracaoDaDona(ctx.user.openId, input.meetingId)),
 
   // O resumo GUARDADO (H4): gerado em segundo plano pela fila do resumo, cada
   // item pendente até a dona confirmar. Toda reunião que fica pronta já ganha
@@ -319,35 +608,144 @@ export const meetingsRouter = router({
   // resumo que falhou. Só a dona; a dona no WHERE de tudo
   // (server/resumo-guardado.ts). Pedir o resumo que ainda não existe (ou que
   // falhou) gasta uma vaga do teto de pedidos à IA, o mesmo das perguntas.
-  resumoGuardado: protectedProcedure
+  resumoGuardado: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid() }))
     .query(({ ctx, input }) => resumoGuardadoDaDona(ctx.user.openId, input.meetingId)),
 
+  // O título que a IA sugeriu com o resumo: "Usar este título" (usar) troca o
+  // título da reunião pela sugestão; "Manter o atual" só registra a decisão.
+  // Sem IA, então sem teto. CONFLICT: a sugestão já não espera a dona.
+  decidirTituloSugerido: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), usar: z.boolean() }))
+    .mutation(({ ctx, input }) => decidirTituloSugerido(ctx.user.openId, input.meetingId, input.usar)),
+
   // O modelo (H4d) é opcional: a reunião antiga ganha o resumo no modelo que a
   // dona escolheu; sem ele, o Geral (e o que falhou reabre no modelo de antes).
-  pedirResumo: protectedProcedure
-    .input(z.object({ meetingId: z.string().uuid(), modelo: z.enum(MODELOS_DE_RESUMO).optional() }))
-    .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId), input.modelo)),
+  // H4e: o modelo também pode ser um da dona ("proprio:<id>") ou "ia" (a IA
+  // escolhe), com o estilo e as instruções do pedido.
+  pedirResumo: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), modelo: escolhaNaEntrada.optional(), estilo: z.enum(ESTILOS_DO_RESUMO).optional(), instrucoes: instrucoesDoPedidoNaEntrada }))
+    .mutation(({ ctx, input }) => pedirResumoDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId), { modelo: input.modelo, estilo: input.estilo, instrucoes: input.instrucoes })),
 
   // "Refazer como…" (H4d): o resumo volta à fila no modelo escolhido; os itens
   // confirmados, os feitos e os que a dona escreveu ou editou (H4f) ficam, os
   // outros pendentes e ignorados são trocados. Gasta uma vaga do mesmo teto de
   // pedidos à IA.
-  refazerResumo: protectedProcedure
-    .input(z.object({ meetingId: z.string().uuid(), modelo: z.enum(MODELOS_DE_RESUMO) }))
-    .mutation(({ ctx, input }) => refazerResumoDaDona(ctx.user.openId, input.meetingId, input.modelo, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+  // H4e: o refazer leva o modelo (pronto, da dona ou "ia"), o estilo e as
+  // instruções, e conta no teto de custo do refazer (REFAZERES_POR_DIA, no
+  // banco), além do teto de pedidos à IA. TOO_MANY_REQUESTS com o código.
+  refazerResumo: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), modelo: escolhaNaEntrada, estilo: z.enum(ESTILOS_DO_RESUMO).optional(), instrucoes: instrucoesDoPedidoNaEntrada }))
+    .mutation(({ ctx, input }) => refazerResumoDaDona(ctx.user.openId, input.meetingId, { modelo: input.modelo, estilo: input.estilo, instrucoes: input.instrucoes }, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+
+  // Os modelos de resumo da própria dona e as preferências dela (H4e,
+  // server/modelos-proprios.ts): a lista, o padrão, o estilo, o ajuste do
+  // tamanho e quantos refazeres ainda cabem nas 24 h. Só dela.
+  modelosDeResumo: procedimentoDaReuniao.query(async ({ ctx }) => ({
+    ...(await modelosEPreferenciasDaDona(ctx.user.openId)),
+    refazeresQueRestam: await refazeresQueRestam(ctx.user.openId),
+  })),
+  // BAD_REQUEST com o código (MODELOS_DE_RESUMO_DEMAIS, o teto de 20) e
+  // CONFLICT (MODELO_DE_RESUMO_NOME_REPETIDO).
+  criarModeloDeResumo: procedimentoDaReuniao
+    .input(dadosDoModeloNaEntrada)
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return criarModeloProprio(ctx.user.openId, input);
+    }),
+  editarModeloDeResumo: procedimentoDaReuniao
+    .input(dadosDoModeloNaEntrada.extend({ id: z.string().uuid() }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return editarModeloProprio(ctx.user.openId, input.id, input);
+    }),
+  // Os resumos feitos com o modelo ficam no Geral, e o padrão que o citava volta ao Geral.
+  apagarModeloDeResumo: procedimentoDaReuniao
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return apagarModeloProprio(ctx.user.openId, input.id);
+    }),
+  definirPreferenciasDoResumo: procedimentoDaReuniao
+    .input(z.object({ padrao: escolhaNaEntrada, estilo: z.enum(ESTILOS_DO_RESUMO) }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return definirPreferencias(ctx.user.openId, input);
+    }),
+  // O pedido do resumo antes de gravar (H4e), na reunião que ainda não ficou
+  // pronta; null volta às preferências. PRECONDITION_FAILED com o código na
+  // reunião pronta (aí vale o "Refazer o resumo").
+  definirPedidoDoResumo: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      pedido: z.object({ modelo: escolhaNaEntrada, estilo: z.enum(ESTILOS_DO_RESUMO), instrucoes: instrucoesDoPedidoNaEntrada }).nullable(),
+    }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return definirPedidoDoResumo(ctx.user.openId, input.meetingId, input.pedido ? { modelo: input.pedido.modelo, estilo: input.pedido.estilo, instrucoes: input.pedido.instrucoes ?? null } : null);
+    }),
+  // "O resumo teve o tamanho certo?" (H4e): a resposta ajusta os próximos resumos da dona; null desfaz.
+  responderTamanhoDoResumo: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), resposta: z.enum(RESPOSTAS_DO_TAMANHO).nullable() }))
+    .mutation(({ ctx, input }) => {
+      tetoDosModelosDeResumo.reservar(ctx.user.openId);
+      return responderTamanhoDoResumo(ctx.user.openId, input.meetingId, input.resposta);
+    }),
 
   // O mapa mental (H10), na linha do resumo guardado: a fila o gera logo
   // depois do resumo, numa chamada à parte (server/fila-do-resumo.ts). Pedir
   // serve à reunião resumida antes do mapa e ao mapa que falhou, e gasta uma
   // vaga do mesmo teto de pedidos à IA (server/mapa-mental-guardado.ts).
-  mapaMental: protectedProcedure
+  mapaMental: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid() }))
     .query(({ ctx, input }) => mapaMentalDaDona(ctx.user.openId, input.meetingId)),
 
-  pedirMapa: protectedProcedure
+  pedirMapa: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid() }))
     .mutation(({ ctx, input }) => pedirMapaDaDona(ctx.user.openId, input.meetingId, () => tetoDaIADaReuniao.reservar(ctx.user.openId))),
+
+  // H10b: a dona salva o mapa que editou (renomeou, arrastou, acrescentou ou
+  // apagou ramos), ou volta ao da IA. Sem IA; a revisão que a tela viu vai
+  // junto, e a de outra aba é recusada (server/mapa-mental-edicao.ts).
+  editarMapa: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      revisao: z.number().int().min(0),
+      operacao: z.discriminatedUnion("tipo", [
+        z.object({ tipo: z.literal("salvar"), mapa: mapaNoPedido }),
+        z.object({ tipo: z.literal("voltar") }),
+      ]),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaEdicaoDoMapa.reservar(ctx.user.openId);
+      try {
+        const feito = await comRecusaDoMapa(() => mudarMapaDaDona(ctx.user.openId, input.meetingId,
+          input.operacao.tipo === "salvar" ? { tipo: "salvar", revisao: input.revisao, mapa: input.operacao.mapa } : { tipo: "voltar", revisao: input.revisao },
+          { userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] }));
+        if (!feito.mudou) soltarVaga();
+        return feito;
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
+    }),
+
+  // H10b: "Refazer em outro estilo". O mapa volta à fila no estilo pedido, com
+  // o de agora à vista até o novo chegar. Gasta uma vaga do teto comum de
+  // pedidos à IA e uma do teto do refazer; o pedido recusado devolve as duas.
+  refazerMapa: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), revisao: z.number().int().min(0), estilo: z.enum(ESTILOS_DO_MAPA) }))
+    .mutation(({ ctx, input }) => comRecusaDoMapa(() => refazerMapaNoEstilo(ctx.user.openId, input.meetingId,
+      { revisao: input.revisao, estilo: input.estilo },
+      { userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] },
+      () => {
+        // Confere os dois antes de gastar: a recusa de um não deixa a vaga do outro gasta.
+        tetoDoRefazerDoMapa.conferir(ctx.user.openId);
+        tetoDaIADaReuniao.conferir(ctx.user.openId);
+        const soltarRefazer = tetoDoRefazerDoMapa.reservar(ctx.user.openId);
+        const soltarIA = tetoDaIADaReuniao.reservar(ctx.user.openId);
+        return () => { soltarRefazer(); soltarIA(); };
+      }))),
 
   // Desconfirmar apaga a próxima ação do item (H5a), e o evento dela sai da
   // Google Agenda depois (H5c, server/acoes-na-google.ts): o token vem antes da
@@ -356,7 +754,7 @@ export const meetingsRouter = router({
   // se a ação saiu é o estado gravado, não o pedido: o item escrito pela dona
   // (H4f) que a tela pede de volta a "para conferir" fica confirmado, e a ação
   // dele, com o evento, fica.
-  decidirItemDoResumo: protectedProcedure
+  decidirItemDoResumo: procedimentoDaReuniao
     .input(z.object({ itemId: z.string().uuid(), status: z.enum(["pending", "confirmed", "ignored"]) }))
     .mutation(async ({ ctx, input }): Promise<{ ok: true; acaoId: string | null } & ResultadoNaGoogle> => {
       const conta = { id: ctx.user.id, openId: ctx.user.openId };
@@ -366,14 +764,14 @@ export const meetingsRouter = router({
       return { ok: true as const, ...(await depoisDeMexerNoItem(conta, preparo, false)) };
     }),
 
-  confirmarItensDoResumo: protectedProcedure
+  confirmarItensDoResumo: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => ({ confirmados: await confirmarItensDoResumo(ctx.user.openId, input.meetingId) })),
 
   // A caixa da ação no resumo marca também a próxima ação dela (H5a): feita, ela
   // sai da Google Agenda; reaberta, volta, se o prazo ainda vem (H5c). O fuso
   // e os rótulos vêm da tela, como na lista (routers/proximasAcoes.ts).
-  marcarAcaoFeita: protectedProcedure
+  marcarAcaoFeita: procedimentoDaReuniao
     .input(z.object({ itemId: z.string().uuid(), feito: z.boolean(), ...pedidoDaTelaParaAGoogle }))
     .mutation(async ({ ctx, input }): Promise<{ ok: true; acaoId: string | null } & ResultadoNaGoogle> => {
       const conta = { id: ctx.user.id, openId: ctx.user.openId };
@@ -387,7 +785,7 @@ export const meetingsRouter = router({
   // e a tela pergunta de novo. A tradução guardada não chama a IA e não gasta
   // vaga; a que chama gasta uma do teto próprio da tradução
   // (tetoDaTraducaoDoResumo), só quando a IA é chamada de fato.
-  traduzirResumo: protectedProcedure
+  traduzirResumo: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid(), idioma: z.enum(IDIOMAS_DA_REUNIAO) }))
     .mutation(({ ctx, input }) => traduzirResumoDaDona(ctx.user.openId, input.meetingId, input.idioma,
       () => { tetoDaTraducaoDoResumo.reservar(ctx.user.openId); })),
@@ -402,7 +800,7 @@ export const meetingsRouter = router({
   // escrita, só quando a ação tem prazo, e o fuso e os rótulos vêm da tela.
   // Quando a Google falha, a resposta diz "falhou", e a lista mostra "Tentar de
   // novo" (a escrita deixou a ação "falhou" antes do envio).
-  editarItemDoResumo: protectedProcedure
+  editarItemDoResumo: procedimentoDaReuniao
     .input(z.object({ itemId: z.string().uuid(), ...camposDoItemDoResumo, ...pedidoDaTelaParaAGoogle }))
     .mutation(async ({ ctx, input }): Promise<{ ok: true; acaoId: string | null } & ResultadoNaGoogle> => {
       const { itemId, fuso, rotulos, ...campos } = input;
@@ -413,14 +811,36 @@ export const meetingsRouter = router({
       return { ok: true as const, ...(await depoisDeMexerNoItem(conta, preparo, true, { fuso, rotulos })) };
     }),
 
-  acrescentarItemDoResumo: protectedProcedure
+  acrescentarItemDoResumo: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid(), secao: z.enum(SECOES_DO_RESUMO), ...camposDoItemDoResumo }))
     .mutation(async ({ ctx, input }) => {
       const { meetingId, secao, ...campos } = input;
       return { id: await acrescentarItemDoResumo(ctx.user.openId, meetingId, secao, campos) };
     }),
 
-  perguntar: protectedProcedure
+  // "Baixar o áudio do resumo" (H19b, server/resumo-em-audio.ts): o MP3 com a
+  // voz do Gemini, gerado uma vez por texto e idioma e servido de novo do bucket.
+  // O idioma é o do resumo ou o de uma tradução já pronta (H11).
+  audioDoResumo: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), idioma: z.string().min(2).max(12).optional() }))
+    .mutation(async ({ ctx, input }) => audioDoResumoDaDona(ctx.user.openId, input.meetingId, input.idioma, {
+      userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"],
+    })),
+
+  // O complemento pela busca na web (H4i, server/complemento-pela-busca.ts): a
+  // dona pede num item; o que a busca achar espera a decisão dela.
+  pedirComplemento: procedimentoDaReuniao
+    .input(z.object({ itemId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => pedirComplemento(ctx.user.openId, input.itemId)),
+
+  decidirComplemento: procedimentoDaReuniao
+    .input(z.object({ itemId: z.string().uuid(), decisao: z.enum(["confirmar", "descartar"]) }))
+    .mutation(async ({ ctx, input }) => {
+      await decidirComplemento(ctx.user.openId, input.itemId, input.decisao);
+      return { ok: true as const };
+    }),
+
+  perguntar: procedimentoDaReuniao
     .input(z.object({
       meetingId: z.string().uuid(),
       idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
@@ -432,12 +852,72 @@ export const meetingsRouter = router({
         segundaVagaDaPerguntaLonga(() => tetoDaIADaReuniao.reservar(ctx.user.openId), soltarVaga)));
     }),
 
+  // G15a: a transcrição durante a gravação, só para a dona. A tela do gravador
+  // (e o detalhe da reunião em andamento) pergunta de tempos em tempos e recebe
+  // o andamento de cada parte e o texto das partes prontas que ainda não tem
+  // (`desde`). Sem IA: o texto é o que a fila já transcreveu. Reunião de outra
+  // dona, ou excluída, é NOT_FOUND.
+  transcricaoDaGravacao: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), desde: z.number().int().min(0).max(PARTES_NO_MAXIMO).default(0) }))
+    .query(async ({ ctx, input }) => {
+      const dados = await transcricaoDuranteAGravacao(ctx.user.openId, input.meetingId, input.desde);
+      if (!dados) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });
+      return dados;
+    }),
+
+  // G15a: perguntar à IA sobre o que já foi dito, com a reunião ainda gravando
+  // (server/reuniao-com-ia.ts, perguntarDuranteAGravacao). O mesmo teto e as
+  // mesmas recusas traduzidas da pergunta de sempre; nada é gravado.
+  perguntarDuranteAGravacao: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
+      pergunta: z.string().trim().min(2).max(TAMANHO_MAXIMO_DA_PERGUNTA),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaIADaReuniao.reservar(ctx.user.openId);
+      return comRecusaTraduzida(() => perguntarDuranteAGravacao(ctx.user.openId, input.meetingId, input.pergunta, input.idioma,
+        segundaVagaDaPerguntaLonga(() => tetoDaIADaReuniao.reservar(ctx.user.openId), soltarVaga)));
+    }),
+
+  // G15b: a legenda ao vivo é do navegador da dona, e o texto dela nunca vem
+  // para cá. Antes de ligar, a tela manda a confirmação da dona, com o aviso
+  // que ela viu (no Chrome, o áudio costuma ir a um servidor do Google), e o
+  // servidor a grava na auditoria (server/legenda-ao-vivo.ts): sem a linha, a
+  // legenda não liga. Só na reunião dela que está gravando.
+  ligarLegendaAoVivo: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      concordanciaDasPessoas: z.literal(true),
+      versaoDoAviso: z.enum(VERSOES_DO_AVISO_DA_LEGENDA),
+      // O idioma da tela em que o aviso apareceu, e o aviso como apareceu.
+      idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
+      textoExibido: z.string().trim().min(1).max(TEXTO_DO_AVISO_DA_LEGENDA_MAX),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaLegenda.reservar(ctx.user.openId);
+      try {
+        await registrarLegendaLigada(ctx.user.openId, input.meetingId, {
+          userId: ctx.user.id,
+          ipAddress: ipDaCliente(ctx.req),
+          userAgent: ctx.req.headers["user-agent"],
+          versaoDoAviso: input.versaoDoAviso,
+          idioma: input.idioma,
+          textoExibido: input.textoExibido,
+        });
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
+      return { success: true } as const;
+    }),
+
   // H20: o rascunho de um e-mail de retorno, escrito pela IA a partir dos itens
   // que a dona confirmou no resumo guardado (server/email-de-retorno.ts). O
   // servidor só devolve o texto: nada é gravado nem enviado, e a dona manda
   // pelo app de e-mail dela. O nome de quem recebe nem chega aqui (a tela o põe
   // no lugar da marca {DESTINATARIO}); só a voz dela, quando a tela a reconhece.
-  rascunharEmailDeRetorno: protectedProcedure
+  rascunharEmailDeRetorno: procedimentoDaReuniao
     .input(z.object({
       meetingId: z.string().uuid(),
       relacao: z.enum(RELACOES_DO_EMAIL),
@@ -461,7 +941,7 @@ export const meetingsRouter = router({
   // transação (server/exportar-reuniao.ts): sem a linha, nada sai. A vaga é
   // reservada antes do await, como a do reprocesso, e volta se a exportação
   // não sai.
-  exportar: protectedProcedure
+  exportar: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid(), formato: z.enum(FORMATOS_DA_EXPORTACAO) }))
     .mutation(async ({ ctx, input }) => {
       const soltarVaga = tetoDaExportacao.reservar(ctx.user.openId);
@@ -478,6 +958,49 @@ export const meetingsRouter = router({
       }
     }),
 
+  // H8c: o áudio da reunião num arquivo só, em MP3 ou M4A. Este passo confere a
+  // dona, a gravação encerrada e os 30 dias, e lê as partes e grava a auditoria
+  // MEETING_AUDIO_DOWNLOADED na mesma transação (server/baixar-audio-da-reuniao.ts):
+  // sem a linha, nenhum endereço sai. Devolve um endereço de uso único, que
+  // vale 2 minutos e só para a sessão da dona; a rota GET
+  // (server/_core/rota-do-audio-baixado.ts) o transmite enquanto converte. As
+  // chaves das partes ficam no servidor. O link aberto (routers/reuniaoAberta.ts)
+  // não baixa áudio. Ordem: o teto da dona, o ffmpeg, a vaga da instância e só
+  // então a transação, para nenhuma recusa gravar auditoria.
+  baixarAudio: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      formato: z.enum(FORMATOS_DO_AUDIO),
+      // O nome que a tela sugere (o título e a data, como no PDF); o servidor o limpa.
+      nome: z.string().max(300).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDoAudio.reservar(ctx.user.openId);
+      let reserva: ReturnType<typeof balcaoDoAudio.reservar> | null = null;
+      try {
+        if (!await ffmpegDisponivel()) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: RECUSAS_DO_AUDIO.indisponivel });
+        reserva = balcaoDoAudio.reservar();
+        const audio = await prepararAudioDaReuniao(ctx.user.openId, input.meetingId, {
+          formato: input.formato,
+          userId: ctx.user.id,
+          ipAddress: ipDaCliente(ctx.req),
+          userAgent: ctx.req.headers["user-agent"],
+        });
+        const nomeDoArquivo = nomeDoArquivoDoAudio(input.nome, input.formato);
+        const ficha = reserva.emitir({ ownerId: ctx.user.openId, meetingId: input.meetingId, formato: input.formato, nomeDoArquivo, partes: audio.partes });
+        return {
+          endereco: `${ROTA_DO_AUDIO_BAIXADO}/${ficha}`,
+          nomeDoArquivo,
+          validadeMs: VALIDADE_DO_ENDERECO_DO_AUDIO_MS,
+          tamanhoEstimadoBytes: tamanhoEstimadoDoAudio(audio.duracaoSegundos),
+        };
+      } catch (erro) {
+        reserva?.soltar();
+        soltarVaga();
+        throw erro;
+      }
+    }),
+
   // O link aberto (pedido do Roberto em 12/11/2026, "por enquanto"): quem tem o
   // endereço ouve, lê e pergunta à IA sem conta na WRW (routers/reuniaoAberta.ts).
   // Só a dona liga e desliga, e só reunião pronta tem link. Ligar exige de novo
@@ -485,7 +1008,12 @@ export const meetingsRouter = router({
   // consentimento da gravação foi para um áudio privado. Essa palavra vai para
   // a auditoria na mesma transação que liga o link (ligarLinkAberto). Ligar o
   // que já está ligado devolve o mesmo link.
-  ligarLinkAberto: protectedProcedure
+  //
+  // Desde a H23, a dona escolhe ao ligar se o link pede a senha de 6 dígitos
+  // e se leva o áudio. A senha volta em texto só nesta resposta (e na de
+  // novaSenhaDoLink): o banco guarda o hash. A aba aberta antes do deploy não
+  // manda as escolhas, e o link sai como antes, sem senha e com o áudio.
+  ligarLinkAberto: procedimentoDaReuniao
     .input(z.object({
       meetingId: z.string().uuid(),
       autorizacaoDasPessoas: z.literal(true),
@@ -497,20 +1025,71 @@ export const meetingsRouter = router({
       // só com ela o link mostra os nomes. A aba aberta antes do deploy não
       // manda nada, e o serviço grava 1: a frase dela não falava dos nomes.
       versaoDaAutorizacao: z.literal(VERSAO_DA_AUTORIZACAO_COM_NOMES).optional(),
+      comSenha: z.boolean().optional(),
+      incluirAudio: z.boolean().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const token = await comRecusaTraduzida(() => ligarLinkAberto(ctx.user.openId, input.meetingId, {
-        userId: ctx.user.id,
-        ipAddress: ipDaCliente(ctx.req),
-        userAgent: ctx.req.headers["user-agent"],
-        idioma: input.idioma,
-        textoExibido: input.textoExibido,
-        versaoDaAutorizacao: input.versaoDaAutorizacao,
-      }));
-      return { token };
+      // Ligar com senha é um scrypt, como a senha nova: gasta uma vaga do
+      // mesmo teto, antes do serviço. A vaga volta na recusa, na falha e
+      // quando nenhuma senha saiu (o link já estava ligado).
+      const soltarVaga = input.comSenha === true ? tetoDasSenhasDoLink.reservar(ctx.user.openId) : () => {};
+      try {
+        const ligado = await comRecusaTraduzida(() => ligarLinkAbertoComOpcoes(ctx.user.openId, input.meetingId, {
+          userId: ctx.user.id,
+          ipAddress: ipDaCliente(ctx.req),
+          userAgent: ctx.req.headers["user-agent"],
+          idioma: input.idioma,
+          textoExibido: input.textoExibido,
+          versaoDaAutorizacao: input.versaoDaAutorizacao,
+        }, { comSenha: input.comSenha, incluirAudio: input.incluirAudio }));
+        if (ligado.senha === null) soltarVaga();
+        return ligado;
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
     }),
 
-  desligarLinkAberto: protectedProcedure
+  // Uma senha nova para o link ligado (H23): liga a senha no link que não
+  // tinha, ou troca a que havia, e a anterior deixa de valer na hora. A
+  // auditoria vai na mesma transação.
+  novaSenhaDoLink: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDasSenhasDoLink.reservar(ctx.user.openId);
+      try {
+        const senha = await comRecusaTraduzida(() => novaSenhaDoLink(ctx.user.openId, input.meetingId, {
+          userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"],
+        }));
+        return { senha };
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
+    }),
+
+  // Tira a senha do link ligado (H23): quem tem o endereço volta a abrir sem ela.
+  tirarSenhaDoLink: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await comRecusaTraduzida(() => tirarSenhaDoLink(ctx.user.openId, input.meetingId, {
+        userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"],
+      }));
+      return { success: true };
+    }),
+
+  // Se o link ligado leva o áudio e o player (H23). A regra vale na consulta do
+  // link (server/link-aberto-da-reuniao.ts), não só na tela.
+  mudarAudioDoLink: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), incluirAudio: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await comRecusaTraduzida(() => mudarAudioDoLink(ctx.user.openId, input.meetingId, input.incluirAudio, {
+        userId: ctx.user.id, ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"],
+      }));
+      return { success: true };
+    }),
+
+  desligarLinkAberto: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       await comRecusaTraduzida(() => desligarLinkAberto(ctx.user.openId, input.meetingId));
@@ -521,7 +1100,65 @@ export const meetingsRouter = router({
       return { success: true };
     }),
 
-  decideEntity: protectedProcedure
+  // H22: o resumo por e-mail (server/resumo-por-email.ts). Com um toque, a
+  // WRW manda o link aberto da reunião à própria dona, às participantes da
+  // agenda que ela escolher e a e-mails que ela digitar, com texto fixo no
+  // idioma da reunião. O link desligado só liga com a mesma confirmação do
+  // "Compartilhar por link", que vai para a auditoria junto com o envio. Tetos
+  // por envio, por reunião e por dona; a Resend fora do ar deixa o pedido
+  // guardado para o "Tentar de novo". Só a dona: reunião de outra conta é
+  // "não encontrada".
+  resumoPorEmail: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(({ ctx, input }) => painelDoResumoPorEmail(ctx.user.openId, input.meetingId)),
+
+  mandarResumoPorEmail: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      paraMim: z.boolean(),
+      participantes: emailsDoPedido,
+      outros: emailsDoPedido,
+      // Só quando o link está desligado: a palavra da dona, como em ligarLinkAberto.
+      autorizacao: z.object({
+        autorizacaoDasPessoas: z.literal(true),
+        idioma: z.enum(MEETING_TRANSCRIPT_LANGUAGES),
+        textoExibido: z.string().trim().min(1).max(1000),
+        versaoDaAutorizacao: z.literal(VERSAO_DA_AUTORIZACAO_COM_NOMES).optional(),
+      }).optional(),
+    }))
+    .mutation(({ ctx, input }) => comRecusaTraduzida(() => mandarResumoPorEmail(
+      { id: ctx.user.id, openId: ctx.user.openId },
+      input.meetingId,
+      {
+        paraMim: input.paraMim,
+        participantes: input.participantes,
+        outros: input.outros,
+        autorizacao: input.autorizacao
+          ? { idioma: input.autorizacao.idioma, textoExibido: input.autorizacao.textoExibido, versaoDaAutorizacao: input.autorizacao.versaoDaAutorizacao }
+          : undefined,
+      },
+      { ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] },
+    ))),
+
+  mandarResumoPorEmailDeNovo: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => mandarResumoPorEmailDeNovo(
+      { id: ctx.user.id, openId: ctx.user.openId },
+      input.meetingId,
+      { ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] },
+    )),
+
+  // O envio automático no fim da reunião (H22), desligado por padrão: vale
+  // para a conta, e não para uma reunião.
+  envioAutomaticoDoResumo: procedimentoDaReuniao
+    .input(z.object({ ligado: z.boolean() }))
+    .mutation(({ ctx, input }) => definirEnvioAutomaticoDoResumo(
+      { id: ctx.user.id, openId: ctx.user.openId },
+      input.ligado,
+      { ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] },
+    )),
+
+  decideEntity: procedimentoDaReuniao
     .input(z.object({ entityId: z.string().uuid(), status: z.enum(["confirmed", "ignored"]) }))
     .mutation(async ({ ctx, input }) => {
       const db = await exigirDb();
@@ -536,7 +1173,7 @@ export const meetingsRouter = router({
       return { success: true };
     }),
 
-  decideContactSuggestion: protectedProcedure
+  decideContactSuggestion: procedimentoDaReuniao
     .input(z.object({
       suggestionId: z.string().uuid(),
       // "self" (N5): "Sou eu". Nenhum contato nasce; o que a pessoa tem e
@@ -622,7 +1259,7 @@ export const meetingsRouter = router({
 
   // N5: os contatos da dona que podem ser a pessoa da reunião (o mesmo
   // e-mail, telefone ou nome), para o "Vincular a um contato".
-  candidatosParaVincular: protectedProcedure
+  candidatosParaVincular: procedimentoDaReuniao
     .input(z.object({ suggestionId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const candidatos = await candidatosParaVincular(ctx.user.openId, input.suggestionId);
@@ -633,7 +1270,7 @@ export const meetingsRouter = router({
   // N5: cada pessoa da reunião com o que tem e precisa e as conexões que
   // nasceram dela — o ramo "Conexões desta reunião" do mapa mental e a linha
   // do resumo. Só para a dona: o link aberto não tem nada disto.
-  conexoes: protectedProcedure
+  conexoes: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const termoSmartMatch = await hasValidConsent(ctx.user.id, "termo_smart_match");
@@ -643,13 +1280,273 @@ export const meetingsRouter = router({
     }),
 
   /** H3: o nome de uma voz da transcrição por falante; nome vazio tira o nome. */
-  nomearFalante: protectedProcedure
+  nomearFalante: procedimentoDaReuniao
     .input(z.object({ meetingId: z.string().uuid(), falante: z.string().regex(FORMATO_DO_FALANTE), nome: z.string().max(NOME_DO_FALANTE_MAX * 2) }))
     .mutation(async ({ ctx, input }) => {
-      const nomes = await nomearFalante(ctx.user.openId, input.meetingId, input.falante, input.nome);
+      const nomes = await nomearFalante(ctx.user.openId, input.meetingId, input.falante, input.nome).catch(erro => {
+        if (erro instanceof NomesSoComReuniaoPronta) throw new TRPCError({ code: "CONFLICT", message: erro.message });
+        throw erro;
+      });
       if (!nomes) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });
       return { nomes };
     }),
+  // H18: a dona edita a transcrição de uma reunião pronta dela (o texto ou a
+  // voz de um trecho, localizar e substituir, voltar ao original), com a
+  // transcrição e a revisão que a tela leu. Recusas como código que a tela
+  // traduz (shared/editar-transcricao.ts): NOT_FOUND (outra conta, não
+  // existe ou na lixeira, H7d: a guarda antes do zod e o serviço na leitura
+  // travada), CONFLICT (não está pronta, ou a transcrição mudou),
+  // PRECONDITION_FAILED (documento), BAD_REQUEST (trecho inválido, ou que
+  // ficaria vazio) e TOO_MANY_REQUESTS (o teto). A auditoria vai na transação
+  // da mudança (server/editar-transcricao.ts).
+  editarTranscricao: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      // A transcrição que a tela leu: o servidor compara com a de agora.
+      transcricaoId: z.string().min(1).max(64),
+      revisao: z.number().int().min(0),
+      operacao: operacaoDaEdicao,
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaEdicao.reservar(ctx.user.openId);
+      try {
+        const feita = await editarTranscricao(ctx.user.openId, input.meetingId, {
+          transcricaoId: input.transcricaoId, revisao: input.revisao, operacao: input.operacao,
+        }, {
+          userId: ctx.user.id,
+          ipAddress: ipDaCliente(ctx.req),
+          userAgent: ctx.req.headers["user-agent"],
+        });
+        if (!feita.mudou) soltarVaga();
+        return feita;
+      } catch (erro) {
+        soltarVaga();
+        if (erro instanceof RecusaDaEdicao) throw new TRPCError({ code: erro.codigoTrpc, message: erro.message });
+        throw erro;
+      }
+    }),
+  // H7c: os detalhes da reunião (o título, as etiquetas, o "Onde foi", o
+  // contato e o contexto). Campo ausente não muda; nulo (ou lista vazia) tira.
+  // A posse do contato e do contexto é conferida antes de gravar; a reunião de
+  // outra conta é NOT_FOUND. O link aberto não leva nada disto
+  // (server/detalhes-da-reuniao.ts).
+  atualizarDetalhes: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      titulo: z.string().trim().min(TITULO_DA_REUNIAO_MIN).max(TITULO_DA_REUNIAO_MAX).optional(),
+      // O servidor normaliza (espaços, repetidas, o corte em ETIQUETA_MAX); aqui só o teto do pedido.
+      etiquetas: z.array(z.string().max(ETIQUETA_MAX * 2)).max(ETIQUETAS_POR_REUNIAO_MAX * 2).nullable().optional(),
+      ondeFoi: z.string().max(ONDE_FOI_MAX * 2).nullable().optional(),
+      contactId: z.number().int().positive().nullable().optional(),
+      contextId: z.string().uuid().nullable().optional(),
+    }))
+    .mutation(({ ctx, input }) => {
+      const { meetingId, ...campos } = input;
+      return atualizarDetalhesDaReuniao(ctx.user.openId, meetingId, campos);
+    }),
+
+  // H7b: a busca entre as reuniões da dona, na transcrição e nos itens do
+  // resumo que não foram ignorados, com os filtros da tela
+  // (server/busca-de-reunioes.ts). Até 30 resultados, com o teto de 120 buscas
+  // a cada 10 minutos (tetoDaBusca). Consulta, e não mutação: a tela a pede a
+  // cada termo; a vaga é gasta por pedido que passa da validação.
+  buscar: procedimentoDaReuniao
+    .input(z.object({
+      termo: z.string().trim().min(TERMO_DA_BUSCA_MIN).max(TERMO_DA_BUSCA_MAX),
+      etiqueta: z.string().max(ETIQUETA_MAX * 2).nullish(),
+      origem: z.enum(ORIGENS_DO_FILTRO).nullish(),
+      periodo: z.enum(PERIODOS_DO_FILTRO).nullish(),
+      contactId: z.number().int().positive().nullish(),
+      contextId: z.string().uuid().nullish(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaBusca.reservar(ctx.user.openId);
+      const { termo, ...filtros } = input;
+      try {
+        return await buscarNasReunioes(ctx.user.openId, termo, filtros);
+      } catch (erro) {
+        soltarVaga();
+        throw erro;
+      }
+    }),
+
+  // H17: juntar duas ou mais reuniões numa só, na ordem dada (a primeira
+  // fica). Responde quando a transação termina, com a reunião que fica em
+  // 'uploading'; a fila monta a transcrição e refaz o resumo em segundo plano
+  // (server/juntar-reunioes.ts). Recusas como código que a tela traduz:
+  // NOT_FOUND (outra conta, ou não existe), CONFLICT (alguma não está pronta),
+  // PRECONDITION_FAILED (documento ou YouTube, áudio vencido, longa demais),
+  // BAD_REQUEST (repetida) e TOO_MANY_REQUESTS (o teto de junções).
+  juntar: procedimentoDaReuniao
+    .input(z.object({ meetingIds: z.array(z.string().uuid()).min(2).max(REUNIOES_POR_JUNCAO_MAX) }))
+    .mutation(async ({ ctx, input }) => {
+      const soltarVaga = tetoDaJuncao.reservar(ctx.user.openId);
+      try {
+        return await juntarReunioes(ctx.user.openId, input.meetingIds, {
+          userId: ctx.user.id,
+          ipAddress: ipDaCliente(ctx.req),
+          userAgent: ctx.req.headers["user-agent"],
+        });
+      } catch (erro) {
+        soltarVaga();
+        if (erro instanceof RecusaDaJuncao) throw new TRPCError({ code: erro.codigoTrpc, message: erro.message });
+        throw erro;
+      }
+    }),
+
+  // H7d: as pastas da dona (server/pastas-de-reunioes.ts), com quantas
+  // reuniões fora da lixeira cada uma tem. Nome, ícone e cor de listas
+  // fechadas; as recusas saem como código (RECUSAS_DAS_PASTAS), que a tela
+  // traduz. Sem IA nem bucket: sem teto.
+  pastas: procedimentoDaReuniao.query(({ ctx }) => listarPastas(ctx.user.openId)),
+
+  criarPasta: procedimentoDaReuniao
+    .input(z.object({ nome: nomeDaPastaNoPedido, icone: z.enum(ICONES_DA_PASTA), cor: z.enum(CORES_DA_PASTA) }))
+    .mutation(({ ctx, input }) => comRecusaDaPasta(() => criarPasta(ctx.user.openId, input))),
+
+  editarPasta: procedimentoDaReuniao
+    .input(z.object({
+      pastaId: z.string().uuid(), nome: nomeDaPastaNoPedido.optional(), icone: z.enum(ICONES_DA_PASTA).optional(), cor: z.enum(CORES_DA_PASTA).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { pastaId, ...dados } = input;
+      await comRecusaDaPasta(() => editarPasta(ctx.user.openId, pastaId, dados));
+      return { success: true };
+    }),
+
+  // Apagar a pasta não apaga reunião: as dela ficam sem pasta.
+  apagarPasta: procedimentoDaReuniao
+    .input(z.object({ pastaId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => comRecusaDaPasta(() => apagarPasta(ctx.user.openId, input.pastaId))),
+
+  // Põe as reuniões escolhidas numa pasta, ou as tira de pasta (pastaId nulo).
+  // A guarda recusa a reunião da lixeira, e o serviço confere de novo.
+  moverParaPasta: procedimentoDaReuniao
+    .input(z.object({ meetingIds: idsDaAcao, pastaId: z.string().uuid().nullable() }))
+    .mutation(({ ctx, input }) => comRecusaDaPasta(() => moverParaPasta(ctx.user.openId, input.meetingIds, input.pastaId))),
+
+  // H7d: a lixeira (server/lixeira-de-reunioes.ts). Os ÚNICOS procedimentos
+  // sem a guarda da lixeira: são os que leem ou mexem na reunião de lá, e cada
+  // serviço confere sozinho a dona, a reunião de fora e o prazo de 30 dias.
+  // Mandar para a lixeira desliga o link aberto e grava a auditoria na mesma
+  // transação; apagar de vez segue a exclusão de sempre (deletePrivateMeeting).
+  lixeira: protectedProcedure.query(({ ctx }) => listarLixeira(ctx.user.openId)),
+
+  mandarParaALixeira: protectedProcedure
+    .input(z.object({ meetingIds: idsDaAcao }))
+    .mutation(({ ctx, input }) => comRecusaDaLixeira(() => mandarParaALixeira(ctx.user.openId, input.meetingIds, provaDaDona(ctx)))),
+
+  restaurarDaLixeira: protectedProcedure
+    .input(z.object({ meetingIds: idsDaAcao }))
+    .mutation(({ ctx, input }) => comRecusaDaLixeira(() => restaurarDaLixeira(ctx.user.openId, input.meetingIds, provaDaDona(ctx)))),
+
+  apagarDeVez: protectedProcedure
+    .input(z.object({ meetingIds: z.array(z.string().uuid()).min(1).max(REUNIOES_POR_EXCLUSAO_MAX) }))
+    .mutation(({ ctx, input }) => comRecusaDaLixeira(() => apagarDeVez(ctx.user.openId, input.meetingIds, provaDaDona(ctx)))),
+
+  // Uma rodada por pedido (até REUNIOES_POR_EXCLUSAO_MAX reuniões); `restam`
+  // diz à tela se pede de novo.
+  esvaziarLixeira: protectedProcedure.mutation(({ ctx }) => esvaziarLixeira(ctx.user.openId, provaDaDona(ctx))),
+
+  // As fotos e os desenhos do resumo (H4g e H4h, server/anexos-do-resumo.ts):
+  // a imagem chega em base64, já reduzida no aparelho; o servidor confere o
+  // conteúdo e tira os metadados. O teto do base64 é o do arquivo (10 MB) em
+  // base64, com folga para o cabeçalho "data:".
+  anexos: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(({ ctx, input }) => comRecusaDoAnexo(() => anexosDaDona(ctx.user.openId, input.meetingId))),
+
+  anexarAoResumo: procedimentoDaReuniao
+    .input(z.object({
+      meetingId: z.string().uuid(),
+      tipo: z.enum(TIPOS_DE_ANEXO),
+      dataBase64: z.string().min(1).max(Math.ceil(ANEXO_BYTES_MAX / 3) * 4 + 100),
+    }))
+    .mutation(({ ctx, input }) => comRecusaDoAnexo(() => anexarAoResumo(ctx.user.openId, input.meetingId, { tipo: input.tipo, dataBase64: input.dataBase64 }, provaDaDona(ctx)))),
+
+  apagarAnexo: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), anexoId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => comRecusaDoAnexo(() => apagarAnexo(ctx.user.openId, input.meetingId, input.anexoId, provaDaDona(ctx)))),
+
+  // O Excluir de sempre, imediato: o caminho do "Descartar" da gravação em
+  // curso (useGravacaoEmPartes, os descartes pendentes e a retomada), do
+  // documento que não subiu e da gravação ainda no ar. A tela da reunião
+  // pronta manda para a lixeira (mandarParaALixeira).
+  // ── As participantes (R1b) e as vozes ligadas às contas (H3c) ──────────
+  // Todos pela guarda da lixeira: para a dona, a reunião dela na lixeira é
+  // REUNIAO_NA_LIXEIRA; para a participante, a guarda não acha nada (só lê as
+  // reuniões da própria conta) e o serviço recusa pela reuniaoVisivel().
+  // Recusas como código que a tela traduz (shared/participantes-da-reuniao.ts
+  // e shared/vozes-da-reuniao.ts).
+
+  /** A dona vê todas e os convites pendentes; a participante, só os nomes das que aceitaram e o da dona. */
+  participantes: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .query(({ ctx, input }) => participantesDaReuniao(ctx.user, input.meetingId)),
+
+  /** Um convite por link de uso único (o token sai só nesta resposta). A primeira vez na reunião pede a confirmação da dona. */
+  criarConvite: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), autorizacao: autorizacaoDasParticipantes }))
+    .mutation(({ ctx, input }) => criarConvite(ctx.user.openId, input.meetingId, provaDaDona(ctx), input.autorizacao)),
+
+  /** Convida uma conexão aceita da dona; o convite aparece na conta dela. */
+  convidarConexao: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), conexaoId: z.number().int().positive(), autorizacao: autorizacaoDasParticipantes }))
+    .mutation(({ ctx, input }) => convidarConexao(ctx.user, input.meetingId, input.conexaoId, provaDaDona(ctx), input.autorizacao)),
+
+  /** A dona tira o convite ainda não aceito. */
+  cancelarConvite: procedimentoDaReuniao
+    .input(z.object({ participanteId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => removerParticipante(ctx.user.openId, input.participanteId, provaDaDona(ctx), { soConvite: true })),
+
+  /** A dona tira uma participante: o acesso acaba na hora, e as vozes dela saem. */
+  removerParticipante: procedimentoDaReuniao
+    .input(z.object({ participanteId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => removerParticipante(ctx.user.openId, input.participanteId, provaDaDona(ctx))),
+
+  /** A página do convite: o título, o nome da dona e se o convite ainda vale. */
+  verConvite: procedimentoDaReuniao
+    .input(z.object({ token: z.string().max(64) }))
+    .query(({ ctx, input }) => verConvite(input.token, ctx.user)),
+
+  aceitarConvite: procedimentoDaReuniao
+    .input(z.object({ token: z.string().max(64) }))
+    .mutation(({ ctx, input }) => aceitarConvite(input.token, ctx.user, provaDaDona(ctx))),
+
+  responderConviteDeConexao: procedimentoDaReuniao
+    .input(z.object({ participanteId: z.string().uuid(), aceitar: z.boolean() }))
+    .mutation(({ ctx, input }) => responderConviteDeConexao(ctx.user, input.participanteId, input.aceitar, provaDaDona(ctx))),
+
+  /** As reuniões compartilhadas com a conta e os convites de conexão pendentes. */
+  compartilhadasComigo: procedimentoDaReuniao.query(({ ctx }) => compartilhadasComigo(ctx.user)),
+
+  sairDaReuniao: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await sairDaReuniao(ctx.user, input.meetingId, provaDaDona(ctx));
+      return { success: true };
+    }),
+
+  /** H3c: liga uma voz à conta de quem falou ("owner" ou o id de uma participante ativa); null desliga. */
+  ligarVozAConta: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), falante: z.string().regex(FORMATO_DO_FALANTE), conta: z.union([z.literal(CONTA_DA_DONA), z.string().uuid()]).nullable() }))
+    .mutation(async ({ ctx, input }) => ({ contas: await ligarVozAConta(ctx.user.openId, input.meetingId, input.falante, input.conta) })),
+
+  /** H3c: "F3 é a mesma pessoa que F1". */
+  juntarVozes: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), voz: z.string().regex(FORMATO_DO_FALANTE), principal: z.string().regex(FORMATO_DO_FALANTE) }))
+    .mutation(async ({ ctx, input }) => ({ juntadas: await juntarVozes(ctx.user.openId, input.meetingId, input.voz, input.principal) })),
+
+  separarVoz: procedimentoDaReuniao
+    .input(z.object({ meetingId: z.string().uuid(), voz: z.string().regex(FORMATO_DO_FALANTE) }))
+    .mutation(async ({ ctx, input }) => ({ juntadas: await separarVoz(ctx.user.openId, input.meetingId, input.voz) })),
+
+  //
+  // Sem a guarda da lixeira, de propósito: quem chama quer a reunião fora
+  // agora, e a que foi para a lixeira por outro aparelho no meio também sai
+  // (deletePrivateMeeting não olha o trashed_at). Com a guarda, o NOT_FOUND
+  // dela era lido pelo descarte pendente como "já saiu", e a gravação que a
+  // dona descartou ficava 30 dias restaurável na lixeira.
   delete: protectedProcedure.input(z.object({ meetingId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const deleted = await deletePrivateMeeting(ctx.user.openId, input.meetingId);
     if (!deleted) throw new TRPCError({ code: "NOT_FOUND", message: "Reunião não encontrada." });

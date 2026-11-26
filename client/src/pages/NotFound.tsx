@@ -42,7 +42,7 @@ export default function NotFound() {
       >
         {/* Logo */}
         <Link href="/">
-          <span className="inline-block text-2xl font-black tracking-tight mb-10 cursor-pointer text-white">WRW</span>
+          <span className="inline-block text-2xl font-black tracking-tight mb-10 cursor-pointer text-white">Marquesa Global Match</span>
         </Link>
 
         {/* 404 number */}

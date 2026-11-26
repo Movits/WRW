@@ -133,15 +133,16 @@ describe("Oportunidades — lista e vitrine em erro", () => {
 describe("Dashboard — matches em erro", () => {
   const perfil = { profile: { displayName: "Glenda", jobTitle: "CEO", city: "São Paulo", profileCompleteness: 80 } };
 
-  it("stats mostram '—' (não zero) e a aba de matches traz o alerta, sem convite a gerar os primeiros matches", async () => {
+  it("o resumo diz que não carregou (não 'nenhuma') e a aba de matches traz o alerta, sem convite a gerar os primeiros matches", async () => {
     duble.respostas["profile.get"] = { data: perfil };
     duble.respostas["matches.list"] = emErro;
     duble.respostas["connections.list"] = { data: [] };
     duble.respostas["consent.status"] = { data: { accepted: true, document: null } };
     render(<Dashboard />);
 
-    // Os cards entram com um pequeno atraso (animação de entrada).
-    await waitFor(() => expect(screen.getAllByText("—")).toHaveLength(3));
+    // Desde 25/11 os números do Início são o resumo em frases (components/ResumoDasConexoes.tsx).
+    await waitFor(() => expect(screen.getByText("Não deu para carregar suas sugestões agora")).toBeInTheDocument());
+    expect(screen.queryByText("Nenhuma sugestão nova por enquanto")).not.toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent(MENSAGEM);
     expect(screen.queryByText(i18n.t("dashboard.noMatches"))).not.toBeInTheDocument();
     expect(screen.queryByText("✨ Encontrar conexões para mim")).not.toBeInTheDocument();
