@@ -121,7 +121,7 @@ faz parte do trabalho.
   `corrigir-colunas-json.mjs`, `normalizar-buscas-antigas.mjs`, `recuperar-enriquecimento.ts`,
   `demonstrar-etapa-11.ts`, `limpar-contextos-how-met.ts` e `reavaliar-prata-antiga.ts`. O
   exame `checar-producao.mjs` cria e apaga contas QA no banco do `--env`. Só
-  `definir-senha-local.mjs` recusa banco remoto; `publicar-documento.mjs` exige
+  `definir-senha-local.mjs` e `semear-rede-com-armadilhas.mjs` recusam banco remoto; `publicar-documento.mjs` exige
   `--confirmo-producao`.
 - **O repositório é PÚBLICO.** Nunca commitar `.env*`, chave de API, senha de banco, dump do
   banco (tem e-mails e senhas de usuárias reais; vive só no repositório privado de backup)

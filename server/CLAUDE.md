@@ -265,10 +265,58 @@ sem nomeá-lo → 60 com tipo `semantic` (`necessidadeDeclaraOAssuntoDoServico`:
 curado de tributário, internacionalização e regulatório sanitário, e a necessidade tem de
 pedir ajuda ou uma ação, sem pedir no resto a contraparte, o capital ou o registro de
 marca: "Entrada de investidor internacional" não casa), mesma categoria → 60 (para
-serviço, só no par que a regra não lê num idioma novo, `regraNaoLeOPar`). O critério
-semântico vale 45, abaixo do limiar 50: está desligado por construção e o texto não sai
-para embeddings. A regra da spec é tag exata, mesmo objeto ou mesmo núcleo em direções
-OPOSTAS, ou mesma categoria; duas pontas que querem a mesma coisa são concorrentes.
+serviço, só no par que a regra não lê num idioma novo, `regraNaoLeOPar`) e, por último, o
+critério semântico ESTREITO → 55 (abaixo da categoria e do e-mail). A regra da spec é tag
+exata, mesmo objeto ou mesmo núcleo em direções OPOSTAS, ou mesma categoria; duas pontas
+que querem a mesma coisa são concorrentes.
+
+**N7 (25/11), o que entrou nos motores determinísticos** (valem no privado e, por
+`nomeiamAMesmaCoisa` e `satisfaz`, no de perfis):
+
+- **Verbo conjugado é direção** (`shared/direcao-do-termo.ts`): "Exportamos frutas",
+  "Vendo vinhos", "Fornece embalagens", "Compramos gado", com o pronome ("Nós exportamos")
+  e o "se" ("Vende-se terreno"). "Exportamos frutas" × "Exportar frutas" são concorrentes
+  (achado C06). "Compra" segue substantivo e "contrato" fica fora (é o documento).
+- **O mesmo termo em outra grafia** (`mesmoTermoEmOutraGrafia`): o termo INTEIRO, palavra
+  a palavra e na mesma ordem, igual sem acento, no singular ou com UMA troca de letra numa
+  palavra de 8 letras ou mais, com a mesma inicial, em termo de duas palavras de conteúdo
+  ou mais; também a menos do lugar. "Soja em grão" × "soja em graos", "Embalagens
+  sustentáveis" × "embalagem sustentavel", "Transporte de cargas" × "Trasporte de carga pra
+  Manaus". Nunca palavra solta, nunca palavra de direção, nunca entre concorrentes. Limite
+  aceito: duas palavras longas a uma letra uma da outra ("material" × "maternal") casam
+  dentro do mesmo termo. As capitais sem outra leitura (Manaus, Belém, Curitiba...) viraram
+  lugar; Natal, Salvador, Vitória, Palmas, Recife e Fortaleza não.
+- **Necessidade que na verdade OFERECE** (`necessidadeEhOferta`, `shared/tipo-da-oferta.ts`,
+  validação da #154): marca de oferta ("ofereço", "oferece", "oferecemos", "disponível",
+  "prestamos", "we offer", "ofrecemos") sem nenhuma marca de pedido no texto ("gostaria",
+  "desejo", "quisiera" e "we'd like" são marca de pedido desde a validação da #259). Diante de um
+  SERVIÇO não é necessidade declarada: o privado dá 0 com o bloqueio
+  `servico-sem-demanda-expressa` ANTES do slug, e o `satisfaz` do de perfis devolve falso.
+  "Contabilidade" × "Ofereço contabilidade para MEI" valia 100, com e-mail. "Procuro
+  contador disponível aos sábados" continua pedindo.
+
+**O critério semântico estreito** (`server/match-service.ts`, só no motor privado): a
+similaridade de cosseno dos RÓTULOS (`gemini-embedding-001`, `SEMANTIC_SIMILARITY`; a
+descrição não entra) vale 55 quando chega a `LIMIAR_SEMANTICO_ESTREITO` (0,9, PROVISÓRIO) e
+`semanticoEstreitoPodeValer` passa: não concorrentes, direções efetivas opostas (oferta no
+que possui, procura no que procura, também pelas palavras), oferta que não é serviço (o
+portão da demanda expressa segue com as regras determinísticas) e NENHUMA palavra de
+conteúdo em comum (a parecença viria da palavra solta; o custo é a paráfrase que repete
+uma palavra, P19 da rede). As guardas vêm antes da chamada: o texto só vai ao provedor
+quando a resposta pode mudar alguma coisa. **Desligado por padrão**: só liga com
+`MATCH_SEMANTICO_ESTREITO=1`, porque o limiar ainda não foi calibrado com os vetores do
+gabarito (a fixture sai de `scripts/rede-de-teste/gerar-embeddings-da-rede.mjs`, que o
+Roberto roda com a chave) e porque o termo do Smart Match (`docs/termos/termo-smart-match.md`)
+diz que nada sai da plataforma com ele desligado: ligar em produção exige publicar a versão
+nova do termo antes (jurídico; republicar revoga os aceites). O de perfis não tem critério
+semântico.
+
+**A medida no gabarito** (`server/rede-com-armadilhas.test.ts`, 44 pares,
+`docs/medir-o-match.md`), com o semântico desligado: privado de 78% de precisão e 64% de
+cobertura (4 armadilhas proibidas: C06, S06, S07, S08) para 100% e 77% (nenhuma); perfis de
+79% e 50% (3: S06, S07, S08) para 100% e 64% (nenhuma). Com similaridade 1 para todo par, as
+guardas ainda recusam toda armadilha proibida; só P08, P09, P14, P15, N01 e N02 chegam ao
+limiar.
 
 **`server/matching.ts`** cruza perfis de usuárias em 6 dimensões ponderadas, com LLM só no
 insight: complementaridade 30, setor 20, investimento 20, especialidade 15, valores 10,

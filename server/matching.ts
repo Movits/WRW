@@ -10,7 +10,7 @@ import crypto from "crypto";
 import { setImmediate as cederAVez } from "node:timers/promises";
 import { hasValidConsent, usersComConsentimento } from "./routers/consent";
 import { nomeiamAMesmaCoisa, saoConcorrentes, slugDoTermo } from "@shared/direcao-do-termo";
-import { classificarOferta, ehServicoDeAssessoria, necessidadeDeclaraOAssuntoDoServico, necessidadeNomeiaOServico, regraNaoLeOPar } from "@shared/tipo-da-oferta";
+import { classificarOferta, ehServicoDeAssessoria, necessidadeDeclaraOAssuntoDoServico, necessidadeEhOferta, necessidadeNomeiaOServico, regraNaoLeOPar } from "@shared/tipo-da-oferta";
 import { chaveAtualDaBusca } from "@shared/o-que-busca";
 import { CATEGORIAS_O_QUE_PRECISO, O_QUE_PRECISO_LEGADO } from "@shared/o-que-preciso";
 import { necessidadesEscritasDoPerfil, rotularBuscas } from "./portao-da-demanda-expressa";
@@ -257,6 +257,10 @@ function satisfaz(have: string, need: string): boolean {
   // (`nomeiamAMesmaCoisa`, que nunca junta pelo lugar em comum) e as regras da
   // demanda expressa.
   if (saoConcorrentes(have, need)) return false;
+  // N7 (validação da #154): necessidade que na verdade OFERECE o serviço
+  // ("Ofereço contabilidade para MEI") não é necessidade declarada, como no
+  // motor privado.
+  if (necessidadeEhOferta(need) && classificarOferta(have, null) === "servico") return false;
   if (have === need) return true;
   if (HAVE_SATISFIES_NEED[have]?.includes(need)) return true;
   if (slugDoTermo(have) === slugDoTermo(need) || nomeiamAMesmaCoisa(have, need)) return true;

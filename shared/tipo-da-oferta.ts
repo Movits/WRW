@@ -2099,6 +2099,7 @@ const LOCUCOES_DE_PEDIDO = new Set(["em", "a", "in"]);
 /** A palavra em `k` é marca de pedido usada como pedido, e não o substantivo depois de preposição ou artigo. */
 function marcaDePedidoEm(palavras: readonly string[], k: number): boolean {
   const palavra = palavras[k];
+  if (ehLikeDePedido(palavras, k)) return true;
   if (!MARCAS_DE_PEDIDO.has(palavra)) return false;
   const anterior = palavras[k - 1];
   if (!MARCAS_QUE_TAMBEM_SAO_SUBSTANTIVO.has(palavra) || anterior === undefined || LOCUCOES_DE_PEDIDO.has(anterior)) return true;
@@ -2106,7 +2107,7 @@ function marcaDePedidoEm(palavras: readonly string[], k: number): boolean {
 }
 
 /** As marcas de pedido do inglês, que põe o qualificador ANTES do serviço: "We need a MARITIME lawyer". */
-const MARCAS_DE_PEDIDO_EM_INGLES = new Set(["need", "needs", "want", "wants", "looking", "seeking", "seeks", "seek", "require", "requires", "hiring"]);
+const MARCAS_DE_PEDIDO_EM_INGLES = new Set(["need", "needs", "want", "wants", "looking", "seeking", "seeks", "seek", "require", "requires", "hiring", "like"]);
 /** Entre o pedido e o serviço, abrem outra coisa que não é o serviço: "Procuro QUEM compre consultoria", "We need SOMEONE to...". */
 const QUEM_NAO_E_O_SERVICO = new Set(["quem", "alguem", "quien", "alguien", "someone", "somebody", "anyone", "anybody", "people", "pessoas"]);
 
@@ -2145,6 +2146,33 @@ function pedidoPedeOServico(palavras: string[]): boolean {
 /** O texto pede o serviço que nomeia (`pedidoPedeOServico`)? Para a guarda de concorrência do portão. */
 export function textoPedeOServico(texto: string): boolean {
   return pedidoPedeOServico(palavrasDe(texto));
+}
+
+/**
+ * Marcas de OFERTA: quem escreve isto no campo de necessidade está oferecendo, não pedindo. "Ofereço contabilidade
+ * para MEI", "Contadora oferece serviços para MEI", "Advogado disponível para empresas", "We offer legal advice",
+ * "Ofrecemos asesoría". Conjugadas e no particípio; o infinitivo ("oferecer") fica de fora, porque aparece no pedido
+ * ("Preciso de alguém para oferecer..."), e "oferta" também, que é substantivo ("Oferta de crédito").
+ */
+const MARCAS_DE_OFERTA = new Set([
+  "ofereco", "oferece", "oferecemos", "oferecem", "oferecendo", "oferecido", "oferecida", "oferecidos", "oferecidas",
+  "disponivel", "disponiveis", "disponibilizo", "disponibiliza", "disponibilizamos", "disponibilizam",
+  "presto", "prestamos", "atendo", "atendemos",
+  "offer", "offers", "offering", "available", "provide", "provides", "providing",
+  "ofrezco", "ofrece", "ofrecemos", "ofrecen", "ofreciendo", "disponible", "disponibles",
+]);
+
+/**
+ * A necessidade, na verdade, OFERECE (N7, achado da validação da #154): a prestadora escreveu no campo de
+ * necessidade o que ela presta — "Ofereço contabilidade para MEI", "Contadora oferece serviços para MEI", "Advogado
+ * disponível para empresas". Isso não é necessidade declarada: diante de "Contabilidade" ou "Advocacia" é a
+ * concorrente, e o par valia 100, com e-mail. Vale só quando há marca de oferta e NENHUMA marca de pedido no texto:
+ * "Procuro contador disponível aos sábados" continua pedindo o serviço.
+ */
+export function necessidadeEhOferta(necessidade: string): boolean {
+  const palavras = palavrasDe(necessidade);
+  if (!palavras.some(palavra => MARCAS_DE_OFERTA.has(palavra))) return false;
+  return !palavras.some((_, k) => marcaDePedidoEm(palavras, k));
 }
 
 /**
@@ -2304,8 +2332,9 @@ function comoAtende(oferta: string, categoriaDaOferta: string | null | undefined
   // (e6ddfa4 da #127): "律师事务所" oferecido é a advocacia sem especialidade, "税务咨询" a consultoria tributária.
   const oferecidos = servicosDoRotulo(oferta);
   const palavrasDaNecessidade = palavrasDe(necessidade);
-  // A prestadora que procura clientes não pede o serviço que ela mesma presta: ver `servicoEhQuemPede`.
-  if (servicoEhQuemPede(palavrasDaNecessidade)) return null;
+  // A prestadora que procura clientes não pede o serviço que ela mesma presta: ver `servicoEhQuemPede`. Nem a que
+  // escreve a própria oferta no campo de necessidade (`necessidadeEhOferta`, N7).
+  if (servicoEhQuemPede(palavrasDaNecessidade) || necessidadeEhOferta(necessidade)) return null;
   const complementoDesconhecido = abreComplementoDesconhecido(palavrasDaNecessidade, pedidos);
   // Os DOIS lados nomeiam a família e nada além dela: "Contabilidade" oferecida diante de "Contador" procurado,
   // "Advocacia" diante de "Advogado", "Empresa de consultoria" diante de "Procura consultoria". Não há o que
@@ -2994,16 +3023,27 @@ const MARCAS_DE_PEDIDO = new Set([
   "procura", "procuro", "procurar", "procurando", "busca", "busco", "buscar", "buscando", "precisa", "preciso",
   "precisar", "precisando", "necessita", "necessito", "necessitar", "quer", "quero",
   "precisamos", "buscamos", "procuramos", "queremos", "necessitamos", "desejamos", "gostariamos", "contratar", "contratamos",
+  // N7, ressalva da validação da #259: sem estas, "Gostaria de um contador disponível aos sábados" não tinha marca de
+  // pedido, o "disponível" o fazia passar por oferta (`necessidadeEhOferta`) e o par dava 0.
+  "gostaria", "desejo", "deseja", "desejam", "buscam", "procuram", "querem",
   "requer", "requerem", "solicita", "solicitam", "exige", "exigem",
   "needs", "need", "wants", "want", "looking", "seeking", "seeks", "seek", "requires", "require", "hiring",
   "necesita", "necesito", "necesitamos", "necesitan", "quiere", "quiero", "buscan", "requiere", "requieren",
+  "quisiera", "quisieramos", "quieren", "queremos", "deseo", "deseamos", "desea", "desean",
 ]);
+
+/**
+ * "We would like" e "we'd like" (o apóstrofo separa o "d"): "like" só é pedido nessa locução. Solto, é comparação
+ * ("Products like coffee") e fica fora de MARCAS_DE_PEDIDO.
+ */
+const ehLikeDePedido = (palavras: readonly string[], k: number) =>
+  palavras[k] === "like" && (palavras[k - 1] === "would" || palavras[k - 1] === "d");
 /** Saem da frente do pedido, depois da marca: "precisamos DE UM", "looking FOR", "we need TO". */
 const SAI_DA_FRENTE_DO_PEDIDO = new Set(["for", "to", "with", "por"]);
 
 /** A cabeça do pedido e se houve marca de pedido antes dela. */
 function cabecaDoPedido(palavras: readonly string[]): { indice: number; comMarca: boolean } {
-  const marca = palavras.findIndex(palavra => MARCAS_DE_PEDIDO.has(palavra));
+  const marca = palavras.findIndex((palavra, k) => MARCAS_DE_PEDIDO.has(palavra) || ehLikeDePedido(palavras, k));
   let indice = marca + 1;
   while (indice < palavras.length && (MARCADORES_FRACOS.has(palavras[indice]) || VERBOS_DE_NECESSIDADE.has(palavras[indice])
     || ARTIGOS.has(palavras[indice]) || GENITIVOS.has(palavras[indice]) || PALAVRAS_SEM_ESPECIALIDADE.has(palavras[indice])
@@ -3202,6 +3242,7 @@ function familiaNomeadaEm(palavras: readonly string[], k: number): string | null
  */
 export function necessidadeDeclaraOAssuntoDoServico(oferta: string, categoriaDaOferta: string | null | undefined, necessidade: string): boolean {
   if (classificarOferta(oferta, categoriaDaOferta) !== "servico") return false;
+  if (necessidadeEhOferta(necessidade)) return false;
   // O que a oferta presta: cada serviço coordenado com a sua família e os assuntos que ele mesmo nomeia.
   const oferecidos = partesDoServico(oferta).flatMap(parte => {
     const familia = entenderServico(parte)?.familia;
