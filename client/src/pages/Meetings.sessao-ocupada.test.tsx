@@ -1008,7 +1008,7 @@ describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", 
     expect(duble.enviarParte).toHaveBeenCalledTimes(3);
     expect(toast.warning).toHaveBeenCalledTimes(1);
     expect(toast.warning).toHaveBeenCalledWith(
-      "Não foi possível guardar uma cópia da gravação neste aparelho. Ela continua sendo enviada, mas, se a internet cair, um trecho pode se perder.",
+      "Não foi possível guardar uma cópia da gravação neste aparelho. O envio continua e, se a internet cair, tenta de novo sozinho. Deixe esta página aberta até o envio terminar, para nenhum trecho se perder.",
       { id: "gravacao-sem-copia-no-aparelho", duration: Infinity, closeButton: true },
     );
     await waitFor(() => expect(sessaoOcupada()).toBe(false));

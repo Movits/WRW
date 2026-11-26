@@ -515,7 +515,7 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
  */
 describe("Reuniões — o MP3 em partes quando algo falha no meio (revisão do pacote 4a)", () => {
   const FINS = "wrw:fins-de-gravacao-pendentes";
-  const SEM_COPIA = "Não foi possível guardar uma cópia da gravação neste aparelho. Ela continua sendo enviada, mas, se a internet cair, um trecho pode se perder.";
+  const SEM_COPIA = "Não foi possível guardar uma cópia da gravação neste aparelho. O envio continua e, se a internet cair, tenta de novo sozinho. Deixe esta página aberta até o envio terminar, para nenhum trecho se perder.";
 
   it("a parte que não sobe vai de novo, lida do arquivo, antes de a seguinte entrar, mesmo sem a cópia no aparelho; o fim vai com as 3 partes", async () => {
     duble.guardarParte.mockRejectedValue(new Error("QuotaExceededError"));
