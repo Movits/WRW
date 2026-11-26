@@ -84,6 +84,17 @@ export function abertoNaCascaDasLojas(userAgent: string): boolean {
   return CASCA_DAS_LOJAS.test(userAgent);
 }
 
+/**
+ * Esta página está aberta dentro do app das lojas? Lido na hora, do navegador.
+ * Dentro do app, as telas mostram só as funções: os subtítulos e as descrições
+ * que explicam o produto ficam no site e na página das lojas (pedido da Glenda
+ * em 11/11, cartão "App: pedir Face ID ao abrir como opção e o app só com as
+ * funções"). Os avisos de consentimento, privacidade, erro e prazo continuam.
+ */
+export function noAppDasLojas(): boolean {
+  return typeof navigator !== "undefined" && abertoNaCascaDasLojas(navigator.userAgent);
+}
+
 export function plataformaDeInstalacao({ userAgent, maxTouchPoints, abertoComoApp }: AmbienteDoNavegador): Plataforma {
   if (abertoComoApp || abertoNaCascaDasLojas(userAgent)) return "app-instalado";
   if (NAVEGADOR_EMBUTIDO.test(userAgent)) return "navegador-embutido";
