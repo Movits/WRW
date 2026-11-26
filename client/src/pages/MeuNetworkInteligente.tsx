@@ -10,7 +10,7 @@ import { trpc } from "@/lib/trpc";
 import { AppHeader } from "@/components/AppHeader";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import { rotuloDoCampo } from "@/components/CompletudeDoContato";
-import { ConexaoRegistrada } from "@/components/ConexoesRegistradas";
+import { ConexaoRegistrada, PaginasDasConexoes } from "@/components/ConexoesRegistradas";
 import { ROTA_DAS_REUNIOES, ROTA_GRAVAR } from "@shared/rotas";
 
 /**
@@ -26,7 +26,8 @@ import { ROTA_DAS_REUNIOES, ROTA_GRAVAR } from "@shared/rotas";
  *   link nem preço;
  * - networkInteligente.conexoes: o registro das conexões (internas e com a
  *   rede global), intermediações, negócios e comissionamentos — só com o
- *   termo; sem ele, traço e convite, nunca número.
+ *   termo; sem ele, traço e convite, nunca número. A lista vem em páginas de
+ *   10, da maior para a menor compatibilidade, paginada no servidor (26/11).
  *
  * A busca inteligente é a Memória Inteligente (memory.search), que só olha a
  * rede da dona.
@@ -145,7 +146,8 @@ export default function MeuNetworkInteligente() {
   const utils = trpc.useUtils();
   const resumo = trpc.networkInteligente.resumo.useQuery();
   const minutos = trpc.networkInteligente.minutos.useQuery();
-  const conexoes = trpc.networkInteligente.conexoes.useQuery();
+  const [pagina, setPagina] = useState(1);
+  const conexoes = trpc.networkInteligente.conexoes.useQuery({ pagina }, { placeholderData: anterior => anterior });
   const procurar = trpc.networkInteligente.procurarNaRedeGlobal.useMutation({
     onSuccess: r => {
       // A conta com muitos contatos (a entidade, N4b): a busca vai para a fila do servidor e roda em lotes.
@@ -164,7 +166,8 @@ export default function MeuNetworkInteligente() {
   // Com o termo e o registro lido, o número; sem o termo, o traço; em erro ou carregando, o traço também — nunca um zero inventado.
   const numeroDoRegistro = (valor: number | undefined) => (contagem && valor !== undefined ? valor : "—");
   const detalheDoRegistro = (detalhe: string) => (registro && !registro.termoAceito ? t("networkPanel.internalMatchesNoConsent") : detalhe);
-  const oportunidadeInterna = registro?.termoAceito && registro.lista.some(c => c.origem === "PRIVATE_NETWORK_MATCH" && c.status === "identificada");
+  // Conta TODAS as conexões, não só as da página.
+  const oportunidadeInterna = Boolean(contagem?.internasIdentificadas);
 
   return (
     <>
@@ -314,9 +317,13 @@ export default function MeuNetworkInteligente() {
                     {registro.lista.length === 0 ? (
                       <p className="mt-3 text-sm text-white/45">{t("networkInteligente.connections.empty")}</p>
                     ) : (
-                      <ul className="mt-3 space-y-2">
-                        {registro.lista.map(conexao => <ConexaoRegistrada key={conexao.id} conexao={conexao} />)}
-                      </ul>
+                      <>
+                        <ul className="mt-3 space-y-2">
+                          {registro.lista.map(conexao => <ConexaoRegistrada key={conexao.id} conexao={conexao} />)}
+                        </ul>
+                        <PaginasDasConexoes pagina={registro.pagina} paginas={registro.paginas} total={registro.total}
+                          carregando={conexoes.isFetching} aoMudar={setPagina} />
+                      </>
                     )}
                     <p className="mt-3 text-xs leading-relaxed text-white/40">{t("networkInteligente.connections.commissionNotice")}</p>
                   </>

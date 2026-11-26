@@ -3778,7 +3778,11 @@
       "discardConfirmCancel": "Cancel",
       "reasonPlatformMatch": "Suggested by the profile engine between two members who had accepted the Smart Match terms when the connection was recorded: {{pontuacao}}% compatibility.",
       "reasonPlatformMatchLocked": "Suggested by the profile engine between two members who had accepted the Smart Match terms when the connection was recorded. The compatibility appears when your profile reaches Silver Member.",
-      "reasonNoAuthorization": "The other side withdrew their authorisation, so the details of this connection are no longer shown."
+      "reasonNoAuthorization": "The other side withdrew their authorisation, so the details of this connection are no longer shown.",
+      "pageSummary": "Page {{pagina}} of {{paginas}} · {{total}} in total · from highest to lowest compatibility",
+      "previousPage": "Previous",
+      "nextPage": "Next",
+      "pagesLabel": "Pages of registered connections"
     },
     "global": {
       "description": "Contacts you make available are cross-referenced with platform members and other authorized networks — only by anonymous ID, What I Have and What I Need. Name, phone, email, audio, transcript and notes never leave.",

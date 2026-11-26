@@ -12,7 +12,7 @@ import { ErroDeConsulta } from "@/components/ErroDeConsulta";
 import {
   CompletarInformacoes, DisponibilidadeDoContato, rotuloDoTipoDePessoa, SugestoesDaIA,
 } from "@/components/NetworkInteligenteDoContato";
-import { ConexaoRegistrada } from "@/components/ConexoesRegistradas";
+import { ConexaoRegistrada, PaginasDasConexoes } from "@/components/ConexoesRegistradas";
 import { FormularioDaAcao, mensagemDoErroDaAcao, ProximasAcoes, type ProximaAcao, type ValoresDaAcao } from "@/components/ProximasAcoes";
 import { ROTA_DAS_PROXIMAS_ACOES } from "@shared/proximas-acoes";
 import { rotaDaReuniao } from "@shared/rotas";
@@ -142,6 +142,11 @@ export default function PerfilDoContatoNetwork() {
   const contactId = Number(params.id);
   const valido = Number.isInteger(contactId) && contactId > 0;
   const perfil = trpc.networkInteligente.contato.useQuery({ contactId }, { enabled: valido, retry: (tentativas, erro) => erro.data?.code !== "NOT_FOUND" && tentativas < 2 });
+  // As conexões do contato vêm em páginas de 10, da maior para a menor compatibilidade (26/11).
+  const [pagina, setPagina] = useState(1);
+  const termoAceito = Boolean(perfil.data?.conexoes.termoAceito);
+  const conexoes = trpc.networkInteligente.conexoes.useQuery({ contactId, pagina }, { enabled: valido && termoAceito, placeholderData: anterior => anterior });
+  const paginaDoContato = conexoes.data?.termoAceito ? conexoes.data : null;
   const utils = trpc.useUtils();
   const procurar = trpc.networkInteligente.procurarNaRedeGlobal.useMutation({
     onSuccess: r => {
@@ -269,12 +274,20 @@ export default function PerfilDoContatoNetwork() {
                 </div>
                 {!dados.conexoes.termoAceito ? (
                   <p className="mt-3 text-sm text-white/45">{t("networkInteligente.contact.connectionsNoConsent")}</p>
-                ) : dados.conexoes.lista.length === 0 ? (
+                ) : conexoes.isError ? (
+                  <div className="mt-3"><ErroDeConsulta erro={conexoes.error} aoTentarDeNovo={() => void conexoes.refetch()} /></div>
+                ) : !paginaDoContato ? (
+                  <p role="status" className="mt-3 text-sm text-white/45">{t("networkPanel.loading")}</p>
+                ) : paginaDoContato.lista.length === 0 ? (
                   <p className="mt-3 text-sm text-white/45">{t("networkInteligente.connections.empty")}</p>
                 ) : (
-                  <ul className="mt-3 space-y-2">
-                    {dados.conexoes.lista.map(conexao => <ConexaoRegistrada key={conexao.id} conexao={conexao} />)}
-                  </ul>
+                  <>
+                    <ul className="mt-3 space-y-2">
+                      {paginaDoContato.lista.map(conexao => <ConexaoRegistrada key={conexao.id} conexao={conexao} />)}
+                    </ul>
+                    <PaginasDasConexoes pagina={paginaDoContato.pagina} paginas={paginaDoContato.paginas} total={paginaDoContato.total}
+                      carregando={conexoes.isFetching} aoMudar={setPagina} />
+                  </>
                 )}
               </section>
 

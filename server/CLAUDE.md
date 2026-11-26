@@ -234,8 +234,15 @@ candidatos, pela leitura autorizada, paginada e em ordem de id (sem janela). A c
 entidades indexa o bloco na transação (`indexarContatos`); o resto dos itens entra pela
 varredura do laço (`server/fila-de-cruzamento.ts`, a cada 2 s os novos, de 10 em 10 min a
 tabela e as órfãs). Conta com mais de 300 contatos disponíveis busca pela fila, em lotes de
-200 (`emFila`), com os tetos de registro (100 e 10 por contraparte) valendo pelo trabalho
-inteiro e o cursor andando só até o último contato cruzado por inteiro; conta com mais de 2000
+200 (`emFila`), e a busca na hora que esgota o orçamento de comparações também vai para a
+fila; o cursor anda só até o último contato cruzado por inteiro, e o primeiro de cada lote é
+cruzado inteiro. **Não há teto de conexões** (decisão do Roberto de 26/11: saíram os 100 por
+busca e os 10 por contraparte, que escondiam os associados de uma entidade, e o de 1000 perfis
+de membras lidos): todo par que combina é registrado, uma vez só (a chave do par), e
+`networkInteligente.conexoes` devolve a lista em páginas de 10 paginadas no servidor, da nota
+maior à menor (`paginaDeConexoesDaSolicitante`), com as contagens do painel sobre todas
+(`contarConexoesDaSolicitante`). Proteção de carga é orçamento, fila, lote, cota e página,
+nunca esconder resultado; conta com mais de 2000
 contatos recalcula o motor privado pela fila, e o laço com mais de 200 mil pares "tem" ×
 "preciso" só compara os que têm chave em comum e guarda os 20 MELHORES pares por contato (mais
 os que já existiam). Editar item (T45) reindexa o contato na transação, e mudar o resultado de

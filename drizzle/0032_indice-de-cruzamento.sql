@@ -21,7 +21,6 @@ CREATE TABLE `fila_de_cruzamento` (
 	`vivo` boolean DEFAULT true,
 	`processados` int NOT NULL DEFAULT 0,
 	`conexoes` int NOT NULL DEFAULT 0,
-	`por_contraparte` text,
 	`tentativas` int NOT NULL DEFAULT 0,
 	`erro` varchar(300),
 	`lock_token` varchar(36),

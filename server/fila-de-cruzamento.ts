@@ -17,8 +17,9 @@ import { indexarPendentes, indexarPendentesDesde, ITENS_POR_VARREDURA, limparOrf
  *   - "global": CONTATOS_POR_LOTE contatos por rodada, em ordem de id, com o
  *     cursor gravado; cada lote pergunta ao índice e registra as conexões. O
  *     cursor só anda até o último contato cruzado POR INTEIRO (o lote que para
- *     no orçamento recomeça dele), e os tetos de registro valem pelo TRABALHO
- *     inteiro, como numa busca só: o total e o por contraparte ficam na linha;
+ *     no orçamento recomeça dele). Não há teto de registros (decisão do Roberto
+ *     de 26/11): todo par que combina é registrado, uma vez só (a chave do par),
+ *     e a linha guarda só quantas conexões o trabalho registrou;
  *   - "privado": o recálculo inteiro numa rodada, já indexado (sem o laço
  *     quadrático) e devolvendo a vez ao servidor no meio.
  *
@@ -102,17 +103,6 @@ export async function enfileirarRecalculoPrivado(ownerId: string): Promise<void>
 
 type Trabalho = typeof filaDeCruzamento.$inferSelect;
 
-/** O JSON {hash da contraparte: conexões} da linha, lido sem confiar na forma. */
-function lerPorContraparte(texto: string | null): Map<string, number> {
-  const mapa = new Map<string, number>();
-  if (!texto) return mapa;
-  try {
-    const objeto = JSON.parse(texto) as Record<string, unknown>;
-    for (const [chave, valor] of Object.entries(objeto ?? {})) if (typeof valor === "number") mapa.set(chave, valor);
-  } catch { /* linha estragada: os tetos recomeçam do zero, o total continua na coluna conexoes */ }
-  return mapa;
-}
-
 async function reservar(db: Banco, escopo: { ownerId?: string }, agora: number): Promise<{ trabalho: Trabalho; token: string } | null> {
   const daDona = escopo.ownerId ? eq(filaDeCruzamento.ownerId, escopo.ownerId) : undefined;
   // O trabalho cuja reserva venceu sem o lote terminar, TENTATIVAS vezes, derrubou o processo nelas: desiste.
@@ -177,10 +167,9 @@ export async function rodarUmLote(escopo: { ownerId?: string } = {}): Promise<{ 
     let conexoes = 0;
     let processados = 0;
     let proximoCursor = 0;
-    const tetos = { conexoes: trabalho.conexoes, porContraparte: lerPorContraparte(trabalho.porContraparte) };
     if (autorizada && trabalho.tipo === "global") {
       const { cruzarUmLoteNaRedeGlobal } = await import("./network-rede-global");
-      const lote = await cruzarUmLoteNaRedeGlobal({ id: trabalho.userId, openId: trabalho.ownerId }, Number(trabalho.cursor), undefined, { tetos, antesDeGravar });
+      const lote = await cruzarUmLoteNaRedeGlobal({ id: trabalho.userId, openId: trabalho.ownerId }, Number(trabalho.cursor), undefined, { antesDeGravar });
       conexoes = lote.conexoes;
       processados = lote.processados;
       terminou = lote.proximoId === null;
@@ -192,21 +181,19 @@ export async function rodarUmLote(escopo: { ownerId?: string } = {}): Promise<{ 
       processados = r.total;
     }
     const fim = Date.now();
-    const porContraparte = tetos.porContraparte.size ? JSON.stringify(Object.fromEntries(tetos.porContraparte)) : null;
     if (!terminou) {
       await db.update(filaDeCruzamento).set({
         cursor: proximoCursor, processados: sql`${filaDeCruzamento.processados} + ${processados}`,
-        conexoes: sql`${filaDeCruzamento.conexoes} + ${conexoes}`, porContraparte,
+        conexoes: sql`${filaDeCruzamento.conexoes} + ${conexoes}`,
         tentativas: 0, lockToken: null, lockedUntil: null, atualizadaEm: fim,
       }).where(minha);
     } else {
-      // Terminou. O pedido que chegou no meio (de_novo) recomeça do início, com os tetos da busca zerados;
+      // Terminou. O pedido que chegou no meio (de_novo) recomeça do início, com a contagem zerada;
       // senão, concluída, e a vaga de vivo se abre para o próximo pedido.
       await db.update(filaDeCruzamento).set({
         estado: sql`case when ${filaDeCruzamento.deNovo} then 'pendente' else 'concluida' end`,
         vivo: sql`case when ${filaDeCruzamento.deNovo} then 1 else null end`,
         conexoes: sql`case when ${filaDeCruzamento.deNovo} then 0 else ${filaDeCruzamento.conexoes} + ${conexoes} end`,
-        porContraparte: sql`case when ${filaDeCruzamento.deNovo} then null else ${porContraparte} end`,
         cursor: 0, deNovo: false, processados: sql`${filaDeCruzamento.processados} + ${processados}`,
         tentativas: 0, lockToken: null, lockedUntil: null, atualizadaEm: fim,
       }).where(minha);

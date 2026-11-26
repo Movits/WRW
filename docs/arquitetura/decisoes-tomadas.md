@@ -890,6 +890,38 @@ gravado não se renomeia" no CLAUDE.md da raiz).
 - **Onde:** `server/perfil-de-voz.ts`, `server/fila-de-transcricao.ts`, migração
   `0031_perfil-de-voz`, `client/src/components/PerfilDeVoz.tsx`.
 
+## 26/11/2026 — a rede global mostra todos os matches, em páginas de 10 (N4b)
+
+- **Decisão do Roberto:** sai o teto de 10 conexões por contraparte da busca na rede global
+  (`TETO_POR_CONTRAPARTE_POR_RODADA`, de 15/09, escolhido por uma sessão do Claude, não por
+  ele). Com as entidades, os associados são contatos de UMA conta, e o teto escondia quase
+  todos. O que ele quer: todos os matches que combinam, cada um uma vez só, do melhor (nota)
+  ao pior, em páginas de 10 na tela.
+- **O que mudou:** saíram também o teto de 100 registros por busca
+  (`TETO_DE_REGISTROS_POR_RODADA`, que escondia o resto do mesmo jeito) e o de 1000 perfis de
+  membras lidos (`TETO_DE_MEMBROS`); na fila, a contagem por contraparte e a coluna
+  `fila_de_cruzamento.por_contraparte` (a migração 0032 ainda não tinha ido à `main` e foi
+  gerada de novo sem ela). Cada par aparece uma vez pela chave do par em
+  `conexoes_registradas` (única e sem direção). A busca na hora que esgota o orçamento de
+  comparações vai para a fila, e o primeiro contato de cada lote da fila é cruzado inteiro,
+  para nenhum par ficar de fora. A lista das conexões (`networkInteligente.conexoes`) é
+  paginada no servidor, 10 por página, da nota maior à menor (na mesma nota, a mais nova; o id
+  desempata), no painel e na ficha do contato; as contagens do painel contam todas, não só a
+  página. Quem não vê a nota das conexões entre membras (U3) também não a deduz pela ordem:
+  elas entram na ordem como nota zero.
+- **O que fica como proteção de carga:** o orçamento de comparações por rodada, a fila em
+  lotes de 200, a cota de buscas por conta (10 a cada 10 min), os 20 itens por lado e a
+  paginação da tela. Nenhum deles esconde resultado, salvo os 20 itens por lado (um contato com
+  mais de 20 itens num lado cruza só com os 20 primeiros) e o motor privado em massa, que segue
+  com os 20 melhores pares por contato: os dois ficam como estão, a decidir.
+- **Risco aceito:** o teto por contraparte também protegia uma dona de ser inundada por
+  contatos feitos sob medida para ela; sem ele, a proteção é a cota de buscas por conta.
+- **Onde:** `server/network-rede-global.ts`, `server/fila-de-cruzamento.ts`,
+  `server/network-registro.ts` (`paginaDeConexoesDaSolicitante`,
+  `contarConexoesDaSolicitante`), `server/routers/networkInteligente.ts`, migração
+  `0032_indice-de-cruzamento`, `client/src/components/ConexoesRegistradas.tsx`
+  (`PaginasDasConexoes`).
+
 ---
 
 ## Lições sem data registrada

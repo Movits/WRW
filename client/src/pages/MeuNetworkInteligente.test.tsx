@@ -106,7 +106,7 @@ const conexao = (parcial: Record<string, unknown> = {}) => ({
   ...parcial,
 });
 
-const CONTAGEM = { internas: 5, comRedeGlobal: 2, oportunidades: 6, intermediacoes: 3, negociosEmAndamento: 2, negociosConcluidos: 1, comissionamentos: 1 };
+const CONTAGEM = { internas: 5, internasIdentificadas: 1, comRedeGlobal: 2, oportunidades: 6, intermediacoes: 3, negociosEmAndamento: 2, negociosConcluidos: 1, comissionamentos: 1 };
 
 const refetch = vi.fn();
 const consulta = (data: unknown) => ({ data, isLoading: false, isError: false, error: null, refetch });
@@ -245,6 +245,18 @@ describe("Meu Network Inteligente — conexões registradas e rede global", () =
     expect(toast.info).toHaveBeenCalledTimes(1);
     expect(String(toast.info.mock.calls[0][0])).toMatch(/começou e roda em segundo plano/);
     expect(String(toast.info.mock.calls[0][0])).not.toMatch(/Nenhuma conexão nova/);
+  });
+
+  it("a lista vem do servidor em páginas de 10 (26/11): a tela pede a página e mostra o resumo", () => {
+    const lista = Array.from({ length: 10 }, (_, i) => conexao({ id: `c-${i}`, status: "apresentacao" }));
+    servidorResponde(dados(), { termoAceito: true, contagem: { ...CONTAGEM, internasIdentificadas: 0 }, lista, total: 30, pagina: 1, porPagina: 10, paginas: 3 });
+    render(<MeuNetworkInteligente />);
+    expect(duble.conexoes).toHaveBeenCalledWith({ pagina: 1 }, expect.anything());
+    expect(screen.getByText("Página 1 de 3 · 30 no total · da maior para a menor compatibilidade")).toBeInTheDocument();
+    // O aviso de oportunidade interna sai da contagem de TODAS as conexões, não da página.
+    expect(screen.queryByText("Encontramos uma oportunidade dentro do seu próprio network.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Próxima" }));
+    expect(duble.conexoes).toHaveBeenLastCalledWith({ pagina: 2 }, expect.anything());
   });
 
   it("conexão interna identificada: o alerta do pedido e o lado da dona leva ao perfil do contato", () => {

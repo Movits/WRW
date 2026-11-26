@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import {
   aiMatchSuggestions, conexoesParticipantes, conexoesRegistradas, privateContacts, users,
 } from "../drizzle/schema";
@@ -412,10 +412,12 @@ export async function participantesAindaAutorizados(db: Banco, alheios: Array<ty
 }
 
 /**
- * As conexões registradas em que a solicitante participa, mais recentes primeiro.
- * A etapa e o descarte saem do ponto de vista dela (ver avancarConexao); numa
- * conexão com a rede global cujo outro lado retirou a autorização, o motivo e
- * os itens não saem (participantesAindaAutorizados).
+ * As conexões registradas em que a solicitante participa, da nota maior para a
+ * menor (e, na mesma nota, as mais recentes primeiro). A etapa e o descarte saem
+ * do ponto de vista dela (ver avancarConexao); numa conexão com a rede global
+ * cujo outro lado retirou a autorização, o motivo e os itens não saem
+ * (participantesAindaAutorizados). A lista da tela é paginada no servidor:
+ * `paginaDeConexoesDaSolicitante`; esta devolve até `limite` (padrão 200).
  */
 export async function listarConexoesDaSolicitante(quem: Solicitante, opcoes: { contactId?: number; limite?: number } = {}): Promise<ConexaoVisivel[]> {
   const db = await exigirDb();
@@ -427,11 +429,79 @@ export async function listarConexoesDaSolicitante(quem: Solicitante, opcoes: { c
     .where(and(...condicoes));
   const ids = Array.from(new Set(minhas.map(linha => linha.conexaoId)));
   if (!ids.length) return [];
-  const [cabecalhos, participantes] = await Promise.all([
-    db.select().from(conexoesRegistradas).where(inArray(conexoesRegistradas.id, ids))
-      .orderBy(desc(conexoesRegistradas.createdAt)).limit(opcoes.limite ?? 200),
-    db.select().from(conexoesParticipantes).where(inArray(conexoesParticipantes.conexaoId, ids)),
-  ]);
+  const cabecalhos = await db.select().from(conexoesRegistradas).where(inArray(conexoesRegistradas.id, ids))
+    .orderBy(desc(conexoesRegistradas.pontuacao), desc(conexoesRegistradas.createdAt), asc(conexoesRegistradas.id)).limit(opcoes.limite ?? 200);
+  return montarConexoes(db, quem, cabecalhos);
+}
+
+/** Conexões por página na tela (decisão do Roberto de 26/11). */
+export const CONEXOES_POR_PAGINA = 10;
+
+/**
+ * Uma página das conexões da solicitante, paginada NO SERVIDOR (o navegador
+ * nunca recebe a lista inteira): todas as que combinam, cada uma uma vez (uma
+ * linha por par em conexoes_registradas), da nota maior para a menor; na mesma
+ * nota, as mais recentes primeiro, e o id desempata (a ordem não muda entre
+ * páginas). `contactId` restringe às conexões de um contato da dona (a ficha
+ * do contato). `semNotaEntreMembras` (U3): quem não vê a nota das conexões
+ * entre membras não pode deduzi-la pela ordem, e elas entram na ordem como se
+ * tivessem nota zero.
+ */
+export async function paginaDeConexoesDaSolicitante(quem: Solicitante, opcoes: {
+  pagina?: number; contactId?: number; semNotaEntreMembras?: boolean;
+} = {}): Promise<{ lista: ConexaoVisivel[]; total: number; pagina: number; porPagina: number; paginas: number }> {
+  const db = await exigirDb();
+  const condicoes = [participacaoDe(quem)!];
+  if (opcoes.contactId !== undefined) {
+    condicoes.push(eq(conexoesParticipantes.ownerId, quem.openId), eq(conexoesParticipantes.contactId, opcoes.contactId));
+  }
+  // O par aparece uma vez: o IN sobre as participações (uma conexão pode ter os dois lados da dona) não repete linha.
+  const minhas = db.select({ conexaoId: conexoesParticipantes.conexaoId }).from(conexoesParticipantes).where(and(...condicoes));
+  const [contagem] = await db.select({ total: count() }).from(conexoesRegistradas).where(inArray(conexoesRegistradas.id, minhas));
+  const total = Number(contagem?.total) || 0;
+  const paginas = Math.max(1, Math.ceil(total / CONEXOES_POR_PAGINA));
+  const pagina = Math.min(Math.max(1, Math.floor(opcoes.pagina ?? 1)), paginas);
+  if (!total) return { lista: [], total, pagina, porPagina: CONEXOES_POR_PAGINA, paginas };
+  const nota = opcoes.semNotaEntreMembras
+    ? sql`case when ${conexoesRegistradas.origem} = ${"PLATFORM_MATCH"} then 0 else ${conexoesRegistradas.pontuacao} end`
+    : conexoesRegistradas.pontuacao;
+  const cabecalhos = await db.select().from(conexoesRegistradas).where(inArray(conexoesRegistradas.id, minhas))
+    .orderBy(desc(nota), desc(conexoesRegistradas.createdAt), asc(conexoesRegistradas.id))
+    .limit(CONEXOES_POR_PAGINA).offset((pagina - 1) * CONEXOES_POR_PAGINA);
+  return { lista: await montarConexoes(db, quem, cabecalhos), total, pagina, porPagina: CONEXOES_POR_PAGINA, paginas };
+}
+
+/**
+ * As contagens do painel sobre TODAS as conexões da solicitante (não só a página
+ * da tela), lendo só a etapa, a origem e a comissão: nada de motivo nem itens.
+ */
+export async function contarConexoesDaSolicitante(quem: Solicitante) {
+  const db = await exigirDb();
+  const linhas = await db.select({
+    id: conexoesRegistradas.id, origem: conexoesRegistradas.origem, status: conexoesRegistradas.status,
+    apresentacaoEm: conexoesRegistradas.apresentacaoEm, statusComissao: conexoesRegistradas.statusComissao,
+    descartadaEm: conexoesParticipantes.descartadaEm, statusComissaoOriginador: conexoesParticipantes.statusComissaoOriginador,
+  }).from(conexoesParticipantes)
+    .innerJoin(conexoesRegistradas, eq(conexoesRegistradas.id, conexoesParticipantes.conexaoId))
+    .where(participacaoDe(quem));
+  const porConexao = new Map<string, typeof linhas>();
+  for (const linha of linhas) porConexao.set(linha.id, [...(porConexao.get(linha.id) ?? []), linha]);
+  return contarConexoes(Array.from(porConexao.values()).map(meus => {
+    const [primeira] = meus;
+    // A etapa PARA quem pergunta, como em montarConexoes: quem descartou vê 'descartada'.
+    const descartadaPorMim = primeira.status !== "fechada" && meus.every(p => p.descartadaEm != null);
+    return {
+      origem: primeira.origem, status: descartadaPorMim ? "descartada" as const : primeira.status,
+      apresentacaoEm: primeira.apresentacaoEm ?? null, statusComissao: primeira.statusComissao,
+      lados: meus.map(p => ({ meu: true, statusComissaoOriginador: p.statusComissaoOriginador ?? null })),
+    };
+  }));
+}
+
+/** Cabeçalhos lidos → as conexões como a solicitante as vê, na ordem dos cabeçalhos. */
+async function montarConexoes(db: Banco, quem: Solicitante, cabecalhos: Array<typeof conexoesRegistradas.$inferSelect>): Promise<ConexaoVisivel[]> {
+  if (!cabecalhos.length) return [];
+  const participantes = await db.select().from(conexoesParticipantes).where(inArray(conexoesParticipantes.conexaoId, cabecalhos.map(c => c.id)));
   const comAutorizacaoAlheia = new Set(cabecalhos.filter(c => ORIGENS_COM_AUTORIZACAO_DO_OUTRO_LADO.includes(c.origem)).map(c => c.id));
   const autorizados = await participantesAindaAutorizados(db,
     participantes.filter(p => comAutorizacaoAlheia.has(p.conexaoId) && !ehDaSolicitante(p, quem)));
@@ -593,10 +663,14 @@ export async function avancarConexao(
 }
 
 /** O que o painel conta a partir das conexões da solicitante. */
-export function contarConexoes(conexoes: ConexaoVisivel[]) {
+export function contarConexoes(conexoes: Array<Pick<ConexaoVisivel, "origem" | "status" | "apresentacaoEm" | "statusComissao"> & {
+  lados: Array<Pick<LadoVisivel, "meu" | "statusComissaoOriginador">>;
+}>) {
   const doTipo = (...origens: OrigemDaConexao[]) => conexoes.filter(c => origens.includes(c.origem));
   return {
     internas: doTipo("PRIVATE_NETWORK_MATCH").length,
+    // O aviso "há oportunidade interna" do painel: conta todas, não só as da página.
+    internasIdentificadas: doTipo("PRIVATE_NETWORK_MATCH").filter(c => c.status === "identificada").length,
     comRedeGlobal: doTipo("NETWORK_PLATFORM_MATCH", "NETWORK_NETWORK_MATCH").length,
     oportunidades: conexoes.filter(c => c.status !== "descartada").length,
     intermediacoes: conexoes.filter(c => c.apresentacaoEm !== null).length,

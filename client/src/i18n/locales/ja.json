@@ -3778,7 +3778,11 @@
       "discardConfirmCancel": "キャンセル",
       "reasonPlatformMatch": "接続が記録された時点で Smart Match の規約に同意していた二人のメンバーの間で、プロフィール・エンジンが提案しました：適合度 {{pontuacao}}%。",
       "reasonPlatformMatchLocked": "接続が記録された時点で Smart Match の規約に同意していた二人のメンバーの間で、プロフィール・エンジンが提案しました。シルバーメンバーになると適合度が表示されます。",
-      "reasonNoAuthorization": "相手が承認を取り消したため、この接続の詳細は表示されなくなりました。"
+      "reasonNoAuthorization": "相手が承認を取り消したため、この接続の詳細は表示されなくなりました。",
+      "pageSummary": "{{paginas}} ページ中 {{pagina}} ページ目 · 全 {{total}} 件 · 相性の高い順",
+      "previousPage": "前へ",
+      "nextPage": "次へ",
+      "pagesLabel": "登録済みコネクションのページ"
     },
     "global": {
       "description": "公開した連絡先は、プラットフォームのメンバーや許可された他のネットワークと照合されます。使われるのは匿名ID、「持っているもの」、「必要なもの」だけです。氏名、電話番号、メール、音声、文字起こし、メモは外に出ません。",

@@ -2652,10 +2652,8 @@ export const filaDeCruzamento = mysqlTable("fila_de_cruzamento", {
   deNovo:       boolean("de_novo").default(false).notNull(),
   vivo:         boolean("vivo").default(true),
   processados:  int("processados").default(0).notNull(),
-  // As conexões registradas nesta busca, e por contraparte (JSON {hash: n}, o hash
-  // da contraparte, nunca o openId): os tetos da busca valem pelo trabalho inteiro.
+  // As conexões registradas por este trabalho (só a contagem: não há teto de registros, 26/11).
   conexoes:     int("conexoes").default(0).notNull(),
-  porContraparte: text("por_contraparte"),
   // Reservas feitas sem o lote terminar bem (a reserva conta, para o lote que
   // derruba o processo não voltar para sempre); zera quando o lote termina.
   tentativas:   int("tentativas").default(0).notNull(),

@@ -257,15 +257,30 @@ fila, em lotes de 200 contatos pela ordem do id, com o cursor gravado, e a tela 
 busca roda em segundo plano (`networkInteligente.global.queued`); a conta com mais de 2000
 contatos recalcula o motor privado pela fila, e a tela de Conexões Inteligentes avisa que as
 sugestões chegam em segundo plano (`intelligentMatches.recalculoNaFila` e `alteracaoNaFila`).
-Vale para toda conta desse tamanho, não só para a entidade: a fila não abre porta nova, porque
-os tetos de registro valem pelo TRABALHO inteiro, como numa busca na hora (100 conexões e 10 por
-contraparte, contadas na linha do trabalho, a contraparte em hash), e o pedido que enfileira
-gasta a vaga de `tetoDeBuscaNaRedeGlobal`. O cursor só anda até o último contato cruzado por
-inteiro: o lote que para no orçamento de comparações recomeça dele, em vez de pular o resto.
+Vale para toda conta desse tamanho, não só para a entidade, e o pedido que enfileira gasta a
+vaga de `tetoDeBuscaNaRedeGlobal`. A busca na hora (até 300 contatos) que esgota o orçamento de
+comparações também vai para a fila, para o resto ser cruzado em lotes. O cursor só anda até o
+último contato cruzado por inteiro: o lote que para no orçamento de comparações recomeça dele,
+em vez de pular o resto, e o primeiro contato de cada lote é cruzado inteiro mesmo passando do
+orçamento (com a vez devolvida ao servidor a cada fatia), para nenhum par ficar para trás.
+
+**Sem teto de conexões (decisão do Roberto de 26/11).** Até 26/11 a busca registrava no máximo
+100 conexões por rodada (`TETO_DE_REGISTROS_POR_RODADA`) e 10 com a mesma contraparte
+(`TETO_POR_CONTRAPARTE_POR_RODADA`, de 15/09, escolhido por uma sessão do Claude), e na fila os
+dois valiam pelo trabalho inteiro, contados na linha (`por_contraparte`). Com as entidades, o
+teto por contraparte escondia quase todos os associados, que são contatos de UMA conta. Os dois
+saíram, com a coluna (a migração 0032 ainda não tinha ido à `main` e foi gerada de novo sem
+ela): todo par que combina é registrado, uma vez só (a chave do par em
+`conexoes_registradas`, sem direção), e a tela mostra todas, da nota maior à menor, em páginas
+de 10 paginadas no servidor (`networkInteligente.conexoes` com `pagina`,
+`paginaDeConexoesDaSolicitante`), no painel e na ficha do contato. A carga fica com o
+orçamento de comparações por rodada, a fila, os lotes, a cota de buscas por conta e a
+paginação. A leitura dos perfis de membras também perdeu o teto de 1000 (`TETO_DE_MEMBROS`):
+lê todas, em páginas de 1000 pela ordem do id.
 
 Um trabalho vivo por dona e tipo, garantido no banco (índice único com a coluna `vivo`, que fica
 nula ao concluir; o pedido que chega no meio marca `de_novo`, e o trabalho recomeça ao
-terminar, com os tetos zerados); os trabalhos se revezam por lote; o termo do Smart Match é
+terminar, com a contagem zerada); os trabalhos se revezam por lote; o termo do Smart Match é
 conferido na hora de rodar. A reserva é de 2 minutos, renovada a cada 30 s enquanto o lote roda;
 cada reserva conta uma tentativa (zera quando o lote termina bem), e o trabalho que derruba o
 processo três vezes desiste, em vez de voltar para sempre. Com o banco fora do ar, a reserva é
@@ -319,11 +334,10 @@ subiu). Os tempos incluem a CPU do teste e do banco na mesma máquina.
 
 Leitura das medidas:
 
-- **A busca de uma membra fica incompleta** pelo teto de sempre: 10 conexões por contraparte
-  numa rodada (`TETO_POR_CONTRAPARTE_POR_RODADA`), e a entidade é UMA dona. Com isso, a membra
-  vê no máximo 10 associados de uma entidade por busca (os de nota maior, quase sempre os
-  mesmos). O teto protege a dona de ser inundada; para a entidade, a inundação é o produto.
-  Contar a contraparte por associado é decisão de produto (próximos passos).
+- **A busca de uma membra ficava incompleta** pelo teto de 10 conexões por contraparte numa
+  rodada, e a entidade é UMA dona: a membra via no máximo 10 associados por busca (medida: 10
+  de 22 conexões). O teto saiu em 26/11 (decisão do Roberto, acima): todas entram, em páginas
+  de 10 na tela.
 - **O motor privado em massa** cabe em 2 GB, mas com pouca folga: o pico do processo do teste
   foi 1,44 GB, sobre uma base de 0,85 GB do próprio teste (o vitest e as 50 mil linhas da
   planilha na memória); o acréscimo do recálculo foi de cerca de 0,6 GB.
@@ -361,12 +375,11 @@ Leitura das medidas:
 
 ### Próximos passos, com a medida que os motiva
 
-1. **Teto por contraparte na entidade:** contar a contraparte por associado, e não pela conta
-   da entidade, para a membra ver mais de 10 associados por busca (medida: 10 de 22 conexões).
-   Decisão de produto.
-2. **Índice para os perfis de membras:** a busca global ainda lê no máximo 1000 perfis
-   (`TETO_DE_MEMBROS`, agora em ordem de id); com 50 mil usuárias, os perfis acima do id
-   1000 não entram no `NETWORK_PLATFORM_MATCH`. O mesmo índice, com o perfil como item.
+1. **Teto por contraparte na entidade:** resolvido em 26/11 tirando o teto (decisão do
+   Roberto): todas as conexões, em páginas de 10. A medida de carga não foi refeita sem ele.
+2. **Índice para os perfis de membras:** desde 26/11 a busca global lê TODOS os perfis, em
+   páginas de 1000 pela ordem do id (antes, no máximo 1000, `TETO_DE_MEMBROS`); com 50 mil
+   usuárias, isso é a leitura inteira a cada busca. O mesmo índice, com o perfil como item.
 3. **Oportunidades × perfis** (`routers/matching.ts`): lê 200 perfis sem ordem para sugerir a
    oportunidade; com 50 mil usuárias, a escolha fica no acaso do banco.
 4. **Motor privado em massa:** registrar as conexões internas em lote (hoje uma a uma, boa

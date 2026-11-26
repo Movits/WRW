@@ -53,7 +53,7 @@ vi.mock("./routers/consent", () => ({ usersComConsentimento, hasValidConsent: as
 
 const {
   definirDisponibilidade, encontrosEntre, lerRedeGlobalAnonima, procurarConexoesNaRedeGlobal, projecaoAnonima, ContatoNaoEncontrado,
-  tetoDeBuscaNaRedeGlobal, BUSCAS_NA_REDE_GLOBAL_POR_JANELA, TETO_DE_ITENS_POR_LADO, TETO_POR_CONTRAPARTE_POR_RODADA, ORCAMENTO_DE_COMPARACOES,
+  tetoDeBuscaNaRedeGlobal, BUSCAS_NA_REDE_GLOBAL_POR_JANELA, TETO_DE_ITENS_POR_LADO, ORCAMENTO_DE_COMPARACOES,
 } = await import("./network-rede-global");
 
 const DONA = "dona-1";
@@ -456,15 +456,18 @@ describe("rede global — tetos de trabalho", () => {
     expect(contato.preciso).toHaveLength(TETO_DE_ITENS_POR_LADO);
   });
 
-  it("por contraparte: a mesma outra dona recebe no máximo o teto de conexões numa rodada, e a rodada diz que ficou incompleta", async () => {
-    redeGrande({ meus: TETO_POR_CONTRAPARTE_POR_RODADA + 5, outros: 1, donasDosOutros: 1, itensPorContato: 1 });
+  it("sem teto por contraparte nem de registros (26/11): a mesma outra dona recebe TODAS as conexões que combinam, cada par uma vez", async () => {
+    // Antes: 10 por contraparte e 100 por busca. 130 contatos da dona × o único contato da outra = 130 pares.
+    redeGrande({ meus: 130, outros: 1, donasDosOutros: 1, itensPorContato: 1 });
     const resposta = await procurarConexoesNaRedeGlobal({ id: 10, openId: DONA });
-    expect(resposta.conexoes).toHaveLength(TETO_POR_CONTRAPARTE_POR_RODADA);
-    expect(resposta.completa).toBe(false);
-    expect(estado.consultas.filter(c => /^insert into `conexoes_registradas`/.test(c.sql))).toHaveLength(TETO_POR_CONTRAPARTE_POR_RODADA);
+    expect(resposta.completa).toBe(true);
+    expect(resposta.emFila).toBeUndefined();
+    expect(resposta.conexoes).toHaveLength(130);
+    expect(new Set(resposta.conexoes.map(c => c.meuCodigo)).size).toBe(130);
+    expect(estado.consultas.filter(c => /^insert into `conexoes_registradas`/.test(c.sql))).toHaveLength(130);
   });
 
-  it("orçamento: passado o total de comparações, o cruzamento para antes de avaliar o resto e diz que ficou incompleto", async () => {
+  it("orçamento: passado o total de comparações, a busca na hora para antes de avaliar o resto e manda a busca para a fila", async () => {
     // Itens no teto dos dois lados: 2 × 20 × 20 = 800 comparações por par.
     const porPar = 2 * TETO_DE_ITENS_POR_LADO * TETO_DE_ITENS_POR_LADO;
     const paresNoOrcamento = Math.floor(ORCAMENTO_DE_COMPARACOES / porPar);
@@ -476,7 +479,10 @@ describe("rede global — tetos de trabalho", () => {
     const resposta = await procurarConexoesNaRedeGlobal({ id: 10, openId: DONA });
     expect(resposta.completa).toBe(false);
     expect(resposta.conexoes).toEqual([]);
-    expect(estado.consultas.some(c => /^insert/.test(c.sql))).toBe(false);
+    expect(estado.consultas.some(c => /^insert into `conexoes/.test(c.sql))).toBe(false);
+    // O resto não se perde: a fila cruza a base inteira em lotes (nenhum match fica de fora).
+    expect(resposta.emFila).toBe(true);
+    expect(estado.consultas.some(c => /^insert into `fila_de_cruzamento`/.test(c.sql))).toBe(true);
   }, 60_000);
 
   it("a vez volta ao event loop também nos pares que podemCasar recusa sem comparar (não gastam orçamento, gastam CPU)", async () => {

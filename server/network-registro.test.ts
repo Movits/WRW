@@ -54,7 +54,7 @@ const schema = await import("../drizzle/schema");
 const {
   chaveDoPar, motivoAnonimo, sincronizarConexoesInternas, ladoParaSolicitante, listarConexoesDaSolicitante,
   avancarConexao, etapaAnteriorExigida, contarConexoes, definirStatusDeComissao,
-  EtapaForaDeOrdem, ConexaoNaoEncontrada, ComissaoAntesDoFechamento,
+  EtapaForaDeOrdem, ConexaoNaoEncontrada, ComissaoAntesDoFechamento, paginaDeConexoesDaSolicitante, CONEXOES_POR_PAGINA,
 } = registro;
 
 const DONA = { id: 9, openId: "dona-9" };
@@ -312,6 +312,37 @@ describe("registro — o que cada participante vê", () => {
   });
 });
 
+describe("registro — a lista paginada no servidor (decisão de 26/11)", () => {
+  it("página de 10, da nota maior para a menor, com o id desempatando; a página pedida vira OFFSET", async () => {
+    estado.responder = sql => (/^select count\(\*\)/.test(sql) ? [[30]] : undefined);
+    const r = await paginaDeConexoesDaSolicitante(DONA, { pagina: 3 });
+    expect(r).toMatchObject({ total: 30, pagina: 3, porPagina: CONEXOES_POR_PAGINA, paginas: 3 });
+    expect(CONEXOES_POR_PAGINA).toBe(10);
+    const pagina = estado.consultas.find(c => /limit \? offset \?/.test(c.sql))!;
+    expect(pagina.sql).toContain("order by `conexoes_registradas`.`pontuacao` desc, `conexoes_registradas`.`created_at` desc, `conexoes_registradas`.`id` asc");
+    // A participação da dona vai no IN (subconsulta): a conexão com os dois lados dela aparece uma vez só.
+    expect(pagina.sql).toMatch(/`conexoes_registradas`\.`id` in \(select `conexao_id` from `conexoes_participantes`/);
+    expect(pagina.params.slice(-2)).toEqual([10, 20]);
+  });
+
+  it("página além da última volta para a última; sem conexões, nem lê a página", async () => {
+    estado.responder = sql => (/^select count\(\*\)/.test(sql) ? [[12]] : undefined);
+    expect(await paginaDeConexoesDaSolicitante(DONA, { pagina: 99 })).toMatchObject({ pagina: 2, paginas: 2 });
+    estado.consultas = [];
+    estado.responder = sql => (/^select count\(\*\)/.test(sql) ? [[0]] : undefined);
+    expect(await paginaDeConexoesDaSolicitante(DONA)).toMatchObject({ lista: [], total: 0, pagina: 1, paginas: 1 });
+    expect(estado.consultas.some(c => /limit \? offset \?/.test(c.sql))).toBe(false);
+  });
+
+  it("U3: sem ver a nota entre membras, a ordem também não a revela (PLATFORM_MATCH entra como nota zero)", async () => {
+    estado.responder = sql => (/^select count\(\*\)/.test(sql) ? [[5]] : undefined);
+    await paginaDeConexoesDaSolicitante(DONA, { semNotaEntreMembras: true });
+    const pagina = estado.consultas.find(c => /order by .* limit \?/.test(c.sql))!;
+    expect(pagina.sql).toContain("order by case when `conexoes_registradas`.`origem` = ? then 0 else `conexoes_registradas`.`pontuacao` end desc");
+    expect(pagina.params).toContain("PLATFORM_MATCH");
+  });
+});
+
 describe("registro — apresentação, negociação, fechamento (itens 16 e 17)", () => {
   it("cada etapa exige a anterior; descartar vale antes do fechamento", () => {
     expect(etapaAnteriorExigida("apresentacao")).toEqual(["identificada"]);
@@ -499,7 +530,7 @@ describe("registro — apresentação, negociação, fechamento (itens 16 e 17)"
       { ...base, id: "3", origem: "NETWORK_NETWORK_MATCH", status: "fechada", apresentacaoEm: 2, negociacaoEm: 3, fechamentoEm: 4, statusComissao: "a_apurar" },
       { ...base, id: "4", origem: "NETWORK_PLATFORM_MATCH", status: "descartada", descartadaEm: 5, statusComissao: "sem_negocio" },
     ]);
-    expect(contagem).toEqual({ internas: 2, comRedeGlobal: 2, oportunidades: 3, intermediacoes: 2, negociosEmAndamento: 1, negociosConcluidos: 1, comissionamentos: 1 });
+    expect(contagem).toEqual({ internas: 2, internasIdentificadas: 1, comRedeGlobal: 2, oportunidades: 3, intermediacoes: 2, negociosEmAndamento: 1, negociosConcluidos: 1, comissionamentos: 1 });
   });
 });
 

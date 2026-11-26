@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "a9802191-e194-4463-b0fb-5ccc885a6eb6",
+  "id": "417d2d3f-68c7-445b-806f-7e847e3d1fa7",
   "prevId": "be9379e3-d2b3-4ce5-a337-ed7211d76fe4",
   "tables": {
     "agenda_reunioes": {
@@ -3621,13 +3621,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": 0
-        },
-        "por_contraparte": {
-          "name": "por_contraparte",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         },
         "tentativas": {
           "name": "tentativas",

@@ -3778,7 +3778,11 @@
       "discardConfirmCancel": "Cancelar",
       "reasonPlatformMatch": "Sugerida por el motor de perfiles entre dos miembros que tenían aceptado el término del Smart Match cuando se registró la conexión: compatibilidad del {{pontuacao}}%.",
       "reasonPlatformMatchLocked": "Sugerida por el motor de perfiles entre dos miembros que tenían aceptado el término del Smart Match cuando se registró la conexión. La compatibilidad aparece cuando tu perfil llega a Miembro Plata.",
-      "reasonNoAuthorization": "La otra parte retiró la autorización, por lo que los detalles de esta conexión dejaron de aparecer."
+      "reasonNoAuthorization": "La otra parte retiró la autorización, por lo que los detalles de esta conexión dejaron de aparecer.",
+      "pageSummary": "Página {{pagina}} de {{paginas}} · {{total}} en total · de mayor a menor compatibilidad",
+      "previousPage": "Anterior",
+      "nextPage": "Siguiente",
+      "pagesLabel": "Páginas de las conexiones registradas"
     },
     "global": {
       "description": "Los contactos que pongas a disposición se cruzan con los miembros de la plataforma y con otros networks autorizados — solo por el ID anónimo, Lo Que Tengo y Lo Que Necesito. Nombre, teléfono, correo, audio, transcripción y notas nunca salen.",

@@ -14,7 +14,8 @@ const {
 const { slugifyMatchTag, recalculatePrivateMatches, CONTATOS_DO_RECALCULO_NA_HORA, TETO_DE_PARES_POR_CONTATO_EM_MASSA } = await import("./match-service");
 const { candidatosPelasChaves, indexarPendentes, limparOrfas, hashDaChave } = await import("./indice-de-cruzamento");
 const { editarItemDaFicha } = await import("./possui-procura-da-ficha");
-const { lerRedeGlobalAnonima, procurarConexoesNaRedeGlobal, tetoDeBuscaNaRedeGlobal, CONTATOS_DA_BUSCA_NA_HORA, TETO_POR_CONTRAPARTE_POR_RODADA } = await import("./network-rede-global");
+const { lerRedeGlobalAnonima, procurarConexoesNaRedeGlobal, tetoDeBuscaNaRedeGlobal, CONTATOS_DA_BUSCA_NA_HORA } = await import("./network-rede-global");
+const { paginaDeConexoesDaSolicitante } = await import("./network-registro");
 const fila = await import("./fila-de-cruzamento");
 const { chavesDoContato, chavesDoItem, VERSAO_DAS_CHAVES } = await import("../shared/chaves-de-cruzamento");
 
@@ -27,7 +28,10 @@ const { chavesDoContato, chavesDoItem, VERSAO_DAS_CHAVES } = await import("../sh
  *   - a busca grande vai para a fila, e a fila registra as conexões em lotes;
  *   - o pedido que chega com o trabalho vivo não cria outro: marca de_novo;
  *   - o motor privado da conta grande vai para a fila e, lá, roda sem o laço
- *     quadrático e grava as mesmas sugestões.
+ *     quadrático e grava as mesmas sugestões;
+ *   - sem teto de conexões (decisão do Roberto de 26/11): 30 associados de uma
+ *     entidade que combinam aparecem os 30, em 3 páginas de 10, sem repetir, e
+ *     a usuária comum com 30 contatos que combinam idem.
  */
 const temBanco = Boolean(process.env.DATABASE_URL_TESTES);
 const sufixo = crypto.randomUUID().slice(0, 8);
@@ -40,7 +44,12 @@ const TETO = `teste-cdc-teto-${sufixo}`;
 const OUTRA = `teste-cdc-outra-${sufixo}`;
 const MASSA = `teste-cdc-massa-${sufixo}`;
 const FILA = `teste-cdc-fila-${sufixo}`;
-const DONAS = [ENTIDADE, MEMBRA, GRANDE, CURSOR, TETO, OUTRA, MASSA, FILA];
+// As da decisão de 26/11 (todos os matches, em páginas de 10).
+const ENTIDADE_30 = `teste-cdc-ent30-${sufixo}`;
+const COMUM = `teste-cdc-comum-${sufixo}`;
+const COMUM_30 = `teste-cdc-comum30-${sufixo}`;
+const QUEM_PROCURA = `teste-cdc-procura-${sufixo}`;
+const DONAS = [ENTIDADE, MEMBRA, GRANDE, CURSOR, TETO, OUTRA, MASSA, FILA, ENTIDADE_30, COMUM, COMUM_30, QUEM_PROCURA];
 
 let ids: Record<string, number> = {};
 let codigo = 0;
@@ -79,6 +88,8 @@ describe.skipIf(!temBanco)("Índice e fila do cruzamento (integração)", () => 
     const db = (await getDb())!;
     await db.insert(users).values([
       { openId: ENTIDADE, onboardingCompleted: true, isEntidade: true },
+      { openId: ENTIDADE_30, onboardingCompleted: true, isEntidade: true },
+      ...[COMUM, COMUM_30, QUEM_PROCURA].map(openId => ({ openId, onboardingCompleted: true })),
       { openId: MEMBRA, onboardingCompleted: true },
       { openId: GRANDE, onboardingCompleted: true },
       ...[CURSOR, TETO, OUTRA, MASSA, FILA].map(openId => ({ openId, onboardingCompleted: true })),
@@ -86,10 +97,10 @@ describe.skipIf(!temBanco)("Índice e fila do cruzamento (integração)", () => 
     const linhas = await db.select({ id: users.id, openId: users.openId }).from(users).where(inArray(users.openId, DONAS));
     ids = Object.fromEntries(linhas.map(l => [l.openId, l.id]));
     const agora = Date.now();
-    await db.insert(entidades).values({
-      ownerId: ENTIDADE, nome: "Entidade do índice", tipo: "associacao", pais: "BR", convenioEstado: "ativo",
+    await db.insert(entidades).values([ENTIDADE, ENTIDADE_30].map(ownerId => ({
+      ownerId, nome: "Entidade do índice", tipo: "associacao", pais: "BR", convenioEstado: "ativo",
       mostrarNomeNoMatch: false, disponivelPorPadrao: true, createdAt: agora, updatedAt: agora,
-    } as never);
+    })) as never);
   });
 
   afterAll(async () => {
@@ -107,7 +118,7 @@ describe.skipIf(!temBanco)("Índice e fila do cruzamento (integração)", () => 
     await db.delete(contactAssets).where(inArray(contactAssets.ownerId, DONAS));
     await db.delete(contactNeeds).where(inArray(contactNeeds.ownerId, DONAS));
     await db.delete(privateContacts).where(inArray(privateContacts.ownerId, DONAS));
-    await db.delete(entidades).where(eq(entidades.ownerId, ENTIDADE));
+    await db.delete(entidades).where(inArray(entidades.ownerId, [ENTIDADE, ENTIDADE_30]));
     await db.delete(users).where(inArray(users.openId, DONAS));
   });
 
@@ -190,21 +201,85 @@ describe.skipIf(!temBanco)("Índice e fila do cruzamento (integração)", () => 
     expect(registradas.length, `o contato ${doDoze.codigo} ficou sem cruzar`).toBeGreaterThan(0);
   }, 300_000);
 
-  it("os tetos de registro da busca pela fila valem pelo trabalho inteiro, não por lote", async () => {
+  it("sem teto pela fila (26/11): 250 contatos × a MESMA contraparte registram as 250, e refazer a busca não duplica", async () => {
     const db = (await getDb())!;
     // 250 contatos (dois lotes) com o que UM contato da outra dona procura: a contraparte é uma só.
+    // Antes: 10 por contraparte (TETO_POR_CONTRAPARTE_POR_RODADA) e 100 por trabalho.
     await contatos(TETO, 250, () => ({ tem: ["Barris de carvalho francês"] }));
     const [daOutra] = await contatos(OUTRA, 1, () => ({ precisa: ["Barris de carvalho francês"] }));
     await indiceEmDia();
+    const comAOutra = () => db.select({ conexaoId: conexoesParticipantes.conexaoId }).from(conexoesParticipantes)
+      .where(and(eq(conexoesParticipantes.ownerId, OUTRA), eq(conexoesParticipantes.contactId, daOutra)));
     await fila.enfileirarCruzamento({ ownerId: TETO, userId: ids[TETO], tipo: "global" });
     fila.religarParaTestes();
     await fila.rodarFilaAteEsvaziar({ ownerId: TETO });
-    const comAOutra = await db.select({ conexaoId: conexoesParticipantes.conexaoId }).from(conexoesParticipantes)
-      .where(and(eq(conexoesParticipantes.ownerId, OUTRA), eq(conexoesParticipantes.contactId, daOutra)));
-    expect(comAOutra).toHaveLength(TETO_POR_CONTRAPARTE_POR_RODADA);
+    expect(await comAOutra()).toHaveLength(250);
     const [trabalho] = await db.select().from(filaDeCruzamento).where(eq(filaDeCruzamento.ownerId, TETO));
-    expect(trabalho).toMatchObject({ estado: "concluida", conexoes: TETO_POR_CONTRAPARTE_POR_RODADA });
+    expect(trabalho).toMatchObject({ estado: "concluida", conexoes: 250 });
+    // A mesma busca de novo: os mesmos 250 pares, nenhum repetido (a chave do par).
+    await db.delete(filaDeCruzamento).where(eq(filaDeCruzamento.ownerId, TETO));
+    await fila.enfileirarCruzamento({ ownerId: TETO, userId: ids[TETO], tipo: "global" });
+    await fila.rodarFilaAteEsvaziar({ ownerId: TETO });
+    const depois = await comAOutra();
+    expect(depois).toHaveLength(250);
+    expect(new Set(depois.map(c => c.conexaoId)).size).toBe(250);
   }, 300_000);
+
+  /** As 3 páginas de 10 de quem pergunta: 30 conexões distintas, da nota maior para a menor. */
+  async function tresPaginas(quem: { id: number; openId: string }) {
+    const paginas = [];
+    for (const pagina of [1, 2, 3]) paginas.push(await paginaDeConexoesDaSolicitante(quem, { pagina }));
+    for (const [indice, p] of paginas.entries()) {
+      expect(p).toMatchObject({ total: 30, pagina: indice + 1, porPagina: 10, paginas: 3 });
+      expect(p.lista).toHaveLength(10);
+    }
+    const todas = paginas.flatMap(p => p.lista);
+    expect(new Set(todas.map(c => c.id)).size).toBe(30);
+    const notas = todas.map(c => c.pontuacao);
+    expect(notas).toEqual([...notas].sort((a, b) => b - a));
+    return todas;
+  }
+
+  it("30 associados de uma entidade que combinam aparecem os 30, em 3 páginas de 10, sem repetir, do melhor ao pior", async () => {
+    // A usuária comum procura; os associados são contatos de UMA conta (a entidade): o teto de 10 por
+    // contraparte mostrava só 10. Os 10 primeiros casam pelo rótulo (100); os outros 20, pela categoria (60).
+    const doTeste = { label: "Sementes de baru torradas", category: "Castanhas nativas" };
+    await contatos(ENTIDADE_30, 30, i => ({ tem: [i < 10 ? doTeste : { label: `Castanha nativa variedade ${i}`, category: "Castanhas nativas" }] }));
+    await contatos(COMUM, 1, () => ({ precisa: [doTeste] }));
+    await indiceEmDia();
+    tetoDeBuscaNaRedeGlobal.esquecer();
+    const r = await procurarConexoesNaRedeGlobal({ id: ids[COMUM], openId: COMUM });
+    expect(r).toMatchObject({ completa: true });
+    expect(r.conexoes).toHaveLength(30);
+    const daComum = await tresPaginas({ id: ids[COMUM], openId: COMUM });
+    expect(daComum.slice(0, 10).every(c => c.pontuacao === 100)).toBe(true);
+    expect(daComum.slice(10).every(c => c.pontuacao === 60)).toBe(true);
+    // A entidade vê as mesmas 30, do lado dela.
+    const daEntidade = await tresPaginas({ id: ids[ENTIDADE_30], openId: ENTIDADE_30 });
+    expect(daEntidade.map(c => c.id).sort()).toEqual(daComum.map(c => c.id).sort());
+    // Procurar de novo não repete nenhuma.
+    tetoDeBuscaNaRedeGlobal.esquecer();
+    await procurarConexoesNaRedeGlobal({ id: ids[COMUM], openId: COMUM });
+    await tresPaginas({ id: ids[COMUM], openId: COMUM });
+  }, 120_000);
+
+  it("a usuária comum com 30 contatos que combinam vê os 30, em 3 páginas de 10, sem repetir", async () => {
+    const doTeste = { label: "Óleo de pequi prensado a frio", category: "Óleos do cerrado" };
+    await contatos(COMUM_30, 30, i => ({ tem: [i % 2 === 0 ? doTeste : { label: `Óleo do cerrado lote ${i}`, category: "Óleos do cerrado" }] }));
+    await contatos(QUEM_PROCURA, 1, () => ({ precisa: [doTeste] }));
+    await indiceEmDia();
+    tetoDeBuscaNaRedeGlobal.esquecer();
+    const r = await procurarConexoesNaRedeGlobal({ id: ids[COMUM_30], openId: COMUM_30 });
+    expect(r).toMatchObject({ completa: true });
+    expect(r.conexoes).toHaveLength(30);
+    const todas = await tresPaginas({ id: ids[COMUM_30], openId: COMUM_30 });
+    expect(todas.filter(c => c.pontuacao === 100)).toHaveLength(15);
+    // A outra ponta (a contraparte única) vê as mesmas 30.
+    await tresPaginas({ id: ids[QUEM_PROCURA], openId: QUEM_PROCURA });
+    tetoDeBuscaNaRedeGlobal.esquecer();
+    await procurarConexoesNaRedeGlobal({ id: ids[COMUM_30], openId: COMUM_30 });
+    await tresPaginas({ id: ids[COMUM_30], openId: COMUM_30 });
+  }, 120_000);
 
   it("em massa, cada contato que procura fica com os MELHORES pares, e o par que já existia não some pelo corte", async () => {
     const db = (await getDb())!;
