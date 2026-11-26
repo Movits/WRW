@@ -3280,6 +3280,42 @@
       }
     }
   },
+  "perfilDeVoz": {
+    "title": "Stimmprofil",
+    "subtitle": "Damit Ihre Besprechungen Ihre Stimme erkennen und Ihren Namen bei Ihren Beiträgen zeigen.",
+    "intro": "Nehmen Sie etwa {{segundos}} Sekunden Ihrer Stimme auf, indem Sie den Text unten laut vorlesen. In den nächsten Besprechungen, die Sie aufnehmen, erscheinen Ihre Beiträge mit Ihrem Namen statt „Sprecher 1“. Wenn die Erkennung sich irrt, korrigieren Sie es unter „Wer ist welche Stimme“, wie bisher.",
+    "readAloud": "Laut vorlesen",
+    "textToRead": "Guten Morgen. Das ist meine Stimme, aufgenommen, damit Marquesa Global Match mich in Besprechungen erkennt. Ich spreche in meinem gewohnten Tempo, wie in einem Arbeitsgespräch. Heute erzähle ich, was ich diese Woche gemacht habe, was die nächsten Schritte sind und mit wem ich sprechen muss. Auch Zahlen, Namen und Daten kommen vor: zweitausendsechsundzwanzig, der fünfzehnte März, siebenunddreißig Personen. Danke fürs Zuhören.",
+    "consent": "Ich erlaube Marquesa Global Match, ein Profil meiner Stimme zu erstellen, um mich in den Transkripten und Zusammenfassungen der Besprechungen zu erkennen.",
+    "consentSupport": "Das Stimmprofil ist ein biometrisches Datum. Es wird nur zu diesem Zweck verwendet, ist für die Nutzung der Plattform nicht erforderlich und kann jederzeit ausgeschaltet werden. Beim Ausschalten wird das Profil gelöscht.",
+    "needsConsent": "Zum Aufnehmen bestätigen Sie oben die Erlaubnis.",
+    "record": "Meine Stimme aufnehmen",
+    "stop": "Stoppen und speichern",
+    "saving": "Wird gespeichert...",
+    "cancel": "Abbrechen",
+    "listen": "Anhören",
+    "rerecord": "Neu aufnehmen",
+    "turnOff": "Ausschalten und löschen",
+    "turnOffConfirm": "Wenn Sie das Stimmprofil ausschalten, wird die Aufnahme Ihrer Stimme endgültig gelöscht. Besprechungen, die Sie ab jetzt aufnehmen, erkennen Ihre Stimme nicht mehr von selbst. Ausschalten?",
+    "turnOffYes": "Ja, ausschalten und löschen",
+    "turningOff": "Wird gelöscht...",
+    "active": "Stimmprofil eingeschaltet (aufgenommen am {{data}}).",
+    "howItWorks": "Die nächsten Besprechungen, die Sie aufnehmen, zeigen Ihre Beiträge mit Ihrem Namen. Bei einem Fehler korrigieren Sie es unter „Wer ist welche Stimme“.",
+    "tooShort": "Die Aufnahme ist zu kurz. Lesen Sie den ganzen Text: mindestens {{segundos}} Sekunden.",
+    "micError": "Das Mikrofon konnte nicht verwendet werden. Prüfen Sie die Berechtigung im Browser und versuchen Sie es erneut.",
+    "unsupported": "Dieser Browser nimmt kein Audio auf. Versuchen Sie es mit einem aktuellen Chrome, Edge oder Safari.",
+    "toast": {
+      "saved": "Stimmprofil gespeichert.",
+      "deleted": "Stimmprofil ausgeschaltet und gelöscht."
+    },
+    "erros": {
+      "consentimentoPedido": "Um das Stimmprofil zu erstellen, bestätigen Sie die Erlaubnis.",
+      "amostraInvalida": "Die Aufnahme konnte nicht verwendet werden. Nehmen Sie erneut auf und lesen Sie den ganzen Text (höchstens 1 Minute).",
+      "semPerfil": "Es ist kein Stimmprofil aufgenommen.",
+      "demais": "Zu viele Aufnahmen in kurzer Zeit. Versuchen Sie es in einer Stunde erneut.",
+      "bucket": "Wir konnten das gerade nicht abschließen. Es hat sich nichts geändert; versuchen Sie es gleich noch einmal."
+    }
+  },
   "googleAgenda": {
     "title": "Google Kalender",
     "subtitle": "Verbinden Sie Ihr Google-Konto, damit Marquesa Global Match die Meetings, die Sie planen, und Ihre nächsten Schritte mit Frist in Ihren Google Kalender einträgt.",

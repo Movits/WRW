@@ -58,6 +58,12 @@ export const PLANO_DE_LIMPEZA = [
   // O áudio do resumo (H19b) e as buscas do complemento (H4i), só para o teto de 24 h.
   // O exame não gera áudio nem busca; a conta QA que fizer sai com o resto.
   { tabela: "resumo_em_audio", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O perfil de voz (H3d) e o registro dos consentimentos dele. O exame não grava
+  // perfil de voz (nenhum objeto vai ao bucket); a conta QA que gravar sai com o
+  // resto. Na conta real, o registro fica (server/exclusao-de-conta.ts); a conta QA
+  // não é gente, e o dela sai.
+  { tabela: "voice_profiles", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "voice_profile_consents", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "buscas_do_complemento", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summary_items", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summaries", coluna: "owner_id", chave: "openId", acao: "apagar" },

@@ -8,7 +8,8 @@ banco, rede ou `process.env`: o mesmo código roda no navegador.
 
 - `types.ts` reexporta os tipos do schema (`drizzle/schema.ts`); importe os tipos por ele.
 - `direcao-do-termo.ts`: direção oferta/demanda de um termo e `saoConcorrentes` (duas
-  pontas que querem a mesma coisa zeram o par no motor privado).
+  pontas que querem a mesma coisa zeram o par no motor privado e, desde o N6, não se
+  atendem no motor de perfis).
 - `tipo-da-oferta.ts`: classifica o item como SERVIÇO, produto, ativo etc. e guarda as
   regras de equivalência de serviço (`mesmaFamiliaEEspecialidade`,
   `necessidadeGenericaNomeiaOServico`, `necessidadeDeclaraOAssuntoDoServico`,
