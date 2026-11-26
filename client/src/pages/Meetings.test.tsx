@@ -110,8 +110,6 @@ vi.mock("@/lib/trpc", () => ({
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       list: { useQuery: (...args: unknown[]) => duble.list(...args) },
       get: { useQuery: (...args: unknown[]) => duble.get(...args) },
-      create: duble.registrar("create"),
-      submitRecording: duble.registrar("submitRecording"),
       decideEntity: duble.registrar("decideEntity"),
       decideContactSuggestion: duble.registrar("decideContactSuggestion"),
       translateTranscript: duble.registrar("translateTranscript"),
@@ -602,17 +600,6 @@ const gravacao = (expiraEm: number) => ({ url: "/manus-storage/meetings/dona/r/r
 const botaoReprocessar = () => screen.queryByRole("button", { name: /Reprocessar/ });
 const sugestaoPendente = { id: "s1", fullName: "Ana Souza", jobTitle: null, company: null, email: null, status: "pending" };
 
-describe("Gravação — envio que falha", () => {
-  it("a lista aberta durante o envio se relê quando ele falha: a reunião 'failed' aparece nela, e com ela o Reprocessar", () => {
-    duble.list.mockReturnValue({ data: [], isLoading: false });
-    render(<Meetings />);
-    // As variáveis do envio, como o React Query passa: o aviso leva o id da reunião.
-    act(() => { duble.mutacoes.submitRecording.opcoes.onError?.({ message: "O limite de uso gratuito do serviço de IA foi atingido." }, { meetingId: "reuniao-x" }); });
-    expect(toast.error).toHaveBeenCalledWith("O limite de uso gratuito do serviço de IA foi atingido.", { id: "reuniao-falhou-reuniao-x" });
-    expect(duble.utils.meetings.list.invalidate).toHaveBeenCalled();
-  });
-});
-
 describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
   it("com áudio guardado: a dica diz até quando ele fica e que o resultado anterior é substituído, e o botão pede o reprocessamento com o id", () => {
     const meeting = abrirDetalhe({ status: "failed", processingError: "Não foi possível transcrever o áudio." }, { recording: gravacao(Date.now() + 20 * DIA) });
@@ -995,8 +982,6 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
     await iniciarNoIdioma("en", "Call with Ana");
     expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith({ title: "Call with Ana", language: "en", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
     // Nada pelo envio único, que saiu do gravador na G14.
-    expect(duble.mutacoes.create.mutateAsync).not.toHaveBeenCalled();
-    expect(duble.mutacoes.submitRecording.mutateAsync).not.toHaveBeenCalled();
   });
 
   it("com a tela em inglês, o gravador já começa em inglês", async () => {

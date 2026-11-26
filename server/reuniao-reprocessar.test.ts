@@ -521,7 +521,7 @@ describe("envio original — a mesma trava da ficha", () => {
     meetingId: REUNIAO, ownerId: DONA, audioBase64, mimeType: "audio/webm", durationSeconds: 30, language: "pt",
   });
 
-  it("submitRecording numa reunião já pronta: ReuniaoForaDoEstado, sem upload e sem IA, e ela continua pronta", async () => {
+  it("o envio único de antes (processMeetingRecording) numa reunião já pronta: ReuniaoForaDoEstado, sem upload e sem IA, e ela continua pronta", async () => {
     estado.reuniao = reuniaoComFalha({ status: "ready", processingError: null });
     await expect(servico.processMeetingRecording(envio())).rejects.toBeInstanceOf(servico.ReuniaoForaDoEstado);
     expect(storagePut).not.toHaveBeenCalled();

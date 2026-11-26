@@ -91,8 +91,8 @@ ilimitado. Elas mudam o plano de 30/10 e valem sobre ele.
   gravação, para todos os níveis e sem teto mensal. No lugar do teto, a G10 avisa a
   cada hora completa de gravação ("1 hora de gravação", "2 horas"...), sem parar a
   gravação, para quem grava acompanhar o tempo (trocado em 15/11: o aviso passa a pedir
-  OK, ver "Decisões de 15/11/2026"). O envio único em base64 continua em 10
-  minutos e 10 MB até sair na G14. O teto de 3 gravações abertas por conta, que é
+  OK, ver "Decisões de 15/11/2026"). O envio único em base64 ficou em 10
+  minutos e 10 MB até sair na G14 (a rota saiu na parte 2, em 25/11/2026). O teto de 3 gravações abertas por conta, que é
   contra abuso e não de tempo, segue como pergunta ao Roberto.
 - **Compartilhar sem link público e sem senha.** A reunião continua visível só para as
   participantes adicionadas e, para consulta, para a presidência e a admin, como na R1.
@@ -469,8 +469,8 @@ Tamanho: P é pequena, M é média e G é grande.
   o OGG (Opus e Vorbis), o WebM e o MKV (o Opus vira Ogg Opus; o AAC, MP4 fragmentado), o
   FLAC e o AAC em ADTS (H9b), sem recodificar (`client/src/lib/corte-do-arquivo.ts`). O
   arquivo curto de um formato que o corte reconhece mas não lê (ALAC, AC-3, o Vorbis no
-  WebM) segue no envio único (o recuo do corte, que a G14 manteve); o maior recebe o
-  aviso com o nome do formato. Cada
+  WebM) vai inteiro, como uma parte só, pela mesma rota (o recuo do corte; até a G14,
+  parte 2, ia pelo envio único); o maior recebe o aviso com o nome do formato. Cada
   parte fecha na última pausa da fala antes do teto, até 20 s antes dele, como a gravação
   ao vivo (`client/src/lib/pausas-do-corte.ts`): o WAV mede o volume das amostras na
   janela antes do teto; os comprimidos são lidos duas vezes, a primeira para achar as
@@ -494,10 +494,15 @@ Tamanho: P é pequena, M é média e G é grande.
     `networkInteligente.complementarPorVoz`), não passam pelo envio único e não mudaram.
     Cada chamada do envio único deixa no log uma linha `[Reuniões] envio único
     (submitRecording)`, que diz se veio do recuo do corte ou sem a marca;
-  - **parte 2 (por fazer):** tirar a rota, ou levar o recuo do corte às partes (o arquivo
-    inteiro como uma parte só, que a rota das partes aceita até 16 MB e 12 min). Só entra
-    com uma semana de log sem chamada sem a marca do recuo (nenhum cliente de fora) e com
-    o aval do Roberto.
+  - **parte 2 (25/11/2026, com o aval do Roberto, que dispensou a semana de log):** a
+    rota `meetings.submitRecording` saiu, com a linha do log, o recorte de 15 MB e a
+    entrada em `corpoGrandeParaUploads`. O recuo do corte vai às partes: o arquivo
+    inteiro como uma parte só, até 16 MB e 12 min (`recuoDoCorte`, em
+    `client/src/pages/Meetings.tsx`). A rota das partes converte em MP3, com o ffmpeg
+    contido, a parte de um codec que o Gemini não lista (o ALAC, o AC-3, o Vorbis no WebM,
+    o ADPCM no WAV: `precisaConverterParaOGemini`, em `server/fatias-de-reuniao.ts`), e
+    recusa com `FORMATO` a que não converte. A leitura da gravação inteira das reuniões
+    antigas fica, para o reprocesso e a junção (ver "Decisões tomadas", 25/11/2026).
 - **A8:** redirecionar o endereço `.onrender.com` do Render para o domínio próprio,
   quando o Roberto confirmar o `FRONTEND_URL`, o www e o health check.
 
@@ -627,11 +632,6 @@ mescla, só por `gh pr merge`).
     - pôr no Render `WEBAUTHN_RP_ID` e `WEBAUTHN_ORIGENS`, com os valores decididos em
       15/11 (ver os contratos das passkeys). Até lá, a A6 e a A7 ficam invisíveis em
       produção;
-    - se existe app ou outro cliente fora do repositório chamando
-      `meetings.submitRecording` (o `shared/const.ts` cita "o app Expo"), porque a G14
-      só entra sem cliente externo. A parte 1 da G14 (21/11) manteve a rota, e cada
-      chamada deixa no log uma linha com a marca do recuo do corte ou sem ela: a
-      chamada sem a marca é a desse cliente;
     - se "o chat" que a administração consulta inclui as perguntas feitas à IA sobre a
       reunião (H6), porque isso muda a H6 e o aviso de gravação (G4);
   - antes da Onda 3:

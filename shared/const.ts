@@ -119,17 +119,25 @@ export const TITULO_DA_REUNIAO_MIN = 2;
 export const TITULO_DA_REUNIAO_MAX = 200;
 
 /**
- * Os tetos do envio único (meetings.submitRecording: o áudio inteiro, em
- * base64, num pedido só): 10 minutos e 10 MB. Moram aqui porque a tela confere
- * os mesmos antes de enviar. Desde a G14 o gravador não usa mais o envio
- * único: a tela só o chama no recuo do corte (o arquivo curto de um formato
- * que o corte reconhece, mas não lê), e o servidor ainda lê com eles a
- * gravação inteira das reuniões antigas, no reprocesso e na junção
- * (docs/arquitetura/gravador-de-reunioes.md). A gravação em partes, que é a de
- * todas, tem o teto dela, logo abaixo.
+ * Os tetos do envio único de antes (o áudio inteiro, em base64, num pedido só):
+ * 10 minutos e 10 MB. A rota dele (meetings.submitRecording) saiu na G14,
+ * parte 2 (25/11/2026), e nada novo chega mais assim; o servidor ainda lê com
+ * estes tetos a gravação inteira das reuniões antigas (meeting_recordings), no
+ * reprocesso e na junção (docs/arquitetura/gravador-de-reunioes.md). A
+ * gravação em partes, que é a de todas, tem o teto dela, logo abaixo.
  */
 export const ENVIO_UNICO_SEGUNDOS_MAX = 10 * 60;
 export const ENVIO_UNICO_BYTES_MAX = 10 * 1024 * 1024;
+
+/**
+ * O que a rota das partes aceita numa parte só (server/fatias-de-reuniao.ts):
+ * 16 MB e 12 min (os 10 min da parte, com 2 de folga para o relógio da aba em
+ * segundo plano). Moram aqui porque o recuo do corte (G14, parte 2: o arquivo
+ * curto que o corte reconhece mas não lê vai inteiro, como uma parte só)
+ * confere os mesmos na tela antes de a reunião nascer.
+ */
+export const PARTE_NO_SERVIDOR_BYTES_MAX = 16 * 1024 * 1024;
+export const PARTE_NO_SERVIDOR_SEGUNDOS_MAX = 12 * 60;
 
 /**
  * A gravação em partes não tem teto de tempo para quem grava (decisão do

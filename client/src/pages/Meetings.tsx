@@ -56,9 +56,9 @@ import { PARTE_SEGUNDOS, useGravacaoEmPartes } from "@/hooks/useGravacaoEmPartes
 import { PedidoAntesDeGravar, type PedidoNaTela } from "@/components/ModeloDoResumo";
 import { useImportacaoEmPartes, type AndamentoDaImportacao } from "@/hooks/useImportacaoEmPartes";
 import { ImportacaoEmAndamento } from "@/components/ImportacaoEmAndamento";
-import type { CodigoDaRecusaDoCorte } from "@/lib/corte-comum";
+import type { CodigoDaRecusaDoCorte, FormatoDoArquivo, RecusaDoCorte, TipoDaParte } from "@/lib/corte-comum";
 import { ocupar } from "@/lib/sessao-ocupada";
-import { CODIGO_ERRO_INTERROMPIDO, ENVIO_UNICO_BYTES_MAX, ENVIO_UNICO_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
+import { CODIGO_ERRO_INTERROMPIDO, PARTE_NO_SERVIDOR_BYTES_MAX, PARTE_NO_SERVIDOR_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { PARAMETRO_DA_AGENDADA, PARAMETRO_DA_LIXEIRA, ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaLixeira, rotaDaReuniao } from "@shared/rotas";
 import { podeIrParaALixeira } from "@shared/lixeira-de-reunioes";
 import { ReuniaoDaAgendaNoGravador } from "@/components/ReuniaoDaAgendaNoGravador";
@@ -113,9 +113,9 @@ const ID_DO_AVISO_DO_MICROFONE = "gravacao-microfone";
  * O gravador grava sempre em partes (G13b e G14). O `?envioUnico=1`, a saída de
  * suporte da G13b para o envio único de antes (o áudio inteiro num pedido só,
  * com 10 minutos e 10 MB e a revisão antes de enviar), saiu na G14: a URL que
- * ainda o trouxer grava em partes, como o `?emPartes=1` da G9. O envio único
- * só sobra no recuo do arquivo de um formato que o corte reconhece e não lê
- * (importarArquivo, abaixo).
+ * ainda o trouxer grava em partes, como o `?emPartes=1` da G9. A rota do
+ * envio único saiu na G14, parte 2: o arquivo de um formato que o corte
+ * reconhece e não lê também vai pelas partes (recuoDoCorte, abaixo).
  */
 
 type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
@@ -200,14 +200,23 @@ function causaDaFalha(t: TranslateFn, processingError: string | null | undefined
   return processingError ? traduzirMensagemDoServidor(processingError, t) : null;
 }
 
-function supportedAudioMime(file: File) {
-  if (file.type === "audio/mpeg" || /\.mp3$/i.test(file.name)) return "audio/mpeg";
-  if (file.type === "audio/ogg" || /\.ogg$/i.test(file.name)) return "audio/ogg";
-  if (file.type === "audio/wav" || /\.wav$/i.test(file.name)) return "audio/wav";
-  if (file.type === "audio/mp4" || /\.mp4$/i.test(file.name)) return "audio/mp4";
-  if (file.type === "audio/m4a" || file.type === "audio/x-m4a" || /\.m4a$/i.test(file.name)) return "audio/m4a";
-  if (file.type === "audio/webm" || /\.webm$/i.test(file.name)) return "audio/webm";
-  return null;
+/** O tipo da parte única do recuo do corte, pelo contêiner que o corte reconheceu nos bytes. */
+const TIPO_DO_RECUO: Partial<Record<FormatoDoArquivo, TipoDaParte>> = { mp4: "audio/mp4", webm: "audio/webm", wav: "audio/wav", ogg: "audio/ogg" };
+
+/**
+ * O recuo do corte (G14, parte 2): o arquivo que o corte reconhece mas não lê
+ * (SEM_SUPORTE, num contêiner conhecido: o ALAC no M4A, o AC-3 e o Vorbis no
+ * WebM, o ADPCM no WAV) vai inteiro, como uma parte só, quando cabe no que a
+ * rota das partes aceita: até 16 MB e 12 min. A duração que o navegador lê só
+ * barra o que ele sabe que passa; sem leitura (o Chrome não toca o ALAC), o
+ * arquivo vai, e o servidor mede nos bytes e recusa o longo demais.
+ */
+async function recuoDoCorte(arquivo: File, recusa: RecusaDoCorte, lerDuracao: (arquivo: Blob) => Promise<number | null> = lerDuracaoNoNavegador) {
+  const mimeType = recusa.formato ? TIPO_DO_RECUO[recusa.formato] : undefined;
+  if (recusa.codigo !== "SEM_SUPORTE" || !mimeType || arquivo.size > PARTE_NO_SERVIDOR_BYTES_MAX) return null;
+  const segundos = await lerDuracao(arquivo);
+  if (segundos !== null && segundos > PARTE_NO_SERVIDOR_SEGUNDOS_MAX) return null;
+  return { mimeType, duracaoMs: (segundos ?? 0) * 1000 };
 }
 
 /** O aviso do arquivo que o corte recusou antes de a reunião nascer (H9a, H9b e H9c). */
@@ -222,15 +231,6 @@ function avisoDaImportacaoRecusada(t: TranslateFn, motivo: CodigoDaRecusaDoCorte
     case "FORMATO_DESCONHECIDO": return t("meetings.importUnknownFormat");
     default: return t("meetings.audioReadError");
   }
-}
-
-function readAsDataUrl(t: TranslateFn, file: Blob) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error(t("meetings.audioReadError")));
-    reader.onload = () => resolve(String(reader.result));
-    reader.readAsDataURL(file);
-  });
 }
 
 export default function Meetings() {
@@ -298,7 +298,6 @@ export default function Meetings() {
   // tradução. Começa no idioma da tela de quem grava.
   const [idiomaFalado, setIdiomaFalado] = useState<EscolhaDoIdioma>(() => idiomaDaReuniao(i18n.resolvedLanguage ?? i18n.language) ?? IDIOMA_DA_REUNIAO_PADRAO);
   const [microphoneIssue, setMicrophoneIssue] = useState<string | null>(null);
-  const [finalizing, setFinalizing] = useState(false);
   // O Iniciar em curso (G13b, ver startRecording): o ref vale já no clique, e o
   // estado trava o botão e o formulário na tela.
   const iniciandoAgora = useRef(false);
@@ -440,55 +439,6 @@ export default function Meetings() {
   // Com a gravação em curso a tela fica no gravador, mesmo que a URL tenha saído
   // de /gravar (ver o efeito que devolve a URL, mais abaixo).
   const screen = naGravacao || recording ? "new" : reuniaoAberta ? "detail" : "list";
-
-  const createMeeting = trpc.meetings.create.useMutation();
-  // O envio único (o áudio inteiro, em base64, num pedido só, até 10 min e 10
-  // MB). Desde a G14 o gravador não o usa mais: a gravação e o arquivo vão em
-  // partes. Ele sobra só no recuo do arquivo curto de um formato que o corte
-  // reconhece, mas não lê (enviarPeloEnvioUnico, abaixo).
-  const submitRecording = trpc.meetings.submitRecording.useMutation({
-    onSuccess: async (_dados, variaveis) => {
-      // A lista pode estar aberta: a dona vai a ela pelo menu durante o envio, e
-      // ela foi lida com a reunião ainda em 'recording', estado em que não se
-      // consulta sozinha. Sem esta releitura, a lista aberta não mostra o desfecho.
-      await utils.meetings.list.invalidate();
-      toast.success(t("meetings.processedSuccess"), avisoDaReuniao("processada", variaveis.meetingId));
-      // O gravador recomeça vazio, como no fim da gravação em partes.
-      setTitle("");
-      setConsent(false);
-      // Só leva ao detalhe quem continua no gravador desta mesma tela. O
-      // onSuccess roda mesmo com a página desmontada, e o processamento leva
-      // minutos: quem saiu, ou já abriu outro gravador para a reunião seguinte,
-      // não é arrastada de volta. O replace troca a entrada do gravador pela do
-      // detalhe; as que a volta ao gravador empilha durante a gravação (cada
-      // toque no menu Reuniões) continuam embaixo.
-      if (noGravadorAgora.current) navigate(rotaDaReuniao(variaveis.meetingId), { replace: true });
-    },
-    // Em falha também, pelo mesmo motivo do onSuccess: a lista aberta durante o
-    // envio não mostra o desfecho sem esta releitura (quem chega à lista depois
-    // já relê, pelo efeito da tela anterior ou pelo remonte). Se o servidor
-    // chegou a processar o áudio, a reunião ficou 'failed', com
-    // o Reprocessar no detalhe (no CONFLICT, outra execução segue com ela). Se o
-    // envio parou antes disso (rede, deploy, sessão vencida, entrada recusada),
-    // ela continua em "Gravação pendente": a varredura do servidor só encerra
-    // as que ficaram em 'processing'.
-    onError: (error, variaveis) => {
-      // As frases conhecidas do servidor (banco fora do ar, sessão vencida...)
-      // saem no idioma da tela; as demais, como vieram.
-      toast.error(traduzirMensagemDoServidor(error.message, t) || t("meetings.processError"), avisoDaReuniao("falhou", variaveis.meetingId));
-      void utils.meetings.list.invalidate();
-    },
-    // O detalhe dessa reunião pode já estar aberto (a lista mostra a reunião
-    // durante o envio): nos dois desfechos ele se relê e mostra o status que o
-    // servidor gravou (fica em "gravação pendente" se o envio parou antes de o
-    // servidor processar o áudio, como diz o onError).
-    // As pendências de Tenho/Preciso lidas no meio do envio vieram vazias: o
-    // reset as tira da tela ("carregando", e não FALTANDO) e relê.
-    onSettled: (_dados, _erro, variaveis) => {
-      void utils.meetings.get.invalidate({ meetingId: variaveis.meetingId });
-      void utils.networkInteligente.pendencias.reset({ meetingId: variaveis.meetingId });
-    },
-  });
 
   // As três rotas de Reuniões montam a MESMA instância desta página (App.tsx):
   // ir de /gravar para /meetings ou /meetings/:id (o item Reuniões do menu, ou o
@@ -668,61 +618,6 @@ export default function Meetings() {
     return importarArquivo(file);
   }
 
-  /**
-   * O recuo do corte (pacote 4b): o arquivo de um formato que o corte reconhece,
-   * mas cujo áudio ele não lê, vai inteiro num pedido só, pelo envio único
-   * (meetings.submitRecording), até 10 minutos e 10 MB. É o único uso do envio
-   * único que sobrou no app depois da G14. Quem chama já conferiu o tipo e os 10
-   * MB (importarArquivo); aqui fica a duração, que o navegador lê. Fora dos 10
-   * minutos, ou sem duração legível, vale o aviso do formato (`recusaDoCorte`),
-   * que é o motivo de verdade: a dica da tela não promete os 10 minutos.
-   */
-  async function enviarPeloEnvioUnico(file: File, mimeType: NonNullable<ReturnType<typeof supportedAudioMime>>, recusaDoCorte: { motivo: CodigoDaRecusaDoCorte; detalhe?: string }) {
-    // A reunião da agenda do clique; se a faixa ainda carregava, a que carregar
-    // enquanto o arquivo é lido, se for a do ?agendada do clique (lida antes de
-    // criar a reunião, abaixo).
-    const agendaNoClique = agendaNaTela.current;
-    const agendadaNoClique = agendada;
-    let reuniaoCriada: string | undefined;
-    // Como no envio em partes: a sessão fica ocupada até o envio terminar, mesmo
-    // que a dona saia desta tela (o pedido segue no ar). É ocupação avulsa, e não
-    // presa à página montada; antes do fim, só o fim da sessão a solta
-    // (liberarTodas): o logout, depois que a dona confirma o Sair, e a exclusão
-    // da conta.
-    const liberarEnvio = ocupar("enviando");
-    try {
-      // O formulário trava já aqui: ler o arquivo leva segundos, e desmarcar a
-      // autorização nesse meio não impedia o create, que grava consentGranted: true.
-      setFinalizing(true);
-      const [audioBase64, durationSeconds] = await Promise.all([readAsDataUrl(t, file), lerDuracaoNoNavegador(file)]);
-      // Sem duração legível, recusa: assumir um valor (eram 60 s) deixava um
-      // áudio de 25 minutos passar por esta conferência. O servidor mede de novo.
-      if (durationSeconds === null || durationSeconds > ENVIO_UNICO_SEGUNDOS_MAX) {
-        return toast.error(avisoDaImportacaoRecusada(t, recusaDoCorte.motivo, recusaDoCorte.detalhe));
-      }
-      const agendaId = agendaNoClique ?? agendaQueCarregou(agendadaNoClique);
-      // A origem 'arquivo' põe a reunião no filtro "Importadas" (H7d): o envio
-      // único só sobra para importar um arquivo (G14).
-      const created = await createMeeting.mutateAsync({ title: title.trim(), consentGranted: true, language: idiomaFalado, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO, origem: "arquivo" });
-      reuniaoCriada = created.id;
-      ligarAAgenda(agendaId, created.id);
-      mandarPedidoDoResumo(created.id);
-      // A marca do recuo vai ao log do servidor: separa este envio do de um
-      // cliente de fora do repositório, se houver (G14, docs/arquitetura/gravador-de-reunioes.md).
-      await submitRecording.mutateAsync({ meetingId: created.id, audioBase64, mimeType, durationSeconds, language: idiomaFalado, recuoDoCorte: true });
-    } catch (error) {
-      // Com a reunião criada, a falha do envio já saiu pelo onError: o mesmo id
-      // troca aquele aviso em vez de pôr outro igual ao lado.
-      // Erro sem mensagem recua como o onError: o aviso nunca fica em branco.
-      const mensagem = (error instanceof Error && traduzirMensagemDoServidor(error.message, t)) || (reuniaoCriada ? t("meetings.processError") : t("meetings.uploadError"));
-      if (reuniaoCriada) toast.error(mensagem, avisoDaReuniao("falhou", reuniaoCriada));
-      else toast.error(mensagem);
-    } finally {
-      setFinalizing(false);
-      liberarEnvio();
-    }
-  }
-
   // O arquivo em partes (H9a, H9b e H9c). Por que todo arquivo, e não só o que
   // passa dos 10 min: a escolha não depende de uma duração que o navegador
   // estima (no MP3 de bitrate variável sem o quadro Xing ela é um palpite, e o
@@ -734,14 +629,13 @@ export default function Meetings() {
   // lido e enviado (MeetingRecorder), e o aoEncerrar da gravação em partes leva
   // ao detalhe no fim.
   //
-  // O recuo do corte, que a G14 manteve: o arquivo de um formato que o corte
-  // reconhece, mas cujo áudio ele não lê (o Vorbis no WebM, o ALAC no M4A),
-  // segue pelo envio único quando cabe nele (até 10 MB, num tipo que ele
-  // aceita; a duração, enviarPeloEnvioUnico confere): é o que esse arquivo já
-  // fazia antes da H9b, e sem o recuo ele só receberia o aviso de converter.
-  // Maior que isso, recebe o aviso; e o que o envio único recusa pela duração
-  // (mais de 10 min, ou ilegível) também recebe o aviso do formato, que é o
-  // motivo de verdade.
+  // O recuo do corte (G14, parte 2): o arquivo de um formato que o corte
+  // reconhece, mas cujo áudio ele não lê (o ALAC do Gravador do iPhone, o
+  // AC-3, o Vorbis no WebM), vai inteiro, como uma parte só, pela mesma rota
+  // das partes, quando cabe numa (recuoDoCorte, acima); o servidor o converte
+  // em MP3 quando o Gemini não lista o codec. Maior que isso, recebe o aviso
+  // do formato, que é o motivo de verdade. Até a G14, parte 2, ele ia pelo
+  // envio único (meetings.submitRecording), que saiu.
   async function importarArquivo(file: File) {
     // A reunião da agenda do clique; se a faixa ainda carregava, a que carregar
     // enquanto o arquivo é lido, se for a do ?agendada do clique.
@@ -752,7 +646,6 @@ export default function Meetings() {
     toast.dismiss(ID_DO_AVISO_SEM_COPIA);
     toast.dismiss(ID_DO_AVISO_DO_DESCARTE_PENDENTE);
     toast.dismiss(ID_DO_AVISO_FIM_PENDENTE);
-    let envioUnico: { tipo: NonNullable<ReturnType<typeof supportedAudioMime>>; recusaDoCorte: { motivo: CodigoDaRecusaDoCorte; detalhe?: string } } | null = null;
     // Como no envio de arquivo: a sessão fica ocupada do clique ao fim.
     const liberarEnvio = ocupar("enviando");
     try {
@@ -765,12 +658,10 @@ export default function Meetings() {
           ligarAAgenda(agendaNoClique ?? agendaQueCarregou(agendadaNoClique), meetingId);
           mandarPedidoDoResumo(meetingId);
         },
+        recusa => recuoDoCorte(file, recusa),
       );
       if (resultado.tipo === "recusada") {
-        const tipoDoEnvioUnico = supportedAudioMime(file);
-        if (resultado.motivo === "SEM_SUPORTE" && tipoDoEnvioUnico && file.size <= ENVIO_UNICO_BYTES_MAX) {
-          envioUnico = { tipo: tipoDoEnvioUnico, recusaDoCorte: { motivo: resultado.motivo, detalhe: resultado.detalhe } };
-        } else toast.error(avisoDaImportacaoRecusada(t, resultado.motivo, resultado.detalhe));
+        toast.error(avisoDaImportacaoRecusada(t, resultado.motivo, resultado.detalhe));
       } else if (resultado.tipo === "cancelada") {
         if (resultado.exclusao) void utils.meetings.list.invalidate();
         // A exclusão que falhou fica guardada, e a retomada de toda tela logada
@@ -802,7 +693,6 @@ export default function Meetings() {
     } finally {
       liberarEnvio();
     }
-    if (envioUnico) await enviarPeloEnvioUnico(file, envioUnico.tipo, envioUnico.recusaDoCorte);
   }
 
   function stopRecording() {
@@ -822,7 +712,7 @@ export default function Meetings() {
     <MeetingRecorder
       title={title} setTitle={setTitle} consent={consent} setConsent={setConsent}
       idioma={idiomaFalado} setIdioma={setIdiomaFalado}
-      recording={recording} paused={pausado} telaPodeApagar={telaAcesa.recusada} onPause={pausaSuportada() ? gravador.pausar : undefined} onResume={gravador.continuar} elapsed={gravador.segundos} processing={gravadorOcupado || finalizing || submitRecording.isPending}
+      recording={recording} paused={pausado} telaPodeApagar={telaAcesa.recusada} onPause={pausaSuportada() ? gravador.pausar : undefined} onResume={gravador.continuar} elapsed={gravador.segundos} processing={gravadorOcupado}
       semMicrofone={semMicrofone} microfoneBloqueado={gravador.microfoneBloqueado} onRetryMicrophone={gravador.tentarOMicrofone}
       starting={iniciando}
       importacao={importacao.andamento} onCancelImport={importacao.cancelar}

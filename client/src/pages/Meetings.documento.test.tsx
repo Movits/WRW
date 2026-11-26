@@ -75,9 +75,7 @@ vi.mock("@/lib/trpc", () => ({
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       list: { useQuery: (...args: unknown[]) => duble.list(...args) },
       get: { useQuery: (...args: unknown[]) => duble.get(...args) },
-      create: duble.registrar("create"),
       iniciarDocumento: duble.registrar("iniciarDocumento"),
-      submitRecording: duble.registrar("submitRecording"),
       decideEntity: duble.registrar("decideEntity"),
       decideContactSuggestion: duble.registrar("decideContactSuggestion"),
       translateTranscript: duble.registrar("translateTranscript"),
@@ -239,7 +237,6 @@ describe("O gravador: resumir um PDF ou fotos de um texto", () => {
     });
     expect(duble.enviarDocumento).toHaveBeenCalledWith(ID, arquivo);
     // Nada do caminho do áudio.
-    expect(duble.mutacoes.create?.mutateAsync ?? vi.fn()).not.toHaveBeenCalled();
   });
 
   it("sem título: o aviso do título do gravador, e nada nasce", async () => {

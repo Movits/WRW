@@ -34,19 +34,34 @@ const u32 = (b: Buffer, pos: number) => (pos + 4 <= b.length ? b.readUInt32BE(po
 
 /** Segundos de áudio, ou null quando o formato não é reconhecido ou não tem áudio mensurável. */
 export function medirDuracaoDoAudio(audio: Buffer): number | null {
+  return analisarAudio(audio).segundos;
+}
+
+/**
+ * A duração (como medirDuracaoDoAudio) e os codecs das faixas de áudio que a
+ * medida achou, pelo nome que o contêiner dá: no MP4, o código da entrada
+ * (`mp4a` é o AAC, `alac`, `ac-3`, `Opus`...); no Matroska e no WebM, o
+ * CodecID (`A_OPUS`, `A_VORBIS`, `A_AC3`...); no Ogg, `opus` ou `vorbis`;
+ * no WAV, `wav:` e o código do formato (1 é o PCM; 2, o ADPCM...); no FLAC,
+ * `flac`; e o resto, `mpeg`. Serve à rota das partes (G14, parte 2), que
+ * converte em MP3 a parte de um codec que o Gemini não lista
+ * (precisaConverterParaOGemini, em server/fatias-de-reuniao.ts).
+ */
+export function analisarAudio(audio: Buffer): { segundos: number | null; codecs: string[] } {
   let segundos: number | null;
+  const codecs: string[] = [];
   try {
     const b = audio.subarray(inicioDepoisDoId3(audio));
-    if (ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 4) === "WAVE") segundos = duracaoWav(b);
-    else if (ascii(b, 0, 4) === "OggS") segundos = duracaoOgg(b);
-    else if (ascii(b, 0, 4) === "fLaC") segundos = duracaoFlac(b);
-    else if (u32(b, 0) === 0x1a45dfa3) segundos = duracaoMatroska(b);
-    else if (CAIXAS_INICIAIS_MP4.has(ascii(b, 4, 4))) segundos = duracaoMp4(b);
-    else segundos = duracaoMpeg(b);
+    if (ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 4) === "WAVE") segundos = duracaoWav(b, codecs);
+    else if (ascii(b, 0, 4) === "OggS") segundos = duracaoOgg(b, codecs);
+    else if (ascii(b, 0, 4) === "fLaC") { codecs.push("flac"); segundos = duracaoFlac(b); }
+    else if (u32(b, 0) === 0x1a45dfa3) segundos = duracaoMatroska(b, codecs);
+    else if (CAIXAS_INICIAIS_MP4.has(ascii(b, 4, 4))) segundos = duracaoMp4(b, codecs);
+    else { codecs.push("mpeg"); segundos = duracaoMpeg(b); }
   } catch {
     segundos = null;
   }
-  return segundos !== null && Number.isFinite(segundos) && segundos > 0 ? segundos : null;
+  return { segundos: segundos !== null && Number.isFinite(segundos) && segundos > 0 ? segundos : null, codecs };
 }
 
 /** Etiquetas ID3v2 antes do áudio (MP3 e, às vezes, outros formatos). */
@@ -64,7 +79,7 @@ function inicioDepoisDoId3(b: Buffer): number {
 /** PCM, ponto flutuante, A-law e µ-law: o decodificador lê taxa × alinhamento. */
 const FORMATOS_PCM = new Set([1, 3, 6, 7]);
 
-function duracaoWav(b: Buffer): number | null {
+function duracaoWav(b: Buffer, codecs: string[] = []): number | null {
   let bytesPorSegundo = 0;
   let bytesDeDados = 0;
   let pos = 12;
@@ -79,6 +94,7 @@ function duracaoWav(b: Buffer): number | null {
       const alinhamento = b.readUInt16LE(dados + 12);
       const subformato = formato === 0xfffe && tamanho >= 26 && dados + 26 <= b.length ? b.readUInt16LE(dados + 24) : formato;
       bytesPorSegundo = FORMATOS_PCM.has(subformato) && alinhamento > 0 ? taxa * alinhamento : declarado;
+      codecs.push(`wav:${subformato}`);
     } else if (id === "data") {
       // Gravação em fluxo deixa o tamanho em 0 ou maior que o arquivo: vale o que chegou.
       const disponiveis = b.length - dados;
@@ -124,7 +140,7 @@ type FluxoOgg = {
   tamanhoPendente: number;
 };
 
-function duracaoOgg(b: Buffer): number | null {
+function duracaoOgg(b: Buffer, codecs: string[] = []): number | null {
   const fluxos: Record<number, FluxoOgg> = {};
   const seriais: number[] = [];
 
@@ -196,6 +212,7 @@ function duracaoOgg(b: Buffer): number | null {
   for (const serial of seriais) {
     const fluxo = fluxos[serial];
     if (fluxo.codec === "ignorado") continue;
+    codecs.push(fluxo.codec ?? "desconhecido");
     if (fluxo.codec === "opus") maior = Math.max(maior, fluxo.amostrasOpus / 48000);
     else if (fluxo.codec === "vorbis" && fluxo.taxaVorbis > 0) {
       // Todo pacote de áudio Vorbis rende ao menos meio bloco curto: o piso
@@ -246,7 +263,7 @@ const lerInteiro = (b: Buffer, inicio: number, fim: number) => {
   return valor;
 };
 
-function duracaoMatroska(b: Buffer): number | null {
+function duracaoMatroska(b: Buffer, codecs: string[] = []): number | null {
   type Faixa = { numero: number; tipo: number; codec: string };
   const faixas: Faixa[] = [];
   const amostrasOpusPorFaixa: Record<number, number> = {};
@@ -346,6 +363,7 @@ function duracaoMatroska(b: Buffer): number | null {
   const audios = faixas.filter(f => f.tipo === 2 || (f.tipo === 0 && f.codec.startsWith("A_")));
   let maior = 0;
   for (const f of audios) {
+    codecs.push(f.codec);
     const segundos = f.codec === "A_OPUS"
       ? (amostrasOpusPorFaixa[f.numero] ?? 0) / 48000
       : (ultimoInicioNsPorFaixa[f.numero] ?? 0) / 1e9;
@@ -378,7 +396,7 @@ type FaixaMp4 = {
   amostrasTabela: number; amostrasFragmentos: number; unidades: number;
 };
 
-function duracaoMp4(b: Buffer): number | null {
+function duracaoMp4(b: Buffer, codecs: string[] = []): number | null {
   const faixas: FaixaMp4[] = [];
   const duracaoPadraoPorFaixa: Record<number, number> = {};
   let faixa: FaixaMp4 | null = null;
@@ -556,6 +574,7 @@ function duracaoMp4(b: Buffer): number | null {
   let maior = 0;
   for (const f of faixas) {
     if (f.manipulador !== "soun") continue;
+    codecs.push(f.codec);
     const amostras = f.amostrasTabela + f.amostrasFragmentos;
     const segundos = f.taxaAac > 0 ? (amostras * f.quadroAac) / f.taxaAac : f.escala > 0 ? f.unidades / f.escala : 0;
     maior = Math.max(maior, segundos);

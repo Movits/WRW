@@ -1074,7 +1074,8 @@ export const meetings = mysqlTable("meetings", {
   processingError: text("processing_error"),
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
-  // Como o áudio chegou: 'single' é o envio único em base64 (meetings.submitRecording);
+  // Como o áudio chegou: 'single' é o envio único em base64 (o meetings.submitRecording,
+  // que saiu na G14, parte 2, em 25/11/2026: só as reuniões antigas o têm);
   // 'slices' é a gravação enviada em partes, uma linha de meeting_audio_slices
   // por parte. As partes são internas: para quem grava, a gravação é contínua e
   // não tem teto de tempo.

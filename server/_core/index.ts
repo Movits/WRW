@@ -228,10 +228,6 @@ async function startServer() {
   // procedimento da URL (ver server/_core/corpo-grande-para-uploads.ts).
   app.use(corpoGrandeParaUploads);
 
-  // A gravação de reunião usa Base64 (até 10 MB de áudio, ~14 MB no JSON).
-  // O limite ampliado é aplicado somente ao procedimento privado de reunião.
-  app.use("/api/trpc/meetings.submitRecording", express.json({ limit: "15mb" }));
-
   // Mesmo caso para os anexos de contexto (fotos/PDF de até 10 MB em Base64):
   // sem este recorte, o limite global de 5 MB devolveria 413 para qualquer
   // arquivo acima de ~3,7 MB — antes de o tRPC sequer validar.

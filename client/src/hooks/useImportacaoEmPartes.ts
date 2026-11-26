@@ -1,5 +1,5 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import { ehCorteCancelado, montarParte, type CodigoDaRecusaDoCorte, type CorteDoArquivo } from "@/lib/corte-comum";
+import { ehCorteCancelado, montarParte, type CodigoDaRecusaDoCorte, type CorteDoArquivo, type ParteCortada, type RecusaDoCorte, type TipoDaParte } from "@/lib/corte-comum";
 import { cortarArquivoNoWorker, type OpcoesDoCorteNoWorker } from "@/lib/corte-do-arquivo-no-worker";
 import type { FimDoArquivo, ResultadoDoDescarte, useGravacaoEmPartes } from "./useGravacaoEmPartes";
 
@@ -9,6 +9,20 @@ type Inicio = Omit<Parameters<GravacaoEmPartes["iniciar"]>[0], "origem">;
 
 /** Quem corta o arquivo: o Worker na tela; nos testes, um dublê. */
 export type Cortador = (arquivo: Blob, opcoes: OpcoesDoCorteNoWorker) => Promise<CorteDoArquivo>;
+
+/**
+ * O recuo do corte (G14, parte 2): diz se o arquivo que o corte recusou vai
+ * inteiro, como uma parte só, e em que tipo (null: não vai, e vale a recusa).
+ * É o arquivo curto de um formato que o corte reconhece mas não lê (o ALAC do
+ * Gravador do iPhone, o AC-3, o Vorbis no WebM); o servidor o converte em MP3
+ * quando o Gemini não lista o codec (server/fatias-de-reuniao.ts).
+ */
+export type RecuoDoCorte = (recusa: RecusaDoCorte) => Promise<{ mimeType: TipoDaParte; duracaoMs: number } | null>;
+
+/** O arquivo inteiro como a única parte: os bytes do arquivo, de 0 ao fim, sem nada novo. */
+export function parteComOArquivoInteiro(arquivo: Blob, duracaoMs: number): ParteCortada {
+  return { novos: new Uint8Array(0), ordem: Float64Array.of(1, 0, arquivo.size), bytes: arquivo.size, duracaoMs };
+}
 
 /** Onde a importação está, para a tela: lendo o arquivo, enviando as partes, cancelando. */
 export type AndamentoDaImportacao =
@@ -155,7 +169,7 @@ export function useImportacaoEmPartes(opcoes: { partes: GravacaoEmPartes; temSes
   atuais.current = opcoes;
   const andamento = useSyncExternalStore(assinar, lerAndamento, lerAndamento);
 
-  const importar = useCallback(async (arquivo: File, inicio: Inicio, aoCriarReuniao?: (meetingId: string) => void): Promise<ResultadoDaImportacao> => {
+  const importar = useCallback(async (arquivo: File, inicio: Inicio, aoCriarReuniao?: (meetingId: string) => void, recuo?: RecuoDoCorte): Promise<ResultadoDaImportacao> => {
     if (emCurso) throw new Error("Já há um arquivo sendo enviado.");
     const { partes, temSessao, cortar = cortarArquivoNoWorker } = atuais.current;
     const corrente: EmCurso = { controle: new AbortController(), partes, meetingId: null, exclusao: null };
@@ -184,22 +198,35 @@ export function useImportacaoEmPartes(opcoes: { partes: GravacaoEmPartes; temSes
         return { tipo: "recusada", motivo: "ILEGIVEL" };
       }
       if (cancelado()) return await cancelada();
-      if (!corte.ok) return { tipo: "recusada", motivo: corte.codigo, ...(corte.detalhe ? { detalhe: corte.detalhe } : {}) };
+      let mimeType: TipoDaParte;
+      let partesDoArquivo: ParteCortada[];
+      if (corte.ok) {
+        mimeType = corte.mimeType;
+        partesDoArquivo = corte.partes;
+      } else {
+        // O recuo do corte: o arquivo inteiro vai como uma parte só, pela
+        // mesma rota, quando quem chamou diz que ele cabe numa.
+        const inteiro = recuo ? await recuo(corte).catch(() => null) : null;
+        if (cancelado()) return await cancelada();
+        if (!inteiro) return { tipo: "recusada", motivo: corte.codigo, ...(corte.detalhe ? { detalhe: corte.detalhe } : {}) };
+        mimeType = inteiro.mimeType;
+        partesDoArquivo = [parteComOArquivoInteiro(arquivo, inteiro.duracaoMs)];
+      }
 
       const meetingId = await partes.iniciar({ ...inicio, origem: "arquivo" });
       corrente.meetingId = meetingId;
       if (cancelado()) return await cancelada();
       aoCriarReuniao?.(meetingId);
-      const total = corte.partes.length;
+      const total = partesDoArquivo.length;
       mostrar(corrente, { fase: "enviando", enviadas: 0, total });
       for (let seq = 0; seq < total; seq++) {
-        const parte = corte.partes[seq];
+        const parte = partesDoArquivo[seq];
         for (let espera = PRIMEIRA_ESPERA_MS; ; espera = Math.min(espera * 2, ESPERA_MAXIMA_MS)) {
           // O Sair no meio apagou as cópias do aparelho e a sessão: nada mais sobe.
           if (!temSessao()) return { tipo: "sem-sessao", meetingId };
           const desfecho = await partes.subirParteDoArquivo(meetingId, {
-            blob: montarParte(arquivo, parte, corte.mimeType),
-            mimeType: corte.mimeType,
+            blob: montarParte(arquivo, parte, mimeType),
+            mimeType,
             duracaoMs: parte.duracaoMs,
             seq,
           });

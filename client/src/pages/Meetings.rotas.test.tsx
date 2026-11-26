@@ -86,8 +86,6 @@ vi.mock("@/lib/trpc", () => ({
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       list: { useQuery: (...args: unknown[]) => duble.list(...args) },
       get: { useQuery: (...args: unknown[]) => duble.get(...args) },
-      create: duble.registrar("create"),
-      submitRecording: duble.registrar("submitRecording"),
       decideEntity: duble.registrar("decideEntity"),
       decideContactSuggestion: duble.registrar("decideContactSuggestion"),
       translateTranscript: duble.registrar("translateTranscript"),
@@ -316,120 +314,6 @@ describe("Reuniões — a URL escolhe a tela", () => {
 });
 
 describe("Reuniões — depois do envio", () => {
-  it("o envio que dá certo leva ao detalhe e tira o gravador do histórico", async () => {
-    const trocar = vi.spyOn(window.history, "replaceState");
-    abrirEm("/gravar");
-    trocar.mockClear();
-    await act(async () => { await duble.mutacoes.submitRecording.opcoes.onSuccess?.({}, { meetingId: VINICOLA }); });
-    expect(window.location.pathname).toBe(`/meetings/${VINICOLA}`);
-    expect(trocar.mock.calls.some(chamada => chamada[2] === `/meetings/${VINICOLA}`)).toBe(true);
-  });
-
-  it("quem saiu do gravador enquanto o áudio processava não é arrastada ao detalhe", async () => {
-    abrirEm("/gravar");
-    act(() => window.history.pushState(null, "", "/meetings"));
-    await act(async () => { await duble.mutacoes.submitRecording.opcoes.onSuccess?.({}, { meetingId: VINICOLA }); });
-    expect(window.location.pathname).toBe("/meetings");
-  });
-
-  it("o envio de um gravador que já saiu da tela não tira a usuária do gravador novo", async () => {
-    const { unmount } = abrirEm("/gravar");
-    const onSuccessDoPrimeiro = duble.mutacoes.submitRecording.opcoes.onSuccess;
-    unmount();
-    abrirEm("/gravar");
-    await act(async () => { await onSuccessDoPrimeiro?.({}, { meetingId: VINICOLA }); });
-    expect(window.location.pathname).toBe("/gravar");
-  });
-
-  it("em /gravar/ (barra final, como a rota aceita) o envio que dá certo também leva ao detalhe", async () => {
-    abrirEm("/gravar/");
-    await act(async () => { await duble.mutacoes.submitRecording.opcoes.onSuccess?.({}, { meetingId: VINICOLA }); });
-    expect(window.location.pathname).toBe(`/meetings/${VINICOLA}`);
-  });
-
-  it("o fim do envio, com sucesso ou com falha, relê o detalhe daquela reunião (que pode já estar aberto)", () => {
-    abrirEm("/gravar");
-    const { onSettled } = duble.mutacoes.submitRecording.opcoes;
-    act(() => onSettled?.({}, null, { meetingId: VINICOLA }));
-    expect(duble.utils.meetings.get.invalidate).toHaveBeenLastCalledWith({ meetingId: VINICOLA });
-    // As pendências lidas no meio do envio saem da tela e se releem.
-    expect(duble.utils.networkInteligente.pendencias.reset).toHaveBeenLastCalledWith({ meetingId: VINICOLA });
-    duble.utils.meetings.get.invalidate.mockClear();
-    act(() => onSettled?.(undefined, new Error("falhou"), { meetingId: BIA }));
-    expect(duble.utils.meetings.get.invalidate).toHaveBeenLastCalledWith({ meetingId: BIA });
-    expect(duble.utils.networkInteligente.pendencias.reset).toHaveBeenLastCalledWith({ meetingId: BIA });
-  });
-
-  it("com o detalhe aberto durante o envio, o fim do envio e o detalhe avisam com o mesmo id: um aviso só", async () => {
-    const detalheCom = (status: string) => ({
-      data: { meeting: { ...reuniao(VINICOLA), status }, transcript: null, entities: [], suggestions: [], recording: null, recordingExpired: false },
-      isLoading: false, isError: false, error: null, refetch: vi.fn(),
-    });
-    duble.get.mockReturnValue(detalheCom("processing"));
-    const { rerender } = abrirEm(`/meetings/${VINICOLA}`);
-    duble.get.mockReturnValue(detalheCom("ready"));
-    await act(async () => { await duble.mutacoes.submitRecording.opcoes.onSuccess?.({}, { meetingId: VINICOLA }); });
-    rerender(<Meetings />);
-    const avisos = vi.mocked(toast.success).mock.calls.filter(([texto]) => texto === i18n.t("meetings.processedSuccess"));
-    expect(avisos).toHaveLength(2);
-    for (const [, opcoes] of avisos) expect(opcoes).toEqual({ id: `reuniao-processada-${VINICOLA}` });
-  });
-
-  it("com o detalhe aberto, a falha do envio e a do detalhe também avisam com o mesmo id", async () => {
-    const detalheCom = (status: string) => ({
-      data: { meeting: { ...reuniao(VINICOLA), status }, transcript: null, entities: [], suggestions: [], recording: null, recordingExpired: false },
-      isLoading: false, isError: false, error: null, refetch: vi.fn(),
-    });
-    duble.get.mockReturnValue(detalheCom("processing"));
-    const { rerender } = abrirEm(`/meetings/${VINICOLA}`);
-    duble.get.mockReturnValue(detalheCom("failed"));
-    act(() => duble.mutacoes.submitRecording.opcoes.onError?.(new Error("A IA não respondeu."), { meetingId: VINICOLA }));
-    rerender(<Meetings />);
-    const avisos = vi.mocked(toast.error).mock.calls;
-    expect(avisos).toHaveLength(2);
-    for (const [, opcoes] of avisos) expect(opcoes).toEqual({ id: `reuniao-falhou-${VINICOLA}` });
-  });
-
-  it("a falha do envio com o banco fora do ar avisa no idioma da tela", async () => {
-    await act(async () => { await i18n.changeLanguage("en"); });
-    abrirEm("/gravar");
-    act(() => duble.mutacoes.submitRecording.opcoes.onError?.(new Error(MENSAGEM_BANCO_INDISPONIVEL), { meetingId: VINICOLA }));
-    expect(toast.error).toHaveBeenCalledWith(i18n.t("errors.databaseUnavailable"), { id: `reuniao-falhou-${VINICOLA}` });
-  });
-
-  it("com o detalhe aberto, o aviso da falha que o detalhe vê traz a causa gravada pelo servidor, e não a frase genérica", async () => {
-    const CAUSA = "O limite de uso gratuito do serviço de IA foi atingido.";
-    const detalheCom = (status: string, processingError: string | null) => ({
-      data: { meeting: { ...reuniao(VINICOLA), status, processingError }, transcript: null, entities: [], suggestions: [], recording: null, recordingExpired: false },
-      isLoading: false, isError: false, error: null, refetch: vi.fn(),
-    });
-    duble.get.mockReturnValue(detalheCom("processing", null));
-    const { rerender } = abrirEm(`/meetings/${VINICOLA}`);
-    act(() => duble.mutacoes.submitRecording.opcoes.onError?.(new Error(CAUSA), { meetingId: VINICOLA }));
-    duble.get.mockReturnValue(detalheCom("failed", CAUSA));
-    rerender(<Meetings />);
-    const avisos = vi.mocked(toast.error).mock.calls;
-    expect(avisos.at(-1)).toEqual([CAUSA, { id: `reuniao-falhou-${VINICOLA}` }]);
-    expect(avisos.some(([texto]) => texto === i18n.t("meetings.processError"))).toBe(false);
-  });
-
-  it("com a tela em inglês, o erro de consulta gravado como causa sai traduzido no aviso do detalhe e no quadro", async () => {
-    await act(async () => { await i18n.changeLanguage("en"); });
-    const detalheCom = (status: string, processingError: string | null) => ({
-      data: { meeting: { ...reuniao(VINICOLA), status, processingError }, transcript: null, entities: [], suggestions: [], recording: null, recordingExpired: false },
-      isLoading: false, isError: false, error: null, refetch: vi.fn(),
-    });
-    duble.get.mockReturnValue(detalheCom("processing", null));
-    const { rerender } = abrirEm(`/meetings/${VINICOLA}`);
-    act(() => duble.mutacoes.submitRecording.opcoes.onError?.(new Error(MENSAGEM_ERRO_DE_CONSULTA), { meetingId: VINICOLA }));
-    duble.get.mockReturnValue(detalheCom("failed", MENSAGEM_ERRO_DE_CONSULTA));
-    rerender(<Meetings />);
-    // O aviso do detalhe (o último, com o mesmo id do envio) e o quadro vermelho, os dois traduzidos.
-    expect(vi.mocked(toast.error).mock.calls.at(-1)).toEqual([i18n.t("errors.queryFailed"), { id: `reuniao-falhou-${VINICOLA}` }]);
-    expect(screen.getByText(i18n.t("errors.queryFailed"))).toBeInTheDocument();
-    expect(screen.queryByText(MENSAGEM_ERRO_DE_CONSULTA)).not.toBeInTheDocument();
-    expect(i18n.t("errors.queryFailed")).not.toBe(MENSAGEM_ERRO_DE_CONSULTA);
-  });
 
   it("a falha marcada pela varredura chega ao aviso do detalhe já traduzida", () => {
     const detalheCom = (status: string, processingError: string | null) => ({
@@ -443,15 +327,6 @@ describe("Reuniões — depois do envio", () => {
     expect(toast.error).toHaveBeenLastCalledWith(i18n.t("meetings.processingInterrupted"), { id: `reuniao-falhou-${VINICOLA}` });
   });
 
-  it("depois do envio o gravador recomeça vazio, sem o título nem o consentimento da reunião enviada", async () => {
-    abrirEm("/gravar");
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
-    fireEvent.click(screen.getByRole("checkbox"));
-    await act(async () => { await duble.mutacoes.submitRecording.opcoes.onSuccess?.({}, { meetingId: VINICOLA }); });
-    act(() => window.history.pushState(null, "", "/gravar"));
-    expect(screen.getByPlaceholderText("Ex.: Conversa com investidor")).toHaveValue("");
-    expect(screen.getByRole("checkbox")).not.toBeChecked();
-  });
 });
 
 describe("Reuniões — gravação em curso", () => {
@@ -573,7 +448,6 @@ describe("Reuniões — gravação em curso", () => {
     expect(toast.info).toHaveBeenCalledWith(ENCERRADA_AO_SAIR, { id: "gravacao-encerrada-ao-sair", duration: Infinity, closeButton: true });
     expect(excluirReuniao.mutate).not.toHaveBeenCalled();
     expect(localStorage.getItem(FINS)).toBeNull();
-    expect(duble.mutacoes.submitRecording?.mutateAsync).not.toHaveBeenCalled();
   });
 
   it("em partes, a página que sai pelo fim da sessão (o Sair mesmo assim, excluir a conta) descarta como antes: nada sobe, nada avisa e a sessão não volta a ficar ocupada", async () => {
@@ -872,14 +746,6 @@ describe("Reuniões — excluir, voltar à lista e link inválido", () => {
     expect(duble.utils.meetings.list.invalidate.mock.calls.length).toBeGreaterThan(antes);
   });
 
-  it("com a lista aberta durante o envio, o fim do envio com sucesso a relê (ela foi lida com a reunião ainda pendente)", async () => {
-    abrirEm("/meetings");
-    const releiturasAntes = duble.utils.meetings.list.invalidate.mock.calls.length;
-    await act(async () => { await duble.mutacoes.submitRecording.opcoes.onSuccess?.({}, { meetingId: VINICOLA }); });
-    expect(duble.utils.meetings.list.invalidate.mock.calls.length).toBe(releiturasAntes + 1);
-    expect(window.location.pathname).toBe("/meetings");
-  });
-
   it("chegar à lista vinda do gravador (menu ou voltar) relê a lista", () => {
     abrirEm("/meetings");
     fireEvent.click(screen.getByRole("button", { name: /Nova reunião/ }));
@@ -975,19 +841,6 @@ describe("Reuniões — escondida pelo Suspense, sem desmontar", () => {
     );
     return { entregarTela: () => act(async () => { entregar({ default: () => <h1>Memória</h1> }); }) };
   }
-
-  it("o fim do envio com a dona numa tela que ainda carrega não troca essa tela pelo detalhe", async () => {
-    const { entregarTela } = abrirNoApp("/gravar");
-    act(() => window.history.pushState(null, "", "/memory"));
-    expect(screen.getByText("Carregando a tela…")).toBeInTheDocument();
-    // O gravador segue montado, só escondido: é o caso em que o efeito comum não se limpa.
-    expect(screen.getByText(/Iniciar gravação/)).not.toBeVisible();
-    await act(async () => { await duble.mutacoes.submitRecording.opcoes.onSuccess?.({}, { meetingId: VINICOLA }); });
-    expect(window.location.pathname).toBe("/memory");
-    await entregarTela();
-    expect(await screen.findByRole("heading", { name: "Memória" })).toBeInTheDocument();
-    expect(window.location.pathname).toBe("/memory");
-  });
 
   it("a ida para a lixeira que termina com o detalhe escondido (a dona foi a uma tela que ainda carrega) não a leva à lista", async () => {
     abrirNoApp(`/meetings/${VINICOLA}`);

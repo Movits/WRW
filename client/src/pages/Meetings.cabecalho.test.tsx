@@ -52,8 +52,6 @@ vi.mock("@/lib/trpc", () => ({
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
       list: { useQuery: () => duble.list() },
       get: { useQuery: () => duble.get() },
-      create: duble.mutacao(),
-      submitRecording: duble.mutacao(),
       decideEntity: duble.mutacao(),
       decideContactSuggestion: duble.mutacao(),
       translateTranscript: duble.mutacao(),
