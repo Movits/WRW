@@ -125,8 +125,10 @@ export function PoliticaDePrivacidade() {
             e-mail, redes sociais, foto, cartão de visita e o que cada uma possui e procura. Para
             quê: organizar a sua rede e encontrar oportunidades entre os contatos. Todo contato
             nasce privado e só você o vê. Se você marcar um contato como "Autorizadas (Ouro)", as
-            contas Ouro (que incluem a administração e a presidência da plataforma) podem ler esse
-            contato, inclusive os dados pessoais dele, e cada leitura fica registrada. Quando o
+            contas Ouro (que incluem a administração e a presidência da plataforma) podem ler, desse
+            contato, o nome, cargo, empresa, localização, etiquetas e o que ele possui e procura (nunca
+            telefone, e-mail, redes sociais, foto, cartão nem as suas anotações), e cada leitura
+            fica registrada. Quando o
             termo de acesso Ouro estiver publicado na plataforma, essa leitura passa a depender
             também da sua autorização a ele. No nível público vão só as oportunidades, sem nome, telefone,
             e-mail ou qualquer dado pessoal do contato. Você é responsável por ter fundamento para
