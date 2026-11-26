@@ -17,6 +17,9 @@ banco, rede ou `process.env`: o mesmo código roda no navegador.
   `necessidadeGenericaNomeiaOServico`, `necessidadeDeclaraOAssuntoDoServico`,
   `necessidadeEhOferta` (N7: "Ofereço contabilidade" no campo de necessidade não pede nada),
   `DESTINATARIOS_COMUNS`, `regraNaoLeOPar`).
+- `chaves-de-cruzamento.ts`: as chaves do índice de cruzamento (N4b). Não decidem match, só
+  acham candidatos; regra nova que faça `scoreMatch` aceitar um par precisa de chave aqui (ou em
+  `substanciasDoTermo` e `chavesDeServico`), e `server/chaves-de-cruzamento.test.ts` acusa.
 - `o-que-busca.ts`: as 12 opções de "O que você busca?" (nenhuma libera serviço sozinha).
 - `qualificacao-do-perfil.ts`: a régua que separa Prata de Bronze.
 

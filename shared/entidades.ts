@@ -22,13 +22,14 @@ import { encontrarContatosEmTexto, mascararContatosEmTexto } from "./contato-em-
 /** Linhas de uma planilha (a meta da reunião de 11/11 é de ~30 mil cadastros por convênio). */
 export const LINHAS_POR_ARQUIVO_MAX = 50_000;
 /**
- * Associados por entidade até a N4b (o índice de cruzamento). A leitura global lê
- * no máximo 1000 contatos de entidade por vez (network-rede-global.ts): uma base
- * maior não cruzaria, e o desenho manda não carregar base real antes da N4b
- * (docs/arquitetura/entidades.md, seção 8). O ensaio lê o arquivo inteiro; o
- * aplicar recusa com BASE_ACIMA_DO_TETO. Decisão vetável (24/11): sobe com a N4b.
+ * Associados por entidade. Até a N4b era 1000 (a leitura global tinha janela de
+ * 1000 contatos de entidade); com o índice de cruzamento (`chaves_de_cruzamento`),
+ * a leitura paginada e a fila (N4b, docs/arquitetura/entidades.md, seção 8), sobe
+ * para 50 mil (a cliente disse "pelo menos 30 mil associados"; Roberto, 25/11),
+ * medida em carga local com 50 e 100 mil associados. O ensaio lê o arquivo
+ * inteiro; o aplicar recusa com BASE_ACIMA_DO_TETO.
  */
-export const ASSOCIADOS_MAX_ATE_N4B = 1000;
+export const ASSOCIADOS_MAX_POR_ENTIDADE = 50_000;
 /** Linhas por bloco: cada bloco é uma chamada e uma transação no servidor. */
 export const LINHAS_POR_BLOCO = 500;
 /** Itens por lado ("o que tem" e "o que precisa") de cada empresa. */
@@ -302,12 +303,12 @@ export function linhasComProblema(problemas: ProblemaDaLinha[]): number {
 }
 
 /**
- * A base passaria do teto (ASSOCIADOS_MAX_ATE_N4B) com os novos desta planilha?
+ * A base passaria do teto (ASSOCIADOS_MAX_POR_ENTIDADE) com os novos desta planilha?
  * `base` é o que a entidade já tem fora os removidos; `novos`, os documentos que
  * ainda não estão nela. O ensaio avisa com isto; o aplicar recusa no servidor.
  */
 export function passaDoTeto(base: number, novos: number): boolean {
-  return base + novos > ASSOCIADOS_MAX_ATE_N4B;
+  return base + novos > ASSOCIADOS_MAX_POR_ENTIDADE;
 }
 
 export type LinhaValida = {
@@ -464,7 +465,7 @@ export const ERROS_DA_ENTIDADE = {
   ativacaoEmailJaCadastrado: "ATIVACAO_EMAIL_JA_CADASTRADO",
   // O associado ativado decide por si: a entidade não devolve a cópia dele à rede global.
   associadoAtivado: "ASSOCIADO_ATIVADO",
-  // Até a N4b (o índice de cruzamento), a base de uma entidade tem teto (ASSOCIADOS_MAX_ATE_N4B).
+  // A base de uma entidade tem teto (ASSOCIADOS_MAX_POR_ENTIDADE, 50 mil desde a N4b).
   baseAcimaDoTeto: "BASE_ACIMA_DO_TETO",
 } as const;
 export type CodigoDeErroDaEntidade = (typeof ERROS_DA_ENTIDADE)[keyof typeof ERROS_DA_ENTIDADE];

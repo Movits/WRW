@@ -204,9 +204,9 @@ contato da rede dela, com o código anônimo, e uma linha em `entidade_membros` 
 em HMAC (`ENTIDADES_HMAC_KEY`) e cifrado, os contatos cifrados e as CNAEs (que NUNCA viram
 necessidade). A carga vem da planilha lida no aparelho, em blocos de 500 com transação, e
 só com o convênio vigente; o cruzamento global tira as entidades sem convênio
-(`entidadesSemConvenio`). Desenho, decisões e limites (o teto de 1000 da rede global e o
-motor privado quadrático: não carregar base real antes da N4b, o índice) em
-`docs/arquitetura/entidades.md`. A ativação do cadastro importado (N3,
+(`entidadesSemConvenio`). Teto de 50 mil associados por entidade
+(`ASSOCIADOS_MAX_POR_ENTIDADE`). Desenho, decisões e medidas de carga em
+`docs/arquitetura/entidades.md` (seção 8). A ativação do cadastro importado (N3,
 `server/entidades-ativacao.ts`) é um link por associado, de uso único e com validade, só em
 hash; ativar cria a conta com só o que a pessoa confirmou, marca o associado `ativado` e tira o
 contato da entidade da rede global, numa transação com a auditoria (seção 9a do desenho).
@@ -223,6 +223,37 @@ nome com a autorização do convênio) e pede o contato; a entidade encaminha à
 registra o aceite com o canal. O telefone e o e-mail saem decifrados só no aceito, a quem
 pediu, com a auditoria na transação. A anotação das conexões é uma leitura à parte
 (`anotarConexoesComEntidade`), fora de `listarConexoesDaSolicitante`. Seção 12 do desenho.
+
+**O índice e a fila do cruzamento (N4b):** `chaves_de_cruzamento` guarda, por item de
+`contact_assets` ("tem") e `contact_needs` ("precisa"), o HASH das chaves de
+`shared/chaves-de-cruzamento.ts` (slug, substância e a outra grafia do N7, família,
+especialidade e público do serviço, assunto curado, categoria; nunca palavra solta). O
+critério semântico estreito (N7) não passa pelo índice: ligado, o par só por semântica
+fica fora do motor privado em massa. A chave só acha candidatos: quem decide o
+par continua sendo `scoreMatch`, e `server/chaves-de-cruzamento.test.ts` confere que todo
+par que ele aceita tem chave em comum (critério novo em `scoreMatch` exige chave nova
+lá). A busca na rede global (`network-rede-global.ts`) pergunta ao índice e lê só os
+candidatos, pela leitura autorizada, paginada e em ordem de id (sem janela). A carga das
+entidades indexa o bloco na transação (`indexarContatos`); o resto dos itens entra pela
+varredura do laço (`server/fila-de-cruzamento.ts`, a cada 2 s os novos, de 10 em 10 min a
+tabela e as órfãs). Conta com mais de 300 contatos disponíveis busca pela fila, em lotes de
+200 (`emFila`), e a busca na hora que esgota o orçamento de comparações também vai para a
+fila; o cursor anda só até o último contato cruzado por inteiro, e o primeiro de cada lote é
+cruzado inteiro. **Não há teto de conexões** (decisão do Roberto de 26/11: saíram os 100 por
+busca e os 10 por contraparte, que escondiam os associados de uma entidade, e o de 1000 perfis
+de membras lidos): todo par que combina é registrado, uma vez só (a chave do par), e
+`networkInteligente.conexoes` devolve a lista em páginas de 10 paginadas no servidor, da nota
+maior à menor (`paginaDeConexoesDaSolicitante`), com as contagens do painel sobre todas
+(`contarConexoesDaSolicitante`). Proteção de carga é orçamento, fila, lote, cota e página,
+nunca esconder resultado; conta com mais de 2000
+contatos recalcula o motor privado pela fila, e o laço com mais de 200 mil pares "tem" ×
+"preciso" só compara os que têm chave em comum e guarda os 20 MELHORES pares por contato (mais
+os que já existiam). Editar item (T45) reindexa o contato na transação, e mudar o resultado de
+`chavesDoItem` exige subir `VERSAO_DAS_CHAVES` (o instantâneo do teste fica vermelho): a
+varredura reindexa as linhas de outra versão. A reserva do lote é curta e renovada, conta
+tentativa e é conferida antes de cada gravação (`antesDeGravar`).
+Consulta nova a `contact_assets` ou `contact_needs` leva a dona no WHERE (o índice é
+dona + contato).
 
 ## Acesso a dados: banco fora do ar é erro
 
@@ -703,3 +734,6 @@ fila substitui a edição. O resumo refeito não refaz sozinho o mapa que a dona
   a forma errada passa em silêncio: escreva o dublê a partir do tipo real e prefira
   asserções que discriminem comportamento.
 - Função pura do client pode ser testada aqui (padrão: `server/transcricao-destacada.test.ts`).
+- A medida de carga da base das associações (`server/carga-das-entidades.carga.test.ts`) só roda com
+  `RODAR_CARGA_N4B=1` e um `DATABASE_URL_TESTES` local recém-migrado (recusa host remoto); o par a par
+  inteiro das chaves de cruzamento, com `CHAVES_DE_CRUZAMENTO_COMPLETO=1` (7 min).

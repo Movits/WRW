@@ -21,8 +21,8 @@ import { garantirCodigosAnonimos } from "../network-codigo-anonimo";
 import { perfilDoContato } from "../network-perfil-do-contato";
 import { AssociadoAtivado, ContatoNaoEncontrado, definirDisponibilidade, procurarConexoesNaRedeGlobal } from "../network-rede-global";
 import {
-  avancarConexao, ComissaoAntesDoFechamento, ConexaoNaoEncontrada, contarConexoes, definirStatusDeComissao,
-  ETAPAS_DA_CONEXAO, EtapaForaDeOrdem, listarConexoesDaSolicitante, listarTodasAsConexoes, ORIGENS_DA_CONEXAO, sincronizarConexoesInternas,
+  avancarConexao, ComissaoAntesDoFechamento, ConexaoNaoEncontrada, contarConexoesDaSolicitante, definirStatusDeComissao,
+  ETAPAS_DA_CONEXAO, EtapaForaDeOrdem, listarTodasAsConexoes, ORIGENS_DA_CONEXAO, paginaDeConexoesDaSolicitante, sincronizarConexoesInternas,
   trancarANotaEntreMembras, type ConexaoParaQuemPergunta,
 } from "../network-registro";
 import { createAuditLog } from "../security";
@@ -154,18 +154,32 @@ export const networkInteligenteRouter = router({
 
   // Itens 16, 17 e 19: as conexões registradas em que a dona participa, com as
   // contagens do painel. Com o termo, as sugestões internas que ainda não
-  // estavam no registro entram antes da leitura.
-  conexoes: protectedProcedure.query(async ({ ctx }) => {
-    if (!(await termoDoSmartMatch(ctx.user.id))) return { termoAceito: false as const };
-    await sincronizarConexoesInternas(ctx.user.openId);
-    const lista = await listarConexoesDaSolicitante(ctx.user);
-    // U3: a nota das conexões entre membras (PLATFORM_MATCH) não vai a quem ainda não vê a lista das conexões
-    // sugeridas (a Bronze, inclusive a que tem o poder de distribuidora: o poder não é nível). A contagem não lê nota.
-    const visiveis: ConexaoParaQuemPergunta[] = veAsConexoesSugeridas(ctx.user.role) ? lista : trancarANotaEntreMembras(lista);
-    // N2: o lado que é associado de uma entidade sai como "membro da entidade X", com o pedido de contato.
-    const anotadas = await anotarConexoesComEntidade(ctx.user, visiveis.slice(0, 50));
-    return { termoAceito: true as const, contagem: contarConexoes(lista), lista: anotadas };
-  }),
+  // estavam no registro entram antes da leitura. Decisão do Roberto de 26/11:
+  // TODAS as conexões, cada uma uma vez, da nota maior à menor, em páginas de 10
+  // paginadas aqui (o navegador recebe só a página). Com `contactId`, as de um
+  // contato da dona (a ficha do contato), sem as contagens do painel.
+  conexoes: protectedProcedure
+    .input(z.object({
+      pagina: z.number().int().min(1).max(1_000_000).optional(),
+      contactId: z.number().int().positive().optional(),
+    }).optional())
+    .query(async ({ ctx, input }) => {
+      if (!(await termoDoSmartMatch(ctx.user.id))) return { termoAceito: false as const };
+      await sincronizarConexoesInternas(ctx.user.openId);
+      // U3: a nota das conexões entre membras (PLATFORM_MATCH) não vai a quem ainda não vê a lista das conexões
+      // sugeridas (a Bronze, inclusive a que tem o poder de distribuidora: o poder não é nível), nem pela ordem.
+      // A contagem não lê nota.
+      const veANota = veAsConexoesSugeridas(ctx.user.role);
+      const pagina = await paginaDeConexoesDaSolicitante(ctx.user, { pagina: input?.pagina, contactId: input?.contactId, semNotaEntreMembras: !veANota });
+      const visiveis: ConexaoParaQuemPergunta[] = veANota ? pagina.lista : trancarANotaEntreMembras(pagina.lista);
+      // N2: o lado que é associado de uma entidade sai como "membro da entidade X", com o pedido de contato.
+      const anotadas = await anotarConexoesComEntidade(ctx.user, visiveis);
+      const contagem = input?.contactId === undefined ? await contarConexoesDaSolicitante(ctx.user) : null;
+      return {
+        termoAceito: true as const, contagem, lista: anotadas,
+        total: pagina.total, pagina: pagina.pagina, porPagina: pagina.porPagina, paginas: pagina.paginas,
+      };
+    }),
 
   avancarConexao: protectedProcedure
     .input(z.object({ conexaoId: z.string().uuid(), etapa: etapaDestino }))

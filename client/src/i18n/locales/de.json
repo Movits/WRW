@@ -2844,6 +2844,8 @@
     "toastRevogado": "Autorisierung widerrufen. Der Abgleich wurde deaktiviert.",
     "erroRevogar": "Der Widerruf war nicht möglich.",
     "toastRecalculado": "{{total}} Möglichkeit(en) analysiert.",
+    "recalculoNaFila": "Ihr Netzwerk ist groß: Die Vorschläge werden im Hintergrund neu berechnet und erscheinen in einigen Minuten hier.",
+    "alteracaoNaFila": "Gespeichert. Ihr Netzwerk ist groß: Die Vorschläge werden im Hintergrund aktualisiert und erscheinen in einigen Minuten hier.",
     "erroAtualizarMatches": "Die vorgeschlagenen Verbindungen konnten nicht aktualisiert werden.",
     "toastItemRemovido": "Eintrag entfernt und Vorschläge aktualisiert.",
     "erroRemoverItem": "Der Eintrag konnte nicht entfernt werden.",
@@ -3777,7 +3779,11 @@
       "discardConfirmCancel": "Abbrechen",
       "reasonPlatformMatch": "Vom Profil-Motor zwischen zwei Mitgliedern vorgeschlagen, die bei der Erfassung die Smart-Match-Bedingungen akzeptiert hatten: {{pontuacao}} % Übereinstimmung.",
       "reasonPlatformMatchLocked": "Vom Profil-Motor zwischen zwei Mitgliedern vorgeschlagen, die bei der Erfassung die Smart-Match-Bedingungen akzeptiert hatten. Die Übereinstimmung wird angezeigt, sobald Ihr Profil den Status Silber-Mitglied erreicht.",
-      "reasonNoAuthorization": "Die andere Seite hat ihre Zustimmung zurückgezogen, deshalb werden die Details dieser Verbindung nicht mehr angezeigt."
+      "reasonNoAuthorization": "Die andere Seite hat ihre Zustimmung zurückgezogen, deshalb werden die Details dieser Verbindung nicht mehr angezeigt.",
+      "pageSummary": "Seite {{pagina}} von {{paginas}} · {{total}} insgesamt · von der höchsten zur niedrigsten Kompatibilität",
+      "previousPage": "Zurück",
+      "nextPage": "Weiter",
+      "pagesLabel": "Seiten der registrierten Verbindungen"
     },
     "global": {
       "description": "Freigegebene Kontakte werden mit Plattformmitgliedern und anderen autorisierten Netzwerken abgeglichen — nur über anonyme ID, Was Ich Habe und Was Ich Brauche. Name, Telefon, E-Mail, Audio, Transkript und Notizen verlassen nie die Plattform.",
@@ -3785,6 +3791,7 @@
       "searching": "Suche läuft…",
       "found": "Gefundene und erfasste Verbindungen: {{quantidade}}.",
       "noneFound": "Derzeit keine neuen Verbindungen mit dem globalen Netzwerk.",
+      "queued": "Die Suche über Ihre {{quantidade}} Kontakte hat begonnen und läuft im Hintergrund. Verbindungen erscheinen hier, sobald sie gefunden werden.",
       "noneAvailable": "Keiner Ihrer Kontakte ist freigegeben. Öffnen Sie einen Kontakt und wählen Sie JA bei „Diesen Kontakt für Chancen im Netzwerk freigeben“.",
       "error": "Suche derzeit nicht möglich."
     },

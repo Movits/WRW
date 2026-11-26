@@ -2844,6 +2844,8 @@
     "toastRevogado": "授权已撤销。智能比对已关闭。",
     "erroRevogar": "无法撤销。",
     "toastRecalculado": "已分析 {{total}} 个机会。",
+    "recalculoNaFila": "您的网络很大：建议正在后台重新计算，几分钟后会显示在这里。",
+    "alteracaoNaFila": "已保存。您的网络很大：建议会在后台更新，几分钟后会显示在这里。",
     "erroAtualizarMatches": "无法更新推荐连接。",
     "toastItemRemovido": "项目已删除，建议已更新。",
     "erroRemoverItem": "无法删除该项目。",
@@ -3777,7 +3779,11 @@
       "discardConfirmCancel": "取消",
       "reasonPlatformMatch": "由资料匹配引擎在两位会员之间建议；记录该连接时，双方均已接受 Smart Match 条款：匹配度 {{pontuacao}}%。",
       "reasonPlatformMatchLocked": "由资料匹配引擎在两位会员之间建议；记录该连接时，双方均已接受 Smart Match 条款。您的资料达到银牌会员后，即可看到匹配度。",
-      "reasonNoAuthorization": "对方已撤回授权，因此该连接的详情不再显示。"
+      "reasonNoAuthorization": "对方已撤回授权，因此该连接的详情不再显示。",
+      "pageSummary": "第 {{pagina}} 页，共 {{paginas}} 页 · 共 {{total}} 个 · 按匹配度从高到低",
+      "previousPage": "上一页",
+      "nextPage": "下一页",
+      "pagesLabel": "已登记连接的分页"
     },
     "global": {
       "description": "您开放的联系人会与平台成员以及其他已授权的人脉进行比对——只使用匿名 ID、“我拥有的”和“我需要的”。姓名、电话、邮箱、音频、转写和备注绝不会外泄。",
@@ -3785,6 +3791,7 @@
       "searching": "查找中…",
       "found": "已找到并记录的连接：{{quantidade}} 个。",
       "noneFound": "目前与全球网络暂无新的连接。",
+      "queued": "已开始搜索您的 {{quantidade}} 个联系人，并在后台运行。找到的连接会陆续显示在这里。",
       "noneAvailable": "您还没有开放任何联系人。请打开一个联系人，在“将此联系人开放给网络中的机会”中选择“是”。",
       "error": "暂时无法查找。"
     },

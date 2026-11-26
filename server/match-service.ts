@@ -1,11 +1,12 @@
 import crypto from "node:crypto";
-import { and, eq, gte, inArray } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray } from "drizzle-orm";
 import { aiMatchSuggestions, contactAssets, contactNeeds, privateContacts } from "../drizzle/schema";
 import { cosineSimilarity, normalizeVector } from "./memory-service";
 import { exigirDb } from "./db";
 import { sendEmail } from "./_core/email";
 import { embedWithGemini } from "./gemini";
 import { direcaoEfetiva, nomeiamAMesmaCoisa, palavrasDeConteudo, saoConcorrentes, slugDoTermo } from "@shared/direcao-do-termo";
+import { chavesDoItem } from "@shared/chaves-de-cruzamento";
 import { classificarOferta, mesmaFamiliaEEspecialidade, necessidadeEhOferta, necessidadeDeclaraOAssuntoDoServico, necessidadeGenericaNomeiaOServico, regraNaoLeOPar } from "@shared/tipo-da-oferta";
 
 const SAVE_THRESHOLD = 50;
@@ -222,6 +223,31 @@ export function scoreMatch(asset: MatchReason, need: MatchReason, semanticScore 
   return { score: 0, type: "semantic" as const };
 }
 
+type ItemDoMotor = { contactId: number; tagSlug: string; tagLabel: string; category: string | null };
+
+/**
+ * O índice das necessidades, em memória, para o recálculo em massa: para cada
+ * "tem", os "preciso" que têm alguma chave em comum com ele, na ORDEM original
+ * (a mesma do laço par a par, para a razão escolhida ser a mesma).
+ */
+function indiceDasNecessidades<Necessidade extends ItemDoMotor>(needs: Necessidade[]) {
+  const porChave = new Map<string, number[]>();
+  needs.forEach((need, indice) => {
+    for (const chave of chavesDoItem({ label: need.tagLabel, category: need.category, slug: need.tagSlug }, "precisa")) {
+      const lista = porChave.get(chave) ?? [];
+      lista.push(indice);
+      porChave.set(chave, lista);
+    }
+  });
+  return (asset: ItemDoMotor): Necessidade[] => {
+    const indices = new Set<number>();
+    for (const chave of chavesDoItem({ label: asset.tagLabel, category: asset.category, slug: asset.tagSlug }, "tem")) {
+      for (const indice of porChave.get(chave) ?? []) indices.add(indice);
+    }
+    return Array.from(indices).sort((a, b) => a - b).map(indice => needs[indice]);
+  };
+}
+
 async function embed(text: string) {
   return normalizeVector(await embedWithGemini(text, "SEMANTIC_SIMILARITY"));
 }
@@ -305,11 +331,53 @@ const carregarRegistro = () => (registroDeConexoes ??= import("./network-registr
   throw erro;
 }));
 
-export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: string | null) {
+/**
+ * Conta com mais contatos que isto (a entidade, com milhares de associados) não
+ * recalcula dentro do pedido: o recálculo vai para a fila
+ * (server/fila-de-cruzamento.ts) e roda no servidor, que chama de volta com
+ * `naFila` (N4b, docs/arquitetura/entidades.md, seção 8).
+ */
+export const CONTATOS_DO_RECALCULO_NA_HORA = 2000;
+/**
+ * Acima destes pares "tem" × "preciso", o laço não compara todos com todos: cada
+ * "tem" só encontra os "preciso" que têm alguma chave de cruzamento em comum com
+ * ele (shared/chaves-de-cruzamento.ts), e a decisão continua com scoreMatch. É o
+ * que tira o motor do quadrático na conta da entidade. Abaixo (toda conta comum
+ * de hoje), o laço é o de sempre, par a par.
+ */
+export const PARES_DO_LACO_DIRETO = 200_000;
+/**
+ * Em massa (a conta da entidade), quantos pares cada contato que procura pode ter: os de nota maior
+ * (depois o mútuo, depois o id), e mais os que já existiam, que não somem por causa do corte. É a lista
+ * que a entidade consegue ler, e o que cabe na memória de uma instância de 2 GB.
+ */
+export const TETO_DE_PARES_POR_CONTATO_EM_MASSA = 20;
+/** Linhas por INSERT (e por DELETE) de sugestão quando o recálculo é em massa. */
+const SUGESTOES_POR_INSERT = 500;
+
+/** Linhas gravadas (ou apagadas) uma a uma entre duas conferências de `antesDeGravar`. */
+const GRAVACOES_POR_CONFERENCIA = 500;
+
+/**
+ * `naFila`: quem chama é a fila do cruzamento (a conta grande). `antesDeGravar`
+ * (da fila) é chamada antes de cada bloco de gravação e lança se o trabalho saiu
+ * da fila no meio (a exclusão da conta): o recálculo para sem gravar o resto.
+ */
+export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: string | null, opcoes: { naFila?: boolean; antesDeGravar?: () => Promise<void> } = {}) {
+  const antesDeGravar = opcoes.antesDeGravar ?? (async () => {});
   const db = await exigirDb();
+  if (!opcoes.naFila) {
+    const [contagem] = await db.select({ total: count() }).from(privateContacts).where(eq(privateContacts.ownerId, ownerId));
+    if ((Number(contagem?.total) || 0) > CONTATOS_DO_RECALCULO_NA_HORA) {
+      const { enfileirarRecalculoPrivado } = await import("./fila-de-cruzamento");
+      await enfileirarRecalculoPrivado(ownerId);
+      return { created: 0, updated: 0, removed: 0, total: 0, emFila: true as const };
+    }
+  }
   const [assets, needs, contacts, existing] = await Promise.all([
-    db.select().from(contactAssets).where(eq(contactAssets.ownerId, ownerId)),
-    db.select().from(contactNeeds).where(eq(contactNeeds.ownerId, ownerId)),
+    // Em ordem de id: o corte do modo em massa e o desempate dos pares saem iguais de uma rodada para outra.
+    db.select().from(contactAssets).where(eq(contactAssets.ownerId, ownerId)).orderBy(asc(contactAssets.id)),
+    db.select().from(contactNeeds).where(eq(contactNeeds.ownerId, ownerId)).orderBy(asc(contactNeeds.id)),
     db.select().from(privateContacts).where(eq(privateContacts.ownerId, ownerId)),
     db.select().from(aiMatchSuggestions).where(eq(aiMatchSuggestions.ownerId, ownerId)),
   ]);
@@ -324,32 +392,100 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
   // Junta por PAR de contatos, não por encontro. É o que permite acumular todas
   // as razões e enxergar quando os dois lados se completam.
   const pares = new Map<string, Par>();
-  for (const asset of assets) {
-    for (const need of needs) {
-      if (asset.contactId === need.contactId) continue;
-      // Linha gravada antes do conserto da escrita não latina tem tag_slug ""
-      // (o slug antigo apagava tudo fora de [a-z0-9]). O rótulo continua lá:
-      // recalcular o slug aqui evita migração de dados e impede que "unicos"
-      // — que dedupe por slug — junte todas essas razões numa só.
-      const baseAsset: MatchReason = { slug: asset.tagSlug || slugifyMatchTag(asset.tagLabel), label: asset.tagLabel, category: asset.category };
-      const baseNeed: MatchReason = { slug: need.tagSlug || slugifyMatchTag(need.tagLabel), label: need.tagLabel, category: need.category };
-      let result = scoreMatch(baseAsset, baseNeed);
-      // Só chama o provedor de embeddings se a resposta puder mudar alguma
-      // coisa: com o critério desligado, ou num par que as guardas já recusam
-      // (concorrente, serviço, palavra em comum), não pode, e mandar o texto
-      // para fora seria transferência de dado sem finalidade.
-      if (!result.score && criterioSemanticoLigado() && semanticoEstreitoPodeValer(baseAsset, baseNeed)) {
-        result = scoreMatch(baseAsset, baseNeed, await semanticScore(asset.tagLabel, need.tagLabel, semantico));
-      }
-      if (result.score < SAVE_THRESHOLD) continue;
+  // Em massa (a conta grande, pela fila): só os pares com chave em comum, e a vez devolvida ao servidor de tempos em tempos.
+  const emMassa = assets.length * needs.length > PARES_DO_LACO_DIRETO;
+  const candidatosDo = emMassa ? indiceDasNecessidades(needs) : null;
+  const existingByPair = new Map(existing.map(match => [`${match.pairLowContactId}:${match.pairHighContactId}`, match]));
+  let desdeAPausa = 0;
 
-      const lowId = Math.min(asset.contactId, need.contactId);
-      const highId = Math.max(asset.contactId, need.contactId);
-      const chave = `${lowId}:${highId}`;
-      const par = pares.get(chave) ?? { lowId, highId, encontros: [] };
-      par.encontros.push({ deId: asset.contactId, paraId: need.contactId, asset: baseAsset, need: baseNeed, score: result.score, type: result.type });
-      pares.set(chave, par);
+  /**
+   * Cada encontro "tem" × "preciso" que passa do corte, na ordem dos ids. Com
+   * `soOsPares`, só os pares dessa lista são pontuados (a segunda volta do modo
+   * em massa).
+   */
+  const percorrerOsEncontros = async (aoAchar: (encontro: Encontro, chave: string) => void, soOsPares?: ReadonlySet<string>) => {
+    for (const asset of assets) {
+      const candidatas = candidatosDo ? candidatosDo(asset) : needs;
+      if (emMassa && (desdeAPausa += candidatas.length + 1) >= 5000) {
+        desdeAPausa = 0;
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      for (const need of candidatas) {
+        if (asset.contactId === need.contactId) continue;
+        const lowId = Math.min(asset.contactId, need.contactId);
+        const highId = Math.max(asset.contactId, need.contactId);
+        const chave = `${lowId}:${highId}`;
+        if (soOsPares && !soOsPares.has(chave)) continue;
+        // Linha gravada antes do conserto da escrita não latina tem tag_slug ""
+        // (o slug antigo apagava tudo fora de [a-z0-9]). O rótulo continua lá:
+        // recalcular o slug aqui evita migração de dados e impede que "unicos"
+        // — que dedupe por slug — junte todas essas razões numa só.
+        const baseAsset: MatchReason = { slug: asset.tagSlug || slugifyMatchTag(asset.tagLabel), label: asset.tagLabel, category: asset.category };
+        const baseNeed: MatchReason = { slug: need.tagSlug || slugifyMatchTag(need.tagLabel), label: need.tagLabel, category: need.category };
+        let result = scoreMatch(baseAsset, baseNeed);
+        // Só chama o provedor de embeddings se a resposta puder mudar alguma
+        // coisa: com o critério desligado, ou num par que as guardas já recusam
+        // (concorrente, serviço, palavra em comum), não pode, e mandar o texto
+        // para fora seria transferência de dado sem finalidade.
+        if (!result.score && criterioSemanticoLigado() && semanticoEstreitoPodeValer(baseAsset, baseNeed)) {
+          result = scoreMatch(baseAsset, baseNeed, await semanticScore(asset.tagLabel, need.tagLabel, semantico));
+        }
+        if (result.score < SAVE_THRESHOLD) continue;
+        aoAchar({ deId: asset.contactId, paraId: need.contactId, asset: baseAsset, need: baseNeed, score: result.score, type: result.type }, chave);
+      }
     }
+  };
+  const juntarNoPar = (encontro: Encontro, chave: string) => {
+    const par = pares.get(chave) ?? { lowId: Math.min(encontro.deId, encontro.paraId), highId: Math.max(encontro.deId, encontro.paraId), encontros: [] };
+    par.encontros.push(encontro);
+    pares.set(chave, par);
+  };
+
+  if (!emMassa) {
+    await percorrerOsEncontros(juntarNoPar);
+  } else {
+    // Em massa, cada contato que procura fica com os TETO_DE_PARES_POR_CONTATO_EM_MASSA MELHORES pares: sem
+    // teto, 50 mil associados com termos comuns davam milhões de pares, e o processo ficava sem memória (medido
+    // na carga da N4b). Duas voltas, para a memória não guardar os encontros de todos os pares:
+    //   1) só a nota: por contato que procura, os melhores (com folga, para o desempate pelo mútuo), num
+    //      vetor curto. O pior só sai para um melhor, e o piso só sobe, então a nota guardada é a máxima;
+    //   2) os encontros, só dos pares escolhidos e dos que já existem (estes passam pelo teto: o par que já
+    //      estava na tela não some por um corte, nem vira órfão na limpeza lá embaixo).
+    const FOLGA = TETO_DE_PARES_POR_CONTATO_EM_MASSA * 2;
+    const melhores = new Map<number, Array<{ outro: number; nota: number }>>();
+    await percorrerOsEncontros(encontro => {
+      let lista = melhores.get(encontro.paraId);
+      if (!lista) { lista = []; melhores.set(encontro.paraId, lista); }
+      const ja = lista.find(e => e.outro === encontro.deId);
+      if (ja) { if (encontro.score > ja.nota) ja.nota = encontro.score; return; }
+      if (lista.length < FOLGA) { lista.push({ outro: encontro.deId, nota: encontro.score }); return; }
+      let pior = 0;
+      for (let k = 1; k < lista.length; k += 1) if (lista[k].nota < lista[pior].nota) pior = k;
+      if (encontro.score > lista[pior].nota) lista[pior] = { outro: encontro.deId, nota: encontro.score };
+    });
+    const escolhidos = new Set<string>(existingByPair.keys());
+    melhores.forEach((lista, procura) => {
+      for (const { outro } of lista) escolhidos.add(`${Math.min(procura, outro)}:${Math.max(procura, outro)}`);
+    });
+    melhores.clear();
+    await percorrerOsEncontros(juntarNoPar, escolhidos);
+    // O corte final, com os encontros dos dois sentidos à mão: por nota, depois o mútuo, depois o id (estável).
+    const porContato = new Map<number, Array<{ chave: string; nota: number; mutuo: boolean; outro: number }>>();
+    pares.forEach((par, chave) => {
+      const nota = par.encontros.reduce((maior, e) => Math.max(maior, e.score), 0);
+      const mutuo = new Set(par.encontros.map(e => e.deId)).size > 1;
+      for (const procura of Array.from(new Set(par.encontros.map(e => e.paraId)))) {
+        const lista = porContato.get(procura) ?? [];
+        lista.push({ chave, nota, mutuo, outro: procura === par.lowId ? par.highId : par.lowId });
+        porContato.set(procura, lista);
+      }
+    });
+    const ficam = new Set<string>(Array.from(existingByPair.keys()));
+    porContato.forEach(lista => {
+      lista.sort((x, y) => y.nota - x.nota || Number(y.mutuo) - Number(x.mutuo) || x.outro - y.outro);
+      for (const { chave } of lista.slice(0, TETO_DE_PARES_POR_CONTATO_EM_MASSA)) ficam.add(chave);
+    });
+    for (const chave of Array.from(pares.keys())) if (!ficam.has(chave)) pares.delete(chave);
   }
 
   const unicos = (itens: MatchReason[]) => {
@@ -360,10 +496,19 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
   const listar = (rotulos: string[]) =>
     rotulos.length === 1 ? rotulos[0] : `${rotulos.slice(0, -1).join(", ")} e ${rotulos[rotulos.length - 1]}`;
 
-  const existingByPair = new Map(existing.map(match => [`${match.pairLowContactId}:${match.pairHighContactId}`, match]));
   const timestamp = Date.now(); let created = 0; let updated = 0; let newHighScore = 0;
+  const novosEmMassa: Array<typeof aiMatchSuggestions.$inferInsert> = [];
 
+  await antesDeGravar();
+  let desdeAConferencia = 0;
   for (const par of Array.from(pares.values())) {
+    // Em massa, o laço passa por centenas de milhares de pares: a vez volta ao servidor, e a fila confere
+    // de tempos em tempos que o trabalho ainda é dela antes de seguir gravando.
+    if (emMassa && ++desdeAConferencia >= GRAVACOES_POR_CONFERENCIA) {
+      desdeAConferencia = 0;
+      await new Promise<void>(resolve => setImmediate(resolve));
+      await antesDeGravar();
+    }
     // Direção é quem possui. Havendo encontros nos dois sentidos, cada contato
     // tem o que o outro procura — a conexão mais forte que existe aqui.
     const direcoes = new Map<number, Encontro[]>();
@@ -428,7 +573,9 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
         && ![...values.matchedAssets, ...values.matchedNeeds].some(razao => slugsAntigos.has(razao.slug));
       const reabrir = razaoTotalmenteNova && (previous.status === "dismissed" || previous.status === "accepted" || previous.status === "viewed");
       // Caso que fica de fora, de propósito: corrigir a escrita de uma tag
-      // ressuscita o par. Não existe edição de tag no produto — `contact_assets`
+      // ressuscita o par. (Desde a T45, 24/11, a ficha edita o rótulo na mesma
+      // linha, `editarItemDaFicha`; o slug muda junto, e a conta abaixo vale
+      // igual: a razão gravada é o slug.) Antes não existia edição de tag — `contact_assets`
       // e `contact_needs` só recebem INSERT e DELETE (`addAsset`/`addNeed` e
       // `removeAsset`/`removeNeed` em `routers/matches.ts`, mais o insert do
       // enriquecimento em `db.ts`) e a tela só oferece "adicionar" e o X. Trocar
@@ -448,6 +595,14 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
       // condicional no banco — o status entra no WHERE, como em
       // `advanceEnrichmentSession` — e só quem achou a linha ainda como a leu
       // (affectedRows === 1) conta para o e-mail.
+      // Em massa, o par que não mudou nada não é regravado: na conta da entidade, cada recálculo regravava
+      // dezenas de milhares de linhas iguais. Fora do modo em massa, a regravação de sempre (o updatedAt anda).
+      if (emMassa && !reabrir && previous.matchScore === values.matchScore && previous.matchType === values.matchType
+        && previous.reasonText === values.reasonText && previous.contactAId === values.contactAId && previous.contactBId === values.contactBId
+        && JSON.stringify(previous.matchedAssets) === JSON.stringify(values.matchedAssets)
+        && JSON.stringify(previous.matchedNeeds) === JSON.stringify(values.matchedNeeds)) {
+        continue;
+      }
       let reabriuDeFato = false;
       if (reabrir) {
         const resultado = await db.update(aiMatchSuggestions)
@@ -503,6 +658,9 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
       const aindaPorDecidir = previous.status === "pending" || previous.status === "viewed";
       const cruzouOLimiar = gravouANota && previous.matchScore < EMAIL_THRESHOLD;
       if (values.matchScore >= EMAIL_THRESHOLD && (reabriuDeFato || (aindaPorDecidir && cruzouOLimiar))) newHighScore += 1;
+    } else if (emMassa) {
+      // Em massa, o par novo espera o INSERT de várias linhas (lá embaixo); a colisão com outra rodada cai no caminho de sempre.
+      novosEmMassa.push({ id: crypto.randomUUID(), ownerId, pairLowContactId: par.lowId, pairHighContactId: par.highId, status: "pending", notifiedAt: null, viewedAt: null, acceptedAt: null, dismissedAt: null, createdAt: timestamp, ...values });
     } else {
       // O par é novo para ESTA rodada, mas o índice único (dona, par) é a
       // verdade: em dois recálculos simultâneos os dois leem "não existe" e os
@@ -541,15 +699,56 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
     }
   }
 
+  for (let i = 0; i < novosEmMassa.length; i += SUGESTOES_POR_INSERT) {
+    const bloco = novosEmMassa.slice(i, i + SUGESTOES_POR_INSERT);
+    await antesDeGravar();
+    try {
+      await db.insert(aiMatchSuggestions).values(bloco);
+      created += bloco.length;
+      newHighScore += bloco.filter(linha => (linha.matchScore ?? 0) >= EMAIL_THRESHOLD).length;
+    } catch (erro) {
+      if (!ehChaveDuplicada(erro)) throw erro;
+      // Outra rodada gravou algum par do bloco no meio: linha a linha, e quem perde só atualiza a razão (como acima).
+      for (const linha of bloco) {
+        try {
+          await db.insert(aiMatchSuggestions).values(linha);
+          created += 1;
+          if ((linha.matchScore ?? 0) >= EMAIL_THRESHOLD) newHighScore += 1;
+        } catch (erroDaLinha) {
+          if (!ehChaveDuplicada(erroDaLinha)) throw erroDaLinha;
+          await db.update(aiMatchSuggestions).set({
+            contactAId: linha.contactAId, contactBId: linha.contactBId, matchScore: linha.matchScore, matchType: linha.matchType,
+            matchedAssets: linha.matchedAssets, matchedNeeds: linha.matchedNeeds, reasonText: linha.reasonText, updatedAt: linha.updatedAt,
+          }).where(and(
+            eq(aiMatchSuggestions.ownerId, ownerId),
+            eq(aiMatchSuggestions.pairLowContactId, linha.pairLowContactId),
+            eq(aiMatchSuggestions.pairHighContactId, linha.pairHighContactId),
+          ));
+          updated += 1;
+        }
+      }
+    }
+  }
+
   // Match órfão: o ativo ou a necessidade que o justificava foi apagado, e o
   // motivo exibido virou mentira. Só some o que ainda é sugestão — decisão da
   // usuária, aceita ou dispensada, permanece como histórico.
   let removed = 0;
+  const orfaos: string[] = [];
   for (const antigo of existing) {
     if (pares.has(`${antigo.pairLowContactId}:${antigo.pairHighContactId}`)) continue;
     if (antigo.status !== "pending" && antigo.status !== "viewed") continue;
+    if (emMassa) { orfaos.push(antigo.id); continue; }
     await db.delete(aiMatchSuggestions).where(and(eq(aiMatchSuggestions.id, antigo.id), eq(aiMatchSuggestions.ownerId, ownerId)));
     removed += 1;
+  }
+  for (let i = 0; i < orfaos.length; i += SUGESTOES_POR_INSERT) {
+    const ids = orfaos.slice(i, i + SUGESTOES_POR_INSERT);
+    await antesDeGravar();
+    await db.delete(aiMatchSuggestions).where(and(
+      inArray(aiMatchSuggestions.id, ids), eq(aiMatchSuggestions.ownerId, ownerId), inArray(aiMatchSuggestions.status, ["pending", "viewed"]),
+    ));
+    removed += ids.length;
   }
 
   if (newHighScore && ownerEmail) {
@@ -569,6 +768,7 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
   // chave do par e a rodada seguinte alcança. Falha do registro só vira log;
   // banco fora do ar sobe como erro.
   const { registrarConexoesInternasDepoisDoRecalculo } = await carregarRegistro();
+  await antesDeGravar();
   await registrarConexoesInternasDepoisDoRecalculo(ownerId);
   return { created, updated, removed, total: pares.size };
 }

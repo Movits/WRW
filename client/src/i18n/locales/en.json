@@ -2844,6 +2844,8 @@
     "toastRevogado": "Authorization revoked. Cross-referencing has been turned off.",
     "erroRevogar": "Could not revoke.",
     "toastRecalculado": "{{total}} opportunity(ies) analyzed.",
+    "recalculoNaFila": "Your network is large: suggestions are being recalculated in the background and will show up here in a few minutes.",
+    "alteracaoNaFila": "Saved. Your network is large: suggestions are updated in the background and will show up here in a few minutes.",
     "erroAtualizarMatches": "Could not update the suggested connections.",
     "toastItemRemovido": "Item removed and suggestions updated.",
     "erroRemoverItem": "Could not remove the item.",
@@ -3777,7 +3779,11 @@
       "discardConfirmCancel": "Cancel",
       "reasonPlatformMatch": "Suggested by the profile engine between two members who had accepted the Smart Match terms when the connection was recorded: {{pontuacao}}% compatibility.",
       "reasonPlatformMatchLocked": "Suggested by the profile engine between two members who had accepted the Smart Match terms when the connection was recorded. The compatibility appears when your profile reaches Silver Member.",
-      "reasonNoAuthorization": "The other side withdrew their authorisation, so the details of this connection are no longer shown."
+      "reasonNoAuthorization": "The other side withdrew their authorisation, so the details of this connection are no longer shown.",
+      "pageSummary": "Page {{pagina}} of {{paginas}} · {{total}} in total · from highest to lowest compatibility",
+      "previousPage": "Previous",
+      "nextPage": "Next",
+      "pagesLabel": "Pages of registered connections"
     },
     "global": {
       "description": "Contacts you make available are cross-referenced with platform members and other authorized networks — only by anonymous ID, What I Have and What I Need. Name, phone, email, audio, transcript and notes never leave.",
@@ -3785,6 +3791,7 @@
       "searching": "Searching…",
       "found": "Connections found and recorded: {{quantidade}}.",
       "noneFound": "No new connections with the global network for now.",
+      "queued": "The search across your {{quantidade}} contacts has started and runs in the background. Connections show up here as they are found.",
       "noneAvailable": "None of your contacts is available. Open a contact and choose YES in “Make this contact available for network opportunities”.",
       "error": "Could not search right now."
     },

@@ -2844,6 +2844,8 @@
     "toastRevogado": "Autorización revocada. El cruce fue desactivado.",
     "erroRevogar": "No se pudo revocar.",
     "toastRecalculado": "{{total}} oportunidad(es) analizada(s).",
+    "recalculoNaFila": "Tu red es grande: las sugerencias se están recalculando en segundo plano y aparecerán aquí en unos minutos.",
+    "alteracaoNaFila": "Guardado. Tu red es grande: las sugerencias se actualizan en segundo plano y aparecerán aquí en unos minutos.",
     "erroAtualizarMatches": "No se pudieron actualizar las conexiones sugeridas.",
     "toastItemRemovido": "Elemento eliminado y sugerencias actualizadas.",
     "erroRemoverItem": "No se pudo eliminar el elemento.",
@@ -3777,7 +3779,11 @@
       "discardConfirmCancel": "Cancelar",
       "reasonPlatformMatch": "Sugerida por el motor de perfiles entre dos miembros que tenían aceptado el término del Smart Match cuando se registró la conexión: compatibilidad del {{pontuacao}}%.",
       "reasonPlatformMatchLocked": "Sugerida por el motor de perfiles entre dos miembros que tenían aceptado el término del Smart Match cuando se registró la conexión. La compatibilidad aparece cuando tu perfil llega a Miembro Plata.",
-      "reasonNoAuthorization": "La otra parte retiró la autorización, por lo que los detalles de esta conexión dejaron de aparecer."
+      "reasonNoAuthorization": "La otra parte retiró la autorización, por lo que los detalles de esta conexión dejaron de aparecer.",
+      "pageSummary": "Página {{pagina}} de {{paginas}} · {{total}} en total · de mayor a menor compatibilidad",
+      "previousPage": "Anterior",
+      "nextPage": "Siguiente",
+      "pagesLabel": "Páginas de las conexiones registradas"
     },
     "global": {
       "description": "Los contactos que pongas a disposición se cruzan con los miembros de la plataforma y con otros networks autorizados — solo por el ID anónimo, Lo Que Tengo y Lo Que Necesito. Nombre, teléfono, correo, audio, transcripción y notas nunca salen.",
@@ -3785,6 +3791,7 @@
       "searching": "Buscando…",
       "found": "Conexiones encontradas y registradas: {{quantidade}}.",
       "noneFound": "Por ahora no hay conexiones nuevas con la red global.",
+      "queued": "La búsqueda de tus {{quantidade}} contactos comenzó y se ejecuta en segundo plano. Las conexiones aparecen aquí a medida que se encuentran.",
       "noneAvailable": "Ninguno de tus contactos está disponible. Abre un contacto y marca SÍ en “Poner este contacto a disposición de las oportunidades de la red”.",
       "error": "No se pudo buscar ahora."
     },

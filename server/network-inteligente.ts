@@ -1,4 +1,4 @@
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import {
   aiMatchSuggestions, contactAssets, contactNeeds, meetings, meetingTranscripts, privateContacts,
 } from "../drizzle/schema";
@@ -23,6 +23,8 @@ import { LIMITE_GRATUITO_POR_REUNIAO_SEGUNDOS } from "./minutos-de-reuniao";
 
 /** Quantos contatos incompletos o painel lista pelo nome. A contagem vem inteira. */
 export const AMOSTRA_DE_INCOMPLETOS = 5;
+/** Contatos por página na leitura da completude (N4b). */
+export const CONTATOS_POR_PAGINA_DO_RESUMO = 1000;
 
 export type ContatoIncompleto = { id: number; fullName: string; faltando: CampoDaCompletude[] };
 
@@ -84,36 +86,57 @@ export async function resumoDoNetworkInteligente(
   // detalhe do contato; por isso a leitura traz as 5 colunas curtas de cada
   // contato (nunca notas, foto ou cartão) em vez de repetir a regra em SQL,
   // onde as duas poderiam divergir.
-  const contatos = await db
-    .select({
-      id: privateContacts.id,
-      fullName: privateContacts.fullName,
-      phone: privateContacts.phone,
-      whatsapp: privateContacts.whatsapp,
-      email: privateContacts.email,
-      disponivelRedeGlobal: privateContacts.disponivelRedeGlobal,
-    })
-    .from(privateContacts)
-    .where(eq(privateContacts.ownerId, ownerId))
-    .orderBy(desc(privateContacts.updatedAt));
-  const comTenho = await db
-    .selectDistinct({ contactId: contactAssets.contactId })
-    .from(contactAssets)
-    .where(eq(contactAssets.ownerId, ownerId));
-  const comPreciso = await db
-    .selectDistinct({ contactId: contactNeeds.contactId })
-    .from(contactNeeds)
-    .where(eq(contactNeeds.ownerId, ownerId));
-  const idsComTenho = new Set(comTenho.map(linha => numero(linha.contactId)));
-  const idsComPreciso = new Set(comPreciso.map(linha => numero(linha.contactId)));
-  const incompletos: ContatoIncompleto[] = [];
-  for (const contato of contatos) {
-    const faltando = camposFaltantes({
-      ...contato,
-      totalTenho: idsComTenho.has(numero(contato.id)) ? 1 : 0,
-      totalPreciso: idsComPreciso.has(numero(contato.id)) ? 1 : 0,
-    });
-    if (faltando.length) incompletos.push({ id: numero(contato.id), fullName: contato.fullName, faltando });
+  //
+  // Paginada pelo id (N4b): a conta da entidade tem dezenas de milhares de
+  // contatos, e a leitura de uma vez segurava todos na memória. Cada página
+  // traz os seus "tem" e "preciso"; a amostra guarda só os incompletos mais
+  // recentes (a ordem de antes, pelo updatedAt; no empate, o id menor).
+  let total = 0;
+  let disponibilizados = 0;
+  let totalIncompletos = 0;
+  const amostra: Array<ContatoIncompleto & { updatedAt: number }> = [];
+  let depoisDe = 0;
+  for (;;) {
+    const pagina = await db
+      .select({
+        id: privateContacts.id,
+        fullName: privateContacts.fullName,
+        phone: privateContacts.phone,
+        whatsapp: privateContacts.whatsapp,
+        email: privateContacts.email,
+        disponivelRedeGlobal: privateContacts.disponivelRedeGlobal,
+        updatedAt: privateContacts.updatedAt,
+      })
+      .from(privateContacts)
+      .where(and(eq(privateContacts.ownerId, ownerId), gt(privateContacts.id, depoisDe)))
+      .orderBy(asc(privateContacts.id))
+      .limit(CONTATOS_POR_PAGINA_DO_RESUMO);
+    if (!pagina.length) break;
+    const ids = pagina.map(contato => numero(contato.id));
+    const [comTenho, comPreciso] = await Promise.all([
+      db.selectDistinct({ contactId: contactAssets.contactId }).from(contactAssets)
+        .where(and(eq(contactAssets.ownerId, ownerId), inArray(contactAssets.contactId, ids))),
+      db.selectDistinct({ contactId: contactNeeds.contactId }).from(contactNeeds)
+        .where(and(eq(contactNeeds.ownerId, ownerId), inArray(contactNeeds.contactId, ids))),
+    ]);
+    const idsComTenho = new Set(comTenho.map(linha => numero(linha.contactId)));
+    const idsComPreciso = new Set(comPreciso.map(linha => numero(linha.contactId)));
+    for (const contato of pagina) {
+      total += 1;
+      if (contato.disponivelRedeGlobal) disponibilizados += 1;
+      const faltando = camposFaltantes({
+        ...contato,
+        totalTenho: idsComTenho.has(numero(contato.id)) ? 1 : 0,
+        totalPreciso: idsComPreciso.has(numero(contato.id)) ? 1 : 0,
+      });
+      if (!faltando.length) continue;
+      totalIncompletos += 1;
+      amostra.push({ id: numero(contato.id), fullName: contato.fullName, faltando, updatedAt: numero(contato.updatedAt) });
+      amostra.sort((a, b) => b.updatedAt - a.updatedAt || a.id - b.id);
+      if (amostra.length > AMOSTRA_DE_INCOMPLETOS) amostra.pop();
+    }
+    if (pagina.length < CONTATOS_POR_PAGINA_DO_RESUMO) break;
+    depoisDe = ids[ids.length - 1];
   }
 
   let matchesInternos: ResumoDoNetworkInteligente["matchesInternos"] = { termoAceito: false };
@@ -140,10 +163,10 @@ export async function resumoDoNetworkInteligente(
       limitePorReuniaoSegundos: LIMITE_GRATUITO_POR_REUNIAO_SEGUNDOS,
     },
     contatos: {
-      total: contatos.length,
-      incompletos: incompletos.length,
-      disponibilizados: contatos.filter(contato => Boolean(contato.disponivelRedeGlobal)).length,
-      amostraIncompletos: incompletos.slice(0, AMOSTRA_DE_INCOMPLETOS),
+      total,
+      incompletos: totalIncompletos,
+      disponibilizados,
+      amostraIncompletos: amostra.map(({ id, fullName, faltando }) => ({ id, fullName, faltando })),
     },
     matchesInternos,
   };

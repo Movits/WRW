@@ -3287,6 +3287,75 @@ export function necessidadeDeclaraOAssuntoDoServico(oferta: string, categoriaDaO
 }
 
 /**
+ * As chaves de SERVIÇO de um item, para o índice de cruzamento (N4b,
+ * shared/chaves-de-cruzamento.ts). Não decidem match: só garantem que o par que
+ * `mesmaFamiliaEEspecialidade`, `necessidadeGenericaNomeiaOServico` e
+ * `necessidadeDeclaraOAssuntoDoServico` aceitariam tem uma chave em comum, com
+ * a mesma conta de `umServicoAtende`:
+ *   - "tem": a oferta classificada como serviço dá `f:<família>` e
+ *     `f:<família>|<lema>` de cada lema de cada especialidade, e `a:<assunto>`
+ *     de cada assunto que uma parte dela nomeia e a família da parte presta;
+ *   - "precisa": o pedido genérico (ou só com público) dá `f:<família>`, que acha
+ *     toda oferta da família; o pedido com especialidade dá `f:<família>|<lema>`,
+ *     porque a oferta precisa cobrir TODOS os lemas pedidos (`cobre`), e `f:<família>|*`, que acha a
+ *     oferta genérica da família (sem especialidade), que às vezes também atende. O pedido de
+ *     APOIO também chega à advocacia e à contabilidade (a profissão nomeada e a área
+ *     da profissão) e entre consultoria e assessoria (os sinônimos próximos), pelos
+ *     mesmos lemas; e `a:<assunto>` de cada assunto curado que o texto nomeia.
+ */
+export function chavesDeServico(rotulo: string, categoria: string | null | undefined, lado: "tem" | "precisa"): string[] {
+  const chaves = new Set<string>();
+  if (lado === "tem") {
+    if (classificarOferta(rotulo, categoria) !== "servico") return [];
+    for (const servico of servicosDoRotulo(rotulo)) {
+      chaves.add(`f:${servico.familia}`);
+      // A oferta GENÉRICA (sem lema de especialidade) atende pedidos com especialidade em alguns casos
+      // ("Escritório de contabilidade" × "Contador de MEI"): ela entra também pela chave curinga da família.
+      if (servico.especialidades.every(especialidade => especialidade.lemas.size === 0)) chaves.add(`f:${servico.familia}|*`);
+      // O público da oferta também cobre o lema pedido ("Contabilidade tributária para MEI" × "Contador de MEI").
+      for (const especialidade of servico.especialidades) {
+        for (const lema of [...Array.from(especialidade.lemas), ...Array.from(especialidade.publico)]) chaves.add(`f:${servico.familia}|${lema}`);
+      }
+    }
+    for (const parte of partesDoServico(rotulo)) {
+      const familia = entenderServico(parte)?.familia;
+      if (!familia) continue;
+      for (const assunto of Array.from(assuntosDoTexto(palavrasDe(parte)))) {
+        if (FAMILIAS_DO_ASSUNTO[assunto].has(familia)) chaves.add(`a:${assunto}`);
+      }
+    }
+    return Array.from(chaves);
+  }
+  for (const servico of servicosDoRotulo(rotulo)) {
+    const familia = servico.familia;
+    const comLemas = servico.especialidades.filter(especialidade => especialidade.lemas.size > 0);
+    if (comLemas.length < servico.especialidades.length || !servico.especialidades.length) chaves.add(`f:${familia}`);
+    if (comLemas.length) chaves.add(`f:${familia}|*`);
+    for (const especialidade of comLemas) {
+      for (const lema of Array.from(especialidade.lemas)) chaves.add(`f:${familia}|${lema}`);
+    }
+    if (!FAMILIAS_DE_APOIO.has(familia)) continue;
+    for (const profissao of Array.from(PROFISSOES_PELO_ADJETIVO)) {
+      if (comLemas.some(especialidade => especialidade.lemas.has(profissao))) chaves.add(`f:${profissao}`);
+      if (comLemas.length) chaves.add(`f:${profissao}|*`);
+      for (const especialidade of comLemas) {
+        for (const lema of Array.from(especialidade.lemas)) chaves.add(`f:${profissao}|${lema}`);
+      }
+    }
+    if (APOIO_QUE_ACONSELHA.has(familia)) {
+      for (const outra of Array.from(APOIO_QUE_ACONSELHA)) {
+        if (comLemas.length) chaves.add(`f:${outra}|*`);
+        for (const especialidade of comLemas) {
+          for (const lema of Array.from(especialidade.lemas)) chaves.add(`f:${outra}|${lema}`);
+        }
+      }
+    }
+  }
+  for (const assunto of Array.from(assuntosDoTexto(palavrasDe(rotulo)))) chaves.add(`a:${assunto}`);
+  return Array.from(chaves);
+}
+
+/**
  * Contraparte comercial: quem tem a mercadoria, o canal ou o capital. Serviço nenhum a entrega — nem a
  * consultoria "em distribuição" entrega o distribuidor. Também lida pelo portão da IA no sentido oposto
  * (server/portao-da-demanda-expressa.ts, `perfilDeclarouPrecisarDoServico`).

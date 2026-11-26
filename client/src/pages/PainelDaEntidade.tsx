@@ -9,7 +9,7 @@ import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
 import { lerPlanilha, PlanilhaIlegivel, sha256DoArquivo } from "@/lib/ler-planilha";
 import {
   ehErroDaEntidade, linhaDaPlanilha, linhasComProblema, mapearCabecalho, ordenarProblemas, passaDoTeto, planilhaDeLinks,
-  ASSOCIADOS_MAX_ATE_N4B, LINHAS_POR_BLOCO, PROBLEMAS_LISTADOS_MAX, ROTA_DA_ATIVACAO, ROTA_DO_CONVITE_DA_ENTIDADE,
+  ASSOCIADOS_MAX_POR_ENTIDADE, LINHAS_POR_BLOCO, PROBLEMAS_LISTADOS_MAX, ROTA_DA_ATIVACAO, ROTA_DO_CONVITE_DA_ENTIDADE,
   type LinhaBruta, type ProblemaDaLinha,
 } from "@shared/entidades";
 
@@ -332,7 +332,7 @@ function Importacao({ habilitada, base }: { habilitada: boolean; base: number })
           )}
           {acimaDoTeto && (
             <p role="alert" className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
-              {t("entidade.importar.tetoNoEnsaio", { max: ASSOCIADOS_MAX_ATE_N4B.toLocaleString(i18n.language), base, novos: relatorio.novos })}
+              {t("entidade.importar.tetoNoEnsaio", { max: ASSOCIADOS_MAX_POR_ENTIDADE.toLocaleString(i18n.language), base, novos: relatorio.novos })}
             </p>
           )}
           {!relatorio.erro && <div className="h-2 rounded-full bg-white/10 overflow-hidden" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progresso}>

@@ -45,7 +45,7 @@ vi.mock("drizzle-orm/mysql2", async (importOriginal) => {
 const hasValidConsent = vi.hoisted(() => vi.fn(async (_userId: number, _tipo: string) => false));
 vi.mock("./routers/consent", () => ({ hasValidConsent }));
 
-const { AMOSTRA_DE_INCOMPLETOS } = await import("./network-inteligente");
+const { AMOSTRA_DE_INCOMPLETOS, CONTATOS_POR_PAGINA_DO_RESUMO } = await import("./network-inteligente");
 const { networkInteligenteRouter } = await import("./routers/networkInteligente");
 const { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } = await import("@shared/const");
 
@@ -139,13 +139,16 @@ describe("networkInteligente.resumo — tudo é da própria dona", () => {
 
     const [contatos] = daTabela("private_contacts");
     expect(contatos.sql).toContain("`private_contacts`.`ownerId` = ?");
-    expect(contatos.params).toEqual([DONA]);
+    // Paginada pelo id (N4b): a dona, o último id lido (0 na primeira página) e o tamanho da página.
+    expect(contatos.sql).toMatch(/order by `private_contacts`.`id` asc limit \?$/);
+    expect(contatos.params).toEqual([DONA, 0, CONTATOS_POR_PAGINA_DO_RESUMO]);
 
     for (const tabela of ["contact_assets", "contact_needs"]) {
       const [consulta] = daTabela(tabela);
       expect(consulta.sql).toMatch(/^select distinct/i);
       expect(consulta.sql).toContain(`\`${tabela}\`.\`owner_id\` = ?`);
-      expect(consulta.params).toEqual([DONA]);
+      // Só os contatos da página, sempre com a dona no WHERE.
+      expect(consulta.params).toEqual([DONA, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
     }
   });
 

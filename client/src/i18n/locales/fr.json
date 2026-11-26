@@ -2844,6 +2844,8 @@
     "toastRevogado": "Autorisation révoquée. Le croisement a été désactivé.",
     "erroRevogar": "Impossible de révoquer.",
     "toastRecalculado": "{{total}} opportunité(s) analysée(s).",
+    "recalculoNaFila": "Votre réseau est grand : les suggestions sont recalculées en arrière-plan et apparaîtront ici dans quelques minutes.",
+    "alteracaoNaFila": "Enregistré. Votre réseau est grand : les suggestions sont mises à jour en arrière-plan et apparaîtront ici dans quelques minutes.",
     "erroAtualizarMatches": "Impossible de mettre à jour les connexions suggérées.",
     "toastItemRemovido": "Élément supprimé et suggestions mises à jour.",
     "erroRemoverItem": "Impossible de supprimer l'élément.",
@@ -3777,7 +3779,11 @@
       "discardConfirmCancel": "Annuler",
       "reasonPlatformMatch": "Suggérée par le moteur de profils entre deux membres qui avaient accepté les conditions du Smart Match au moment de l’enregistrement : compatibilité de {{pontuacao}} %.",
       "reasonPlatformMatchLocked": "Suggérée par le moteur de profils entre deux membres qui avaient accepté les conditions du Smart Match au moment de l’enregistrement. La compatibilité s’affiche lorsque votre profil atteint le niveau Membre Argent.",
-      "reasonNoAuthorization": "L’autre partie a retiré son autorisation ; les détails de cette connexion ne sont donc plus affichés."
+      "reasonNoAuthorization": "L’autre partie a retiré son autorisation ; les détails de cette connexion ne sont donc plus affichés.",
+      "pageSummary": "Page {{pagina}} sur {{paginas}} · {{total}} au total · de la plus forte à la plus faible compatibilité",
+      "previousPage": "Précédente",
+      "nextPage": "Suivante",
+      "pagesLabel": "Pages des connexions enregistrées"
     },
     "global": {
       "description": "Les contacts que vous rendez disponibles sont croisés avec les membres de la plateforme et d'autres réseaux autorisés — uniquement par l'ID anonyme, Ce Que J'ai et Ce Dont J'ai Besoin. Nom, téléphone, e-mail, audio, transcription et notes ne sortent jamais.",
@@ -3785,6 +3791,7 @@
       "searching": "Recherche…",
       "found": "Connexions trouvées et enregistrées : {{quantidade}}.",
       "noneFound": "Aucune nouvelle connexion avec le réseau mondial pour le moment.",
+      "queued": "La recherche sur vos {{quantidade}} contacts a commencé et se poursuit en arrière-plan. Les connexions apparaissent ici au fur et à mesure.",
       "noneAvailable": "Aucun de vos contacts n'est disponible. Ouvrez un contact et choisissez OUI dans « Rendre ce contact disponible pour les opportunités du réseau ».",
       "error": "Impossible de rechercher pour le moment."
     },

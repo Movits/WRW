@@ -585,6 +585,16 @@ describe("U3 — a nota das conexões entre membras no registro é de quem vê a
   function registroComEntreMembras() {
     estado.responder = sql => {
       if (/^select `conexao_id` from `conexoes_participantes`/.test(sql)) return [["c-membras"], ["c-interna"]];
+      // A lista paginada no servidor (26/11): o total, e as contagens do painel sobre todas.
+      if (/^select count\(\*\)/.test(sql)) return [[2]];
+      if (/from `conexoes_participantes` inner join `conexoes_registradas`/.test(sql)) {
+        // id, origem, status, apresentacao_em, status_comissao, descartada_em, status_comissao_originador (os lados da dona)
+        return [
+          ["c-membras", "PLATFORM_MATCH", "apresentacao", 1500, "sem_negocio", null, null],
+          ["c-interna", "PRIVATE_NETWORK_MATCH", "identificada", null, "sem_negocio", null, "sem_negocio"],
+          ["c-interna", "PRIVATE_NETWORK_MATCH", "identificada", null, "sem_negocio", null, "sem_negocio"],
+        ];
+      }
       if (/from `conexoes_registradas`/.test(sql)) {
         // id, origem, chave_do_par, motivo, itens, pontuacao, status, apresentacao_em, negociacao_em, fechamento_em, descartada_em, status_comissao, created_at, updated_at
         return [

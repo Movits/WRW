@@ -73,7 +73,7 @@ import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
   agendaReunioes, aiMatchSuggestions, entidadeMembros, pedidosPelaEntidade, entidades, importacaoDocumentosVistos, importacoesDeEntidade, auditLogs, chavesDeAcesso, contasGoogle, connections, consents, contactAssets, contactContexts,
   desafiosDeChaveDeAcesso, dispositivosDePush,
-  contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
+  contactNeeds, chavesDeCruzamento, filaDeCruzamento, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
   enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAttachments, meetingAudioSlices, meetingContactSuggestions, meetingDocuments,
   meetingEntities, meetingRecordings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslations, meetingTranscriptTranslations, meetingTranscripts,
@@ -197,6 +197,10 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   { tabela: aiMatchSuggestions, coluna: aiMatchSuggestions.ownerId, origem: "openId" },
   { tabela: contactAssets, coluna: contactAssets.ownerId, origem: "openId" },
   { tabela: contactNeeds, coluna: contactNeeds.ownerId, origem: "openId" },
+  // O índice de cruzamento (N4b): as chaves dos itens da dona (hash, não o texto) e a fila dela.
+  { tabela: chavesDeCruzamento, coluna: chavesDeCruzamento.ownerId, origem: "openId" },
+  { tabela: filaDeCruzamento, coluna: filaDeCruzamento.ownerId, origem: "openId" },
+  { tabela: filaDeCruzamento, coluna: filaDeCruzamento.userId, origem: "id" },
   { tabela: memoryDocuments, coluna: memoryDocuments.ownerId, origem: "openId" },
   { tabela: meetingContactSuggestions, coluna: meetingContactSuggestions.ownerId, origem: "openId" },
   { tabela: meetingEntities, coluna: meetingEntities.ownerId, origem: "openId" },

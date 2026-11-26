@@ -5,6 +5,7 @@ import {
   importacoesDeEntidade, privateContacts, users,
 } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { indexarContatos } from "./indice-de-cruzamento";
 import { slugifyMatchTag } from "./match-service";
 import { ORIGEM_CNAE, cnaeExiste, ofertasDasCnaes } from "./cnae";
 import { gerarCodigoAnonimo, ehColisaoDeChave } from "./network-codigo-anonimo";
@@ -12,7 +13,7 @@ import {
   cifrar, decifrar, exigirChavesDaEntidade, gerarTokenDeConvite, hashDoConvite, hmacDoDocumento,
 } from "./entidades-cofre";
 import {
-  ASSOCIADOS_MAX_ATE_N4B, DOCUMENTO_DO_PAIS, ERROS_DA_ENTIDADE, ITENS_POR_LADO_MAX, LINHAS_POR_BLOCO, LINHAS_POR_ARQUIVO_MAX, MEMBROS_POR_PAGINA,
+  ASSOCIADOS_MAX_POR_ENTIDADE, DOCUMENTO_DO_PAIS, ERROS_DA_ENTIDADE, ITENS_POR_LADO_MAX, LINHAS_POR_BLOCO, LINHAS_POR_ARQUIVO_MAX, MEMBROS_POR_PAGINA,
   convenioVigente, formatarDocumento, normalizarDocumento, ordenarProblemas, validarLinha,
   type EstadoDoConvenio, type LinhaBruta, type LinhaValida, type ProblemaDaLinha, type TipoDeDocumento, type TipoDeEntidade,
 } from "../shared/entidades";
@@ -158,7 +159,7 @@ export async function iniciarImportacao(
   if (!DOCUMENTO_DO_PAIS[entidade.pais]) throw erro("PRECONDITION_FAILED", ERROS_DA_ENTIDADE.paisSemDocumento);
   const totalLinhas = Math.min(Math.max(0, Math.floor(entrada.totalLinhas)), LINHAS_POR_ARQUIVO_MAX);
   // O arquivo maior que o teto nem começa a gravar (o bloco confere de novo, contando a base).
-  if (entrada.modo === "aplicar" && totalLinhas > ASSOCIADOS_MAX_ATE_N4B) throw erro("PRECONDITION_FAILED", ERROS_DA_ENTIDADE.baseAcimaDoTeto);
+  if (entrada.modo === "aplicar" && totalLinhas > ASSOCIADOS_MAX_POR_ENTIDADE) throw erro("PRECONDITION_FAILED", ERROS_DA_ENTIDADE.baseAcimaDoTeto);
   const db = await exigirDb();
   return db.transaction(async tx => {
     const agora = Date.now();
@@ -291,7 +292,7 @@ export async function processarBloco(
     if (aplicar && novas.length) {
       const [{ naBase }] = await tx.select({ naBase: count() }).from(entidadeMembros)
         .where(and(eq(entidadeMembros.entidadeId, entidade.id), ne(entidadeMembros.estado, "removido")));
-      if (Number(naBase) + novas.length > ASSOCIADOS_MAX_ATE_N4B) throw erro("PRECONDITION_FAILED", ERROS_DA_ENTIDADE.baseAcimaDoTeto);
+      if (Number(naBase) + novas.length > ASSOCIADOS_MAX_POR_ENTIDADE) throw erro("PRECONDITION_FAILED", ERROS_DA_ENTIDADE.baseAcimaDoTeto);
     }
 
     if (aplicar) {
@@ -337,6 +338,8 @@ export async function processarBloco(
       const preciso = comItens.flatMap(c => c.v.preciso.map(label => item(c.contactId, label)));
       if (tenho.length) await tx.insert(contactAssets).values(tenho);
       if (preciso.length) await tx.insert(contactNeeds).values(preciso);
+      // O índice de cruzamento (N4b) na mesma transação: o associado cruza na rede assim que o bloco grava.
+      await indexarContatos(tx, entidade.ownerId, comItens.map(c => c.contactId));
     }
 
     const criados = novas.length + recriar.length;
@@ -583,6 +586,7 @@ export async function refazerOfertasDaCnae(staffUserId: number, entidadeId: numb
         category: null, description: null, origem: ORIGEM_CNAE, createdAt: agora, updatedAt: agora,
       })));
       if (novas.length) await tx.insert(contactAssets).values(novas);
+      await indexarContatos(tx, entidade.ownerId, ids);
       await tx.insert(auditLogs).values({
         userId: staffUserId, action: "ENTIDADE_OFERTAS_DA_CNAE_REFEITAS", resource: "entidade", resourceId: String(entidade.id),
         details: { membros: comContato.length, ofertas: novas.length }, riskLevel: "low",

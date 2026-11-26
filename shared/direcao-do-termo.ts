@@ -976,6 +976,48 @@ export function mesmoObjetoAMenosDoLugar(objetoA: string, objetoB: string): bool
 }
 
 /**
+ * As SUBSTÂNCIAS de um termo, para o índice de cruzamento (N4b,
+ * shared/chaves-de-cruzamento.ts): o objeto (sem o verbo de direção), o núcleo
+ * (atravessada a cabeça transparente) e os dois sem o qualificador de lugar do
+ * fim. São exatamente o que `nomeiamAMesmaCoisa` compara por igualdade: duas
+ * pontas que ela aceita têm ao menos uma substância em comum. Não decide nada
+ * (as guardas de lugar e de concorrência continuam lá); só acha candidatos.
+ */
+export function substanciasDoTermo(rotulo: string): string[] {
+  const substancias = new Set<string>();
+  for (const termo of [analisarTermo(rotulo).objeto, nucleoDoTermo(rotulo)]) {
+    if (!termo) continue;
+    const { base } = separarLugaresDoFim(termo);
+    for (const substancia of [termo, base]) {
+      if (!substancia) continue;
+      substancias.add(substancia);
+      for (const grafia of grafiasDoTermo(substancia)) substancias.add(grafia);
+    }
+  }
+  return Array.from(substancias);
+}
+
+/**
+ * As formas que `mesmoTermoEmOutraGrafia` aceita como o mesmo termo, para o
+ * índice: cada palavra no singular, as preposições do genitivo como "de" e, para
+ * o erro de digitação perdoado (uma palavra longa, com a mesma inicial), uma
+ * forma por palavra longa com ela trocada por "<inicial>*" (o "*" não aparece em
+ * slug, então não colide com termo de verdade). Duas grafias do mesmo termo
+ * têm sempre uma forma em comum; o resto da decisão continua lá.
+ */
+function grafiasDoTermo(termo: string): string[] {
+  const palavras = termo.split("-").filter(Boolean);
+  if (!palavras.length) return [];
+  const canonicas = palavras.map(p => (GENITIVOS.has(p) && p !== "of" ? "de" : singular(p)));
+  const formas = [canonicas.join("-")];
+  canonicas.forEach((palavra, i) => {
+    if (PALAVRAS_DE_LIGACAO.has(palavras[i]) || palavra.length < TAMANHO_MINIMO_DO_ERRO) return;
+    formas.push([...canonicas.slice(0, i), `${palavra[0]}*`, ...canonicas.slice(i + 1)].join("-"));
+  });
+  return formas;
+}
+
+/**
  * As duas pontas nomeiam a MESMA coisa? É a equivalência que o motor privado
  * (`scoreMatch`) sempre usou depois do slug: mesmo objeto (tirado o verbo de
  * direção e os marcadores fracos) ou mesmo núcleo (atravessada a cabeça

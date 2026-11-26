@@ -27,6 +27,8 @@ import { PessoaSugeridaNaReuniao } from "@/components/PessoaSugeridaNaReuniao";
 type OpcoesDaMutacao = { onSuccess?: (...args: unknown[]) => unknown; onError?: (erro: unknown) => unknown; onSettled?: (...args: unknown[]) => unknown };
 const duble = vi.hoisted(() => ({
   contato: vi.fn(),
+  // A lista paginada das conexões do contato (networkInteligente.conexoes com contactId, 26/11).
+  conexoes: vi.fn(),
   params: { id: "5" } as { id: string },
   mutacoes: {} as Record<string, ReturnType<typeof vi.fn>>,
   // As opções da última montagem de cada mutação, para o teste chamar o onSettled.
@@ -57,6 +59,7 @@ vi.mock("@/lib/trpc", () => {
       useUtils: () => duble.utils,
       networkInteligente: {
         contato: { useQuery: (...args: unknown[]) => duble.contato(...args) },
+        conexoes: { useQuery: (...args: unknown[]) => duble.conexoes(...args) },
         definirDisponibilidade: mutacao("definirDisponibilidade"),
         confirmarPendencia: mutacao("confirmarPendencia"),
         ignorarPendencia: mutacao("ignorarPendencia"),
@@ -112,6 +115,11 @@ const responde = (data: unknown) => duble.contato.mockReturnValue({ data, isLoad
 beforeEach(async () => {
   await i18n.changeLanguage("pt-BR");
   duble.params = { id: "5" };
+  duble.conexoes.mockReset();
+  duble.conexoes.mockReturnValue({
+    data: { termoAceito: true, contagem: null, lista: [], total: 0, pagina: 1, porPagina: 10, paginas: 1 },
+    isError: false, isFetching: false, error: null, refetch: vi.fn(),
+  });
   for (const m of Object.values(duble.mutacoes)) m.mockReset();
   for (const chave of Object.keys(duble.opcoes)) delete duble.opcoes[chave];
   const { networkInteligente, proximasAcoes, meetings } = duble.utils;
@@ -376,6 +384,25 @@ describe("perfil do contato — reuniões, conexões e memória de relacionament
     render(<PerfilDoContatoNetwork />);
     expect(screen.getByText("Ative as Conexões Inteligentes para ver as conexões deste contato.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /rede global/ })).not.toBeInTheDocument();
+  });
+
+  it("as conexões do contato vêm do servidor em páginas de 10, da maior para a menor compatibilidade", () => {
+    const conexao = (n: number) => ({
+      id: `c-${n}`, origem: "NETWORK_NETWORK_MATCH", motivo: null, detalhesVisiveis: true, pontuacao: 100,
+      itens: [{ tem: `Item ${n}`, precisa: `Item ${n}`, deCodigo: "NW-AAAAAA", paraCodigo: "NW-BBBBBB" }],
+      status: "identificada", statusComissao: "sem_negocio", criadaEm: 1, lados: [],
+    });
+    duble.conexoes.mockReturnValue({
+      data: { termoAceito: true, contagem: null, lista: Array.from({ length: 10 }, (_, i) => conexao(i)), total: 30, pagina: 1, porPagina: 10, paginas: 3 },
+      isError: false, isFetching: false, error: null, refetch: vi.fn(),
+    });
+    responde(perfil());
+    render(<PerfilDoContatoNetwork />);
+    expect(duble.conexoes).toHaveBeenCalledWith({ contactId: 5, pagina: 1 }, expect.objectContaining({ enabled: true }));
+    expect(screen.getByText("Página 1 de 3 · 30 no total · da maior para a menor compatibilidade")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Anterior" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Próxima" }));
+    expect(duble.conexoes).toHaveBeenLastCalledWith({ contactId: 5, pagina: 2 }, expect.anything());
   });
 
   it("disponibilizado e com o termo: procurar conexões deste contato na rede global", () => {

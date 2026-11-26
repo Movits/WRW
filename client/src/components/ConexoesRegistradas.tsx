@@ -233,3 +233,34 @@ export function ConexaoRegistrada({ conexao }: { conexao: ConexaoNaTela }) {
     </li>
   );
 }
+
+/**
+ * As páginas das conexões registradas (decisão do Roberto de 26/11): a lista vem
+ * do servidor uma página de cada vez (`networkInteligente.conexoes` com `pagina`),
+ * de 10 em 10, da maior para a menor compatibilidade. Com uma página só, mostra
+ * só o resumo.
+ */
+export function PaginasDasConexoes({ pagina, paginas, total, carregando, aoMudar }: {
+  pagina: number; paginas: number; total: number; carregando?: boolean; aoMudar: (pagina: number) => void;
+}) {
+  const { t } = useTranslation();
+  if (!total) return null;
+  const botao = "rounded-lg border border-white/10 px-3 py-1.5 text-xs font-semibold text-white/70 hover:bg-white/[0.06] disabled:opacity-40";
+  return (
+    <nav aria-label={t("networkInteligente.connections.pagesLabel")} className="mt-3 flex flex-wrap items-center justify-between gap-2">
+      <p className="text-xs text-white/45" aria-live="polite">
+        {t("networkInteligente.connections.pageSummary", { pagina, paginas, total: total.toLocaleString() })}
+      </p>
+      {paginas > 1 && (
+        <div className="flex gap-2">
+          <button type="button" className={botao} disabled={carregando || pagina <= 1} onClick={() => aoMudar(pagina - 1)}>
+            {t("networkInteligente.connections.previousPage")}
+          </button>
+          <button type="button" className={botao} disabled={carregando || pagina >= paginas} onClick={() => aoMudar(pagina + 1)}>
+            {t("networkInteligente.connections.nextPage")}
+          </button>
+        </div>
+      )}
+    </nav>
+  );
+}

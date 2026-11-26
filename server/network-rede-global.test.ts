@@ -53,7 +53,7 @@ vi.mock("./routers/consent", () => ({ usersComConsentimento, hasValidConsent: as
 
 const {
   definirDisponibilidade, encontrosEntre, lerRedeGlobalAnonima, procurarConexoesNaRedeGlobal, projecaoAnonima, ContatoNaoEncontrado,
-  tetoDeBuscaNaRedeGlobal, BUSCAS_NA_REDE_GLOBAL_POR_JANELA, TETO_DE_ITENS_POR_LADO, TETO_POR_CONTRAPARTE_POR_RODADA, ORCAMENTO_DE_COMPARACOES,
+  tetoDeBuscaNaRedeGlobal, BUSCAS_NA_REDE_GLOBAL_POR_JANELA, TETO_DE_ITENS_POR_LADO, ORCAMENTO_DE_COMPARACOES,
 } = await import("./network-rede-global");
 
 const DONA = "dona-1";
@@ -74,8 +74,8 @@ function redeDeTeste(opcoes: {
     new Set(ids.filter(id => !(opcoes.outraSemTermo && id === 20))));
   estado.responder = (sql, params) => {
     if (/from `private_contacts`/.test(sql) && /is null/.test(sql)) return []; // garantirCodigosAnonimos
-    // A janela das contas de entidade (a que traz o not exists do convênio): sem entidade nesta rede.
-    if (/from `private_contacts`/.test(sql) && /not exists/.test(sql)) return [];
+    // O índice de cruzamento (N4b): o contato 2 da outra dona é o candidato de tudo o que a dona procura.
+    if (/from `chaves_de_cruzamento`/.test(sql)) return [[2]];
     if (/from `private_contacts`/.test(sql) && /`ownerId` <> \?/.test(sql)) return [[2, OUTRA, "NW-BBBBBB"]];
     if (/from `private_contacts`/.test(sql)) return [[1, DONA, "NW-AAAAAA"]];
     if (/from `users`/.test(sql)) return opcoes.outraInativa && filtraAtivas(sql) ? [[10, DONA]] : [[10, DONA], [20, OUTRA]];
@@ -123,8 +123,8 @@ describe("rede global — privacidade é regra de consulta", () => {
     redeDeTeste();
     await lerRedeGlobalAnonima({ excetoDona: DONA });
     const leituras = estado.consultas.filter(c => /from `private_contacts`/.test(c.sql));
-    // Duas janelas: a das donas comuns e a das contas de entidade.
-    expect(leituras).toHaveLength(2);
+    // Uma leitura só, paginada e em ordem de id (N4b): as duas janelas de 1000 saíram.
+    expect(leituras).toHaveLength(1);
     for (const leitura of leituras) {
       expect(leitura.sql).toMatch(/^select `private_contacts`\.`id`, `private_contacts`\.`ownerId`, `private_contacts`\.`codigo_anonimo` from `private_contacts`/);
       expect(leitura.sql).toContain("`private_contacts`.`disponivel_rede_global` = ?");
@@ -133,7 +133,7 @@ describe("rede global — privacidade é regra de consulta", () => {
     }
   });
 
-  it("a autorização da dona filtra no SQL, antes do teto; a entidade tem janela própria, sem convênio vencido nem associado ativado", async () => {
+  it("a autorização da dona filtra no SQL, antes do limit da página; o contato de entidade só com convênio vigente e sem associado ativado", async () => {
     redeDeTeste();
     estado.responder = (sql) => {
       if (/from `document_versions`/.test(sql)) return [["termo-vigente"]];
@@ -141,19 +141,20 @@ describe("rede global — privacidade é regra de consulta", () => {
     };
     await lerRedeGlobalAnonima({ excetoDona: DONA });
     const leituras = estado.consultas.filter(c => /from `private_contacts`/.test(c.sql));
-    expect(leituras).toHaveLength(2);
+    expect(leituras).toHaveLength(1);
     for (const leitura of leituras) {
-      // A conta ativa e o termo do Smart Match entram ANTES do limit (sem isto, a janela vinha de donas descartadas depois).
+      // A conta ativa e o termo do Smart Match entram ANTES do limit (sem isto, a página vinha de donas descartadas depois).
       const antesDoLimit = leitura.sql.slice(0, leitura.sql.lastIndexOf(" limit "));
       expect(antesDoLimit).toContain("`users`.`isActive` = ?");
       expect(antesDoLimit).toMatch(/exists \(select .* from `consents`/);
       expect(leitura.params).toContain("termo-vigente");
     }
-    const [comuns, deEntidades] = leituras;
-    expect(comuns.sql).toContain("`users`.`isEntidade` = ?");
-    expect(comuns.sql).not.toContain("not exists");
-    expect(deEntidades.sql).toMatch(/not exists \(select .* from `entidades`/);
-    expect(deEntidades.sql).toMatch(/not exists \(select .* from `entidade_membros`/);
+    const [leitura] = leituras;
+    expect(leitura.sql).toContain("`users`.`isEntidade` = ?");
+    expect(leitura.sql).toMatch(/not exists \(select .* from `entidades`/);
+    expect(leitura.sql).toMatch(/not exists \(select .* from `entidade_membros`/);
+    // Paginada e ordenada (N4b): a leitura alcança todos, página a página, sem janela.
+    expect(leitura.sql).toMatch(/order by `private_contacts`\.`id` asc limit \?$/);
   });
 
   it("a projeção que pode sair tem só ID anônimo, O que tenho e O que preciso", async () => {
@@ -414,8 +415,11 @@ describe("rede global — tetos de trabalho", () => {
   /**
    * Uma dona com muitos contatos diante de muitos contatos de outras donas. Os
    * contatos alheios antes de `casamAPartirDe` não casam com nada; os de depois casam.
+   * Os que não casam têm chave em comum com a dona ("Exportar café" dos dois
+   * lados) e são concorrentes: o índice os traz como candidatos (N4b) e
+   * scoreMatch os zera, então eles gastam o orçamento sem virar conexão.
    */
-  function redeGrande(opcoes: { meus: number; outros: number; donasDosOutros: number; itensPorContato: number; casamAPartirDe?: number }) {
+  function redeGrande(opcoes: { meus: number; outros: number; donasDosOutros: number; itensPorContato: number; casamAPartirDe?: number; naoCasamSemChave?: boolean }) {
     const meusIds = Array.from({ length: opcoes.meus }, (_, i) => i + 1);
     const outrosIds = Array.from({ length: opcoes.outros }, (_, i) => 10_000 + i);
     const donaDe = (id: number) => `dona-outra-${(id - 10_000) % opcoes.donasDosOutros}`;
@@ -425,7 +429,7 @@ describe("rede global — tetos de trabalho", () => {
     const naoCasam = (ids: number[]) => ids.filter(id => id >= 10_000 && id < 10_000 + (opcoes.casamAPartirDe ?? 0));
     estado.responder = (sql, params) => {
       if (/from `private_contacts`/.test(sql) && /is null/.test(sql)) return [];
-      if (/from `private_contacts`/.test(sql) && /not exists/.test(sql)) return [];
+      if (/from `chaves_de_cruzamento`/.test(sql)) return outrosIds.map(id => [id]);
       if (/from `private_contacts`/.test(sql) && /`ownerId` <> \?/.test(sql)) return outrosIds.map(id => [id, donaDe(id), `NW-${id}`]);
       if (/from `private_contacts`/.test(sql)) return meusIds.map(id => [id, DONA, `NW-${id}`]);
       if (/from `users`/.test(sql)) {
@@ -434,10 +438,10 @@ describe("rede global — tetos de trabalho", () => {
       }
       const ids = params.filter((p): p is number => typeof p === "number");
       if (/from `contact_assets`/.test(sql)) {
-        return [...itens(meusDe(ids), "Distribuição de medicamentos"), ...itens(casam(ids), "Capital para expansão"), ...itens(naoCasam(ids), "Parafusos industriais")];
+        return [...itens(meusDe(ids), "Distribuição de medicamentos"), ...itens(casam(ids), "Capital para expansão"), ...itens(naoCasam(ids), opcoes.naoCasamSemChave ? "Tinta acrílica" : "Exportar café")];
       }
       if (/from `contact_needs`/.test(sql)) {
-        return [...itens(meusDe(ids), "Capital para expansão"), ...itens(casam(ids), "Distribuição de medicamentos"), ...itens(naoCasam(ids), "Tinta acrílica")];
+        return [...itens(meusDe(ids), "Exportar café"), ...itens(casam(ids), "Distribuição de medicamentos"), ...itens(naoCasam(ids), opcoes.naoCasamSemChave ? "Rolhas de cortiça" : "Tinta acrílica")];
       }
       if (/from `user_profiles`/.test(sql)) return [];
       if (/from `conexoes_registradas`/.test(sql)) return [[`conexao-${estado.consultas.length}`]];
@@ -452,15 +456,18 @@ describe("rede global — tetos de trabalho", () => {
     expect(contato.preciso).toHaveLength(TETO_DE_ITENS_POR_LADO);
   });
 
-  it("por contraparte: a mesma outra dona recebe no máximo o teto de conexões numa rodada, e a rodada diz que ficou incompleta", async () => {
-    redeGrande({ meus: TETO_POR_CONTRAPARTE_POR_RODADA + 5, outros: 1, donasDosOutros: 1, itensPorContato: 1 });
+  it("sem teto por contraparte nem de registros (26/11): a mesma outra dona recebe TODAS as conexões que combinam, cada par uma vez", async () => {
+    // Antes: 10 por contraparte e 100 por busca. 130 contatos da dona × o único contato da outra = 130 pares.
+    redeGrande({ meus: 130, outros: 1, donasDosOutros: 1, itensPorContato: 1 });
     const resposta = await procurarConexoesNaRedeGlobal({ id: 10, openId: DONA });
-    expect(resposta.conexoes).toHaveLength(TETO_POR_CONTRAPARTE_POR_RODADA);
-    expect(resposta.completa).toBe(false);
-    expect(estado.consultas.filter(c => /^insert into `conexoes_registradas`/.test(c.sql))).toHaveLength(TETO_POR_CONTRAPARTE_POR_RODADA);
+    expect(resposta.completa).toBe(true);
+    expect(resposta.emFila).toBeUndefined();
+    expect(resposta.conexoes).toHaveLength(130);
+    expect(new Set(resposta.conexoes.map(c => c.meuCodigo)).size).toBe(130);
+    expect(estado.consultas.filter(c => /^insert into `conexoes_registradas`/.test(c.sql))).toHaveLength(130);
   });
 
-  it("orçamento: passado o total de comparações, o cruzamento para antes de avaliar o resto e diz que ficou incompleto", async () => {
+  it("orçamento: passado o total de comparações, a busca na hora para antes de avaliar o resto e manda a busca para a fila", async () => {
     // Itens no teto dos dois lados: 2 × 20 × 20 = 800 comparações por par.
     const porPar = 2 * TETO_DE_ITENS_POR_LADO * TETO_DE_ITENS_POR_LADO;
     const paresNoOrcamento = Math.floor(ORCAMENTO_DE_COMPARACOES / porPar);
@@ -472,8 +479,21 @@ describe("rede global — tetos de trabalho", () => {
     const resposta = await procurarConexoesNaRedeGlobal({ id: 10, openId: DONA });
     expect(resposta.completa).toBe(false);
     expect(resposta.conexoes).toEqual([]);
-    expect(estado.consultas.some(c => /^insert/.test(c.sql))).toBe(false);
+    expect(estado.consultas.some(c => /^insert into `conexoes/.test(c.sql))).toBe(false);
+    // O resto não se perde: a fila cruza a base inteira em lotes (nenhum match fica de fora).
+    expect(resposta.emFila).toBe(true);
+    expect(estado.consultas.some(c => /^insert into `fila_de_cruzamento`/.test(c.sql))).toBe(true);
   }, 60_000);
+
+  it("a vez volta ao event loop também nos pares que podemCasar recusa sem comparar (não gastam orçamento, gastam CPU)", async () => {
+    // 100 × 120 pares, nenhum com chave em comum: antes, o laço inteiro corria sem pausa nenhuma.
+    redeGrande({ meus: 100, outros: 120, donasDosOutros: 120, itensPorContato: 1, casamAPartirDe: 120, naoCasamSemChave: true });
+    const pausas = vi.spyOn(globalThis, "setImmediate");
+    const resposta = await procurarConexoesNaRedeGlobal({ id: 10, openId: DONA });
+    expect(resposta.conexoes).toEqual([]);
+    expect(pausas.mock.calls.length).toBeGreaterThanOrEqual(2);
+    pausas.mockRestore();
+  });
 
   it("dentro do orçamento, os mesmos contatos que casam viram conexão (o teto não esconde o que cabe)", async () => {
     redeGrande({ meus: 1, outros: 3, donasDosOutros: 3, itensPorContato: 2 });
