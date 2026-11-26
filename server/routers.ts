@@ -36,6 +36,7 @@ import { googleAgendaRouter } from "./routers/googleAgenda";
 import { perguntasEntreReunioesRouter } from "./routers/perguntasEntreReunioes";
 import { consultaDeReunioesRouter } from "./routers/consultaDeReunioes";
 import { perfilDeVozRouter } from "./routers/perfilDeVoz";
+import { pushNoCelularRouter } from "./routers/pushNoCelular";
 import { salaDeVideoRouter } from "./routers/salaDeVideo";
 
 // ============================================================
@@ -51,6 +52,8 @@ export const appRouter = router({
   // Entrar com a conta Google (A8): server/entrar-com-google.ts.
   contaGoogle: contaGoogleRouter,
   conta: contaRouter,
+  // O token do aparelho para o push no celular: server/push-no-celular.ts.
+  pushNoCelular: pushNoCelularRouter,
   profile: profileRouter,
   opportunities: opportunitiesRouter,
   notifications: notificationsRouter,

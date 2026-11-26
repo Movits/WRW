@@ -4620,5 +4620,12 @@
     "errTooManyTasks": "チームのタスクが500件に達しました。古いものを削除してから作成してください。",
     "errDueInvalid": "期限が有効な日付ではありません。",
     "errAgendaNotFound": "この予定の会議はもう存在しません。ページを更新してください。"
+  },
+  "pushNoCelular": {
+    "reuniaoPronta": "会議の準備ができました",
+    "reuniaoProntaSemResumo": "会議の準備ができました（要約なし）",
+    "lembreteDaAcao": "リマインダー：次のアクションの期限は今日です",
+    "lembreteDaReuniao": "リマインダー：{{hora}} から会議",
+    "corpo": "タップして Marquesa Global Match で開きます。"
   }
 }

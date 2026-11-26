@@ -4620,5 +4620,12 @@
     "errTooManyTasks": "टीम 500 कामों तक पहुँच गई है। नए बनाने के लिए पुराने मिटाएँ।",
     "errDueInvalid": "समय-सीमा एक मान्य तारीख नहीं है।",
     "errAgendaNotFound": "यह तय बैठक अब मौजूद नहीं है। पेज रीफ़्रेश करें।"
+  },
+  "pushNoCelular": {
+    "reuniaoPronta": "आपकी मीटिंग तैयार है",
+    "reuniaoProntaSemResumo": "आपकी मीटिंग तैयार है, सारांश के बिना",
+    "lembreteDaAcao": "रिमाइंडर: एक अगला कदम आज देय है",
+    "lembreteDaReuniao": "रिमाइंडर: मीटिंग {{hora}} बजे",
+    "corpo": "Marquesa Global Match में खोलने के लिए टैप करें।"
   }
 }

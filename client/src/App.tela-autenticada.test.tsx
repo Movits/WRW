@@ -29,6 +29,8 @@ vi.mock("@/lib/trpc", () => {
     trpc: {
       useUtils: () => utils,
       auth: { logout: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
+      // O registro do push no celular (components/RegistroDoPush.tsx), que vem com toda tela logada.
+      pushNoCelular: { registrar: { useMutation: () => ({ mutate: vi.fn() }) } },
     },
   };
 });

@@ -4620,5 +4620,12 @@
     "errTooManyTasks": "A equipe chegou a 500 tarefas. Apague as antigas para criar novas.",
     "errDueInvalid": "O prazo não é uma data válida.",
     "errAgendaNotFound": "Esta reunião marcada não existe mais. Atualize a tela."
+  },
+  "pushNoCelular": {
+    "reuniaoPronta": "Sua reunião está pronta",
+    "reuniaoProntaSemResumo": "Sua reunião está pronta, sem o resumo",
+    "lembreteDaAcao": "Lembrete: uma próxima ação vence hoje",
+    "lembreteDaReuniao": "Lembrete: reunião às {{hora}}",
+    "corpo": "Toque para abrir na Marquesa Global Match."
   }
 }

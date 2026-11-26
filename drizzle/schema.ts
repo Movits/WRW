@@ -349,9 +349,39 @@ export const platformNotifications = mysqlTable("platform_notifications", {
   isRead: boolean("isRead").default(false),
   readAt: timestamp("readAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  // Quando o push no celular deste aviso foi reservado (server/push-no-celular.ts).
+  // Só os avisos do gravador vão por push; nos outros, fica nulo para sempre.
+  pushEnviadoEm: timestamp("pushEnviadoEm"),
 }, (table) => ({
   userIdIdx: index("pnotif_userId_idx").on(table.userId),
   typeIdx: index("pnotif_type_idx").on(table.type),
+  // O laço do push lê só os avisos dos últimos minutos.
+  createdIdx: index("pnotif_created_idx").on(table.createdAt),
+}));
+
+// ============================================================
+// PUSH NO CELULAR — os aparelhos do app das lojas
+// O app (a casca Expo) pede a permissão, lê o token do aparelho no Expo e o
+// manda ao site, que o guarda aqui preso à SESSÃO em que foi mandado: sair da
+// conta, redefinir a senha ou ter a conta desativada derruba a sessão, e o push
+// para de ir ao aparelho sem precisar apagar nada (server/push-no-celular.ts).
+// O idioma é o da tela do app, para o texto do push. Nada da reunião vai no
+// push: só o tipo do aviso, a hora e o endereço que o app abre.
+// ============================================================
+export const dispositivosDePush = mysqlTable("dispositivos_de_push", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  // A sessão (sessions.id) em que o app mandou o token.
+  sessaoId: int("sessao_id").notNull(),
+  // O token do Expo, no formato ExponentPushToken[...].
+  token: varchar("token", { length: 255 }).notNull(),
+  plataforma: varchar("plataforma", { length: 8, enum: ["ios", "android"] }).notNull(),
+  idioma: varchar("idioma", { length: 12 }).notNull(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  tokenUnique: uniqueIndex("dispositivos_de_push_token_unique").on(table.token),
+  userIdx: index("dispositivos_de_push_user_idx").on(table.userId),
 }));
 
 // ============================================================

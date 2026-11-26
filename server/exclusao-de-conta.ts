@@ -72,7 +72,7 @@ import { PREFIXO_DO_PERFIL_DE_VOZ } from "@shared/perfil-de-voz";
 import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
   agendaReunioes, aiMatchSuggestions, entidadeMembros, pedidosPelaEntidade, entidades, importacaoDocumentosVistos, importacoesDeEntidade, auditLogs, chavesDeAcesso, contasGoogle, connections, consents, contactAssets, contactContexts,
-  desafiosDeChaveDeAcesso,
+  desafiosDeChaveDeAcesso, dispositivosDePush,
   contactNeeds, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
   enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAttachments, meetingAudioSlices, meetingContactSuggestions, meetingDocuments,
@@ -345,6 +345,8 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // sem conta e vence em 5 minutos; sai pelo prazo.
   { tabela: chavesDeAcesso, coluna: chavesDeAcesso.userId, origem: "id" },
   { tabela: desafiosDeChaveDeAcesso, coluna: desafiosDeChaveDeAcesso.userId, origem: "id" },
+  // Os aparelhos do push no celular: o token do Expo e o idioma da tela.
+  { tabela: dispositivosDePush, coluna: dispositivosDePush.userId, origem: "id" },
   // A conta Google ligada para entrar (A8): o sub e o e-mail dela. Nenhum token
   // fica guardado, então não há o que revogar na Google.
   { tabela: contasGoogle, coluna: contasGoogle.userId, origem: "id" },

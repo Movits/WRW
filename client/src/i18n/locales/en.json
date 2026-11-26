@@ -4620,5 +4620,12 @@
     "errTooManyTasks": "The team has reached 500 tasks. Delete old ones to create new ones.",
     "errDueInvalid": "The due date is not a valid date.",
     "errAgendaNotFound": "This scheduled meeting no longer exists. Refresh the page."
+  },
+  "pushNoCelular": {
+    "reuniaoPronta": "Your meeting is ready",
+    "reuniaoProntaSemResumo": "Your meeting is ready, without the summary",
+    "lembreteDaAcao": "Reminder: a next step is due today",
+    "lembreteDaReuniao": "Reminder: meeting at {{hora}}",
+    "corpo": "Tap to open in Marquesa Global Match."
   }
 }

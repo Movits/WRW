@@ -4620,5 +4620,12 @@
     "errTooManyTasks": "وصل الفريق إلى 500 مهمة. احذفي القديمة لإنشاء مهام جديدة.",
     "errDueInvalid": "الموعد النهائي ليس تاريخًا صالحًا.",
     "errAgendaNotFound": "هذا الاجتماع المجدول لم يعد موجودًا. حدّثي الصفحة."
+  },
+  "pushNoCelular": {
+    "reuniaoPronta": "اجتماعك جاهز",
+    "reuniaoProntaSemResumo": "اجتماعك جاهز، بدون الملخص",
+    "lembreteDaAcao": "تذكير: موعد خطوة تالية اليوم",
+    "lembreteDaReuniao": "تذكير: اجتماع الساعة {{hora}}",
+    "corpo": "اضغط للفتح في Marquesa Global Match."
   }
 }

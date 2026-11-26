@@ -643,12 +643,14 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // 95: os 89 das associações somados aos 6 das reuniões, das equipes e da conta Google.
     // 97: os 95, mais o perfil de voz (H3d): voice_profiles.owner_id e
     // voice_profile_consents.owner_id.
-    // 100: os 97, mais a sala de vídeo (V1): meeting_rooms.owner_id e
-    // meeting_room_presences.owner_id e .userId.
-    expect(paresDeUsuariaNoSchema).toHaveLength(100);
+    // 101: os 97, mais a sala de vídeo (V1): meeting_rooms.owner_id e
+    // meeting_room_presences.owner_id e .userId; e os aparelhos do push no
+    // celular: dispositivos_de_push.userId.
+    expect(paresDeUsuariaNoSchema).toHaveLength(101);
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_rooms", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_room_presences", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_room_presences", coluna: "userId" });
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "dispositivos_de_push", coluna: "userId" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_members", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_members", coluna: "userId" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_tasks", coluna: "owner_id" });

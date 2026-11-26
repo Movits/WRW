@@ -232,6 +232,13 @@
       "when": 1795693766292,
       "tag": "0032_sala-de-video",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "5",
+      "when": 1795716929083,
+      "tag": "0033_push-no-celular",
+      "breakpoints": true
     }
   ]
 }

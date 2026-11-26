@@ -447,11 +447,15 @@ async function startServer() {
     const { iniciarFilaDoResumo, pararFilaDoResumo } = await import("../fila-do-resumo");
     const { iniciarVarreduraDeGravacoes, pararVarreduraDeGravacoes } = await import("../varredura-de-gravacoes");
     const { iniciarLembretes, pararLembretes } = await import("../lembretes");
+    const { iniciarPush, pararPush } = await import("../push-no-celular");
     const { descreverErroDeBanco } = await import("../banco-indisponivel");
     iniciarFila();
     iniciarFilaDoResumo();
     iniciarVarreduraDeGravacoes();
     iniciarLembretes();
+    // O push no celular dos avisos do sino (server/push-no-celular.ts). Sem
+    // aparelho registrado, não envia nada.
+    iniciarPush();
     // Desligamento: o Render manda SIGTERM no deploy; no dev, o Ctrl+C é
     // SIGINT. Os três laços param de reservar e devolvem as reservas desta
     // instância ANTES de o processo sair, para o próximo retomar na hora (e não
@@ -463,6 +467,7 @@ async function startServer() {
       if (saindo) return;
       saindo = true;
       console.log(`[Fila] ${sinal}: devolvendo as reservas antes de sair.`);
+      pararPush();
       Promise.allSettled([
         pararFila()
           .then(r => console.log(`[Fila] devolvidas: ${r.partes} parte(s), ${r.reunioes} reunião(ões).`))

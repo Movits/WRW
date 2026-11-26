@@ -127,12 +127,14 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // 95: os 89 das associações somados aos 6 das reuniões, das equipes e da conta Google.
     // 97: os 95, mais o perfil de voz (H3d): voice_profiles.owner_id (sai) e
     // voice_profile_consents.owner_id (fica: a prova do consentimento e da revogação).
-    // 100: os 97, mais a sala de vídeo (V1): meeting_rooms.owner_id e
-    // meeting_room_presences.owner_id (saem com a dona) e .userId (a conta como participante).
-    expect(PARES).toHaveLength(100);
+    // 101: os 97, mais a sala de vídeo (V1): meeting_rooms.owner_id e
+    // meeting_room_presences.owner_id (saem com a dona) e .userId (a conta como participante);
+    // e os aparelhos do push no celular: dispositivos_de_push.userId (sai).
+    expect(PARES).toHaveLength(101);
     expect(PARES).toContainEqual({ tabela: "meeting_rooms", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "meeting_room_presences", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "meeting_room_presences", coluna: "userId" });
+    expect(PARES).toContainEqual({ tabela: "dispositivos_de_push", coluna: "userId" });
     expect(PARES).toContainEqual({ tabela: "voice_profiles", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "voice_profile_consents", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "meeting_folder_members", coluna: "owner_id" });
