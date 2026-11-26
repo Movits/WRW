@@ -209,6 +209,23 @@ describe.skipIf(!temBanco)("Pergunte a várias reuniões (integração)", () => 
       .rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: RECUSAS_ENTRE_REUNIOES.semReuniao });
   });
 
+  it("várias etiquetas (T52): a união das reuniões com qualquer uma delas, sem repetir a que tem duas; nenhuma, recusa", async () => {
+    const a = await reuniao(DONA, { titulo: "Cliente A", falas: CONTRATO, etiquetas: ["Clientes"], criadaEm: AGORA - 2 * DIA });
+    const b = await reuniao(DONA, { titulo: "Cliente B", falas: FRETE, etiquetas: ["clientes", "Mentoria"], criadaEm: AGORA - DIA });
+    const c = await reuniao(DONA, { titulo: "Mentoria", falas: FRETE, etiquetas: ["Mentoria"] });
+    await reuniao(DONA, { titulo: "Fornecedor", falas: FRETE, etiquetas: ["Fornecedores"] });
+    await reuniao(OUTRA, { titulo: "Mentoria da outra", falas: FRETE, etiquetas: ["Mentoria"] });
+    duble.invokeLLM.mockResolvedValue(respostaDaIA(NAO_RESPONDE));
+    const resposta = await daDona().perguntar({ etiquetas: [" CLIENTES ", "mentoria"], idioma: "pt-BR", pergunta: "O que ficou combinado?" });
+    expect(resposta).toMatchObject({ escolhidas: 3, alemDoMaximo: 0 });
+    expect(resposta.reunioes.map(fonte => fonte.meetingId).sort()).toEqual([a, b, c].sort());
+    expect(mensagemDaIA()).not.toContain("Fornecedor");
+    expect(mensagemDaIA()).not.toContain("da outra");
+
+    await expect(daDona().perguntar({ etiquetas: ["Inexistente", "Outra"], idioma: "pt-BR", pergunta: "O que ficou combinado?" }))
+      .rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: RECUSAS_ENTRE_REUNIOES.semReuniao });
+  });
+
   it("a escolhida que não está pronta fica de fora, com o motivo; nenhuma pronta, recusa antes da IA", async () => {
     const pronta = await reuniao(DONA, { titulo: "Pronta", falas: CONTRATO });
     const processando = await reuniao(DONA, { titulo: "Processando", falas: FRETE, status: "processing" });
@@ -398,6 +415,8 @@ describe.skipIf(!temBanco)("Pergunte a várias reuniões (integração)", () => 
   it("a escolha é uma das duas: ids e etiqueta juntos, ou nenhum, é BAD_REQUEST sem ler o banco", async () => {
     await expect(daDona().perguntar({ meetingIds: [crypto.randomUUID()], etiqueta: "Clientes", idioma: "pt-BR", pergunta: "O que houve?" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(daDona().perguntar({ idioma: "pt-BR", pergunta: "O que houve?" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(daDona().perguntar({ etiquetas: ["Clientes"], etiqueta: "Clientes", idioma: "pt-BR", pergunta: "O que houve?" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(daDona().perguntar({ etiquetas: [], idioma: "pt-BR", pergunta: "O que houve?" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(duble.invokeLLM).not.toHaveBeenCalled();
   });
 });
