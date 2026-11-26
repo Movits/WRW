@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { ErroDeConsulta } from "@/components/ErroDeConsulta";
+import { SoNoNavegador } from "@/components/SoNoNavegador";
 import { useTranslation } from "react-i18next";
 import { opportunitySectorLabel } from "@/lib/opportunity-sectors";
 import { Badge } from "@/components/ui/badge";
@@ -314,7 +315,7 @@ export default function Opportunities() {
             </Link>
             <div className="min-w-0">
               <h1 className="text-white font-bold text-lg leading-tight truncate">{t("opportunitiesPage.pageTitle")}</h1>
-              <p className="text-white/40 text-xs truncate">{t("opportunitiesPage.pageSubtitle")}</p>
+              <SoNoNavegador><p className="text-white/40 text-xs truncate">{t("opportunitiesPage.pageSubtitle")}</p></SoNoNavegador>
             </div>
           </div>
           <div className="flex flex-shrink-0 items-center gap-2">

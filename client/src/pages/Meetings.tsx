@@ -74,6 +74,7 @@ import { DetalhesDaReuniao } from "@/components/DetalhesDaReuniao";
 import { etiquetasDaDona } from "@shared/detalhes-da-reuniao";
 import { VideoDoYoutube } from "@/components/VideoDoYoutube";
 import { fraseDoErroDoYoutube, fraseDoPedidoDoYoutube } from "@/lib/erro-do-youtube";
+import { SoNoNavegador } from "@/components/SoNoNavegador";
 
 // O relógio do gravador e a duração da reunião no formato da transcrição: a
 // gravação em partes passa de uma hora, e 1 h é 1:00:00, não 60:00.
@@ -771,7 +772,8 @@ export default function Meetings() {
     <main className="min-h-screen text-white px-4 py-8 md:px-8 bg-transparent">
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
-          <div><p className="text-amber-300 text-sm font-semibold tracking-wide">{t("meetings.privateSecureBadge")}</p><h1 className="text-3xl md:text-4xl font-bold mt-1">{t("meetings.heroTitle")}</h1><p className="text-white/55 mt-2 max-w-2xl">{t("meetings.heroSubtitle")}</p></div>
+          {/* No app das lojas, só o título: o selo e o subtítulo explicam o produto, e isso fica no site. */}
+          <div><SoNoNavegador><p className="text-amber-300 text-sm font-semibold tracking-wide">{t("meetings.privateSecureBadge")}</p></SoNoNavegador><h1 className="text-3xl md:text-4xl font-bold mt-1">{t("meetings.heroTitle")}</h1><SoNoNavegador><p className="text-white/55 mt-2 max-w-2xl">{t("meetings.heroSubtitle")}</p></SoNoNavegador></div>
           {/* O vídeo do YouTube (H13) ao lado da reunião nova; no celular, um embaixo do outro. */}
           <div className="flex flex-col-reverse gap-3 sm:flex-row">
             <ResumoDoYoutube/>
@@ -1474,7 +1476,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
         <IdiomasDetectados escolha={meeting.language} idiomaDaTranscricao={transcript.language} segmentos={transcript.segments}/>
         <div className="mb-5 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4">
           <p className="font-semibold text-amber-100">{ehDocumento ? t("meetings.document.translateHeading") : t("meetings.translateHeading")}</p>
-          <p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.translateSubtext") : t("meetings.translateSubtext")}</p>
+          <SoNoNavegador><p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.translateSubtext") : t("meetings.translateSubtext")}</p></SoNoNavegador>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
             <select ref={seletorDaTraducao} value={translationLanguage} onChange={event => setTranslationLanguage(event.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
               <OpcaoDoIdiomaOriginal idioma={idiomaOriginal}/>
@@ -1556,7 +1558,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
         {/* Quem só foi citada na conversa (achado 7 da bancada de 16/11): à parte e
             compacta, nunca um cartão igual ao das participantes. */}
         {citadas.length > 0 && <section aria-labelledby="pessoas-citadas" className="space-y-3 pt-2">
-          <div><h2 id="pessoas-citadas" className="text-sm font-semibold text-white/75">{t("meetings.mentionedHeading")}</h2><p className="mt-1 text-xs text-white/45">{t("meetings.mentionedHelp")}</p></div>
+          <div><h2 id="pessoas-citadas" className="text-sm font-semibold text-white/75">{t("meetings.mentionedHeading")}</h2><SoNoNavegador><p className="mt-1 text-xs text-white/45">{t("meetings.mentionedHelp")}</p></SoNoNavegador></div>
           {citadas.map(cartaoDaSugestao)}
         </section>}
       </> : <div className="rounded-2xl border border-dashed border-white/15 py-14 text-center text-white/45">{t("meetings.noContactSuggestions")}</div>}</div>}
