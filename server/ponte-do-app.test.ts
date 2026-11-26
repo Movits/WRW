@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { ehDaWrw, lerMensagem, mensagemDaWrw } from "../mobile/ponte";
+import { ehDaWrw, lerMensagem, mensagemDaWrw } from "../mobile/regras/ponte";
 
 /**
- * A ponte entre o site e o app das lojas (mobile/ponte.ts) só aceita mensagem
+ * A ponte entre o site e o app das lojas (mobile/regras/ponte.ts, reexportado por mobile/ponte.ts) só aceita mensagem
  * vinda de uma página da WRW, e no formato de cada tipo (ressalva da validação
- * da #248). O arquivo não importa nada do React Native, então o teste roda no
+ * da #248). A pasta mobile/regras/ tem tsconfig próprio e nada do React Native, então o teste roda no
  * CI da raiz, sem as dependências do app.
  */
 const WRW = "https://wrwglobal.org/dashboard";
