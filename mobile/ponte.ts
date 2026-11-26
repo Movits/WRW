@@ -13,23 +13,7 @@
 //   rota sem recarregar) e o idioma e a direção do texto, para a barra de abas
 //   marcar a aba certa e falar a língua do site.
 
-/** Mensagens que a página manda ao app. */
-export type MensagemDaPagina =
-  | { tipo: 'log'; nivel: string; texto: string }
-  | { tipo: 'microfone'; id: number }
-  | { tipo: 'gravando'; ativo: boolean }
-  | { tipo: 'rota'; caminho: string }
-  | { tipo: 'idioma'; lang: string; dir: string };
-
-export function lerMensagem(dados: string): MensagemDaPagina | null {
-  try {
-    const mensagem = JSON.parse(dados);
-    if (mensagem && typeof mensagem.tipo === 'string') return mensagem as MensagemDaPagina;
-  } catch {
-    // Mensagem que não é nossa: ignora.
-  }
-  return null;
-}
+export { ehDaWrw, lerMensagem, mensagemDaWrw, type MensagemDaPagina } from './regras/ponte';
 
 /** O que o app injeta para responder ao pedido de microfone `id`. */
 export function respostaDoMicrofone(id: number, liberado: boolean): string {
