@@ -3225,6 +3225,7 @@
       "inviteEmail": "Email",
       "googleCalendar": "Google Calendar",
       "downloadIcs": ".ics file",
+      "icsInApp": "Inside the app, the .ics file doesn't download. To add the event to your phone's calendar, open this page in the browser and tap .ics there.",
       "edit": "Edit",
       "delete": "Delete",
       "deleteConfirm": "Remove “{{title}}” from your schedule? The recording, if any, stays in Meetings.",

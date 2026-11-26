@@ -3225,6 +3225,7 @@
       "inviteEmail": "E-Mail",
       "googleCalendar": "Google Kalender",
       "downloadIcs": ".ics-Datei",
+      "icsInApp": "In der App wird die .ics-Datei nicht heruntergeladen. Um den Termin in den Handykalender zu übernehmen, öffnen Sie diese Seite im Browser und tippen Sie dort auf .ics.",
       "edit": "Bearbeiten",
       "delete": "Löschen",
       "deleteConfirm": "„{{title}}“ aus Ihren Terminen entfernen? Die Aufnahme, falls vorhanden, bleibt unter Meetings.",

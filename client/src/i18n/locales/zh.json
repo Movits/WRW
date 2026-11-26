@@ -3225,6 +3225,7 @@
       "inviteEmail": "电子邮件",
       "googleCalendar": "Google 日历",
       "downloadIcs": ".ics 文件",
+      "icsInApp": "在应用内无法下载 .ics 文件。要把活动添加到手机日历，请在浏览器中打开此页面，并在那里点按 .ics。",
       "edit": "编辑",
       "delete": "删除",
       "deleteConfirm": "要从日程中移除“{{title}}”吗？如有录音，仍会保留在“会议”中。",

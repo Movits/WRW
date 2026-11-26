@@ -3225,6 +3225,7 @@
       "inviteEmail": "メール",
       "googleCalendar": "Google カレンダー",
       "downloadIcs": ".ics ファイル",
+      "icsInApp": "アプリ内では .ics ファイルはダウンロードされません。スマホのカレンダーに予定を追加するには、このページをブラウザで開き、そこで .ics をタップしてください。",
       "edit": "編集",
       "delete": "削除",
       "deleteConfirm": "「{{title}}」を予定から削除しますか？録音がある場合は「ミーティング」に残ります。",
