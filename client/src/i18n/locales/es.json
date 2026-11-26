@@ -3225,6 +3225,7 @@
       "inviteEmail": "Correo",
       "googleCalendar": "Google Calendar",
       "downloadIcs": "Archivo .ics",
+      "icsInApp": "Dentro de la app, el archivo .ics no se descarga. Para añadir el evento a la agenda del móvil, abre esta página en el navegador y toca .ics allí.",
       "edit": "Editar",
       "delete": "Eliminar",
       "deleteConfirm": "¿Quitar «{{title}}» de la agenda? La grabación, si la hay, sigue en Reuniones.",

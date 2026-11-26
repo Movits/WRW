@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { mensagemDeErroParaTela } from "@/lib/mensagem-de-erro";
+import { abertoNaCascaDasLojas } from "@/lib/instalacao-do-app";
 import {
   destinoDaAcaoNaAgenda,
   DURACAO_DO_EVENTO_DA_ACAO_MIN,
@@ -109,6 +110,21 @@ export function linkDaAcaoNaGoogle(acao: AcaoParaAAgenda, t: TranslateFn, fuso: 
   if (inicio === null) return null;
   const { titulo, descricao } = textosNaTela(acao, t);
   return linkDaGoogleAgenda({ titulo, inicioMs: inicio, duracaoMinutos: DURACAO_DO_EVENTO_DA_ACAO_MIN, fuso, detalhes: descricao, livre: true });
+}
+
+/**
+ * Baixa o .ics (o da ação e o da reunião da agenda). Dentro do app das lojas, a
+ * WebView não trata download: o toque morria em silêncio (achado do T42, 26/11).
+ * Lá, em vez do download, um aviso diz para abrir a página no navegador, como o
+ * Baixar o áudio e o Exportar a reunião já fazem. Devolve se baixou.
+ */
+export function baixarIcsOuAvisar(conteudo: string, nome: string, t: TranslateFn, userAgent: string = navigator.userAgent): boolean {
+  if (abertoNaCascaDasLojas(userAgent)) {
+    toast.info(t("agenda.card.icsInApp"), { duration: 10_000 });
+    return false;
+  }
+  baixar(conteudo, nome);
+  return true;
 }
 
 /** Baixa o .ics. O link temporário sai depois do download. */
@@ -223,7 +239,7 @@ export function AcaoNaAgenda({ acao, googleLigada, googleDesligada, aoTerminar, 
   const mandarAgora = () => mandar.mutate({ id: acao.id, ...pedidoDaTela(t) });
   const baixarIcs = () => {
     const ics = icsDaAcao(acao, t);
-    if (ics) baixar(ics.conteudo, ics.nome);
+    if (ics) baixarIcsOuAvisar(ics.conteudo, ics.nome, t);
   };
 
   let naGoogle = null;
