@@ -70,7 +70,8 @@
     "c67": { "empresa": "Contas de Mentira", "cargo": "Contadora", "cidade": "Bauru" },
     "c68": { "empresa": "Escrita Fiscal Inventada", "cargo": "Contadora", "cidade": "Pelotas" },
     "c69": { "empresa": "Advocacia Faz de Conta", "cargo": "Advogado", "cidade": "Joinville" },
-    "c70": { "empresa": "Oficina Exemplo", "cargo": "Dona", "cidade": "Feira de Santana" }
+    "c70": { "empresa": "Oficina Exemplo", "cargo": "Dona", "cidade": "Feira de Santana" },
+    "c71": { "empresa": "Confeitaria de Mentira", "cargo": "Sócia", "cidade": "Petrópolis" }
   },
   "pares": [
     { "id": "P01", "armadilha": "exato", "esperado": "casa", "oferta": { "contato": "c03", "rotulo": "Café especial em grãos", "categoria": "Alimentos" }, "procura": { "contato": "c04", "rotulo": "Café especial em grãos", "categoria": "Alimentos" }, "porque": "a mesma coisa escrita igual" },
@@ -94,6 +95,7 @@
     { "id": "P19", "armadilha": "parafrase", "esperado": "casa", "oferta": { "contato": "c33", "rotulo": "Terrenos com outorga de água", "categoria": "Imóveis" }, "procura": { "contato": "c34", "rotulo": "Área rural com água liberada para irrigação", "categoria": "Terras" }, "porque": "outorga de água é a água liberada para irrigar" },
     { "id": "P20", "armadilha": "sinonimo", "esperado": "casa", "oferta": { "contato": "c35", "rotulo": "Galpão para locação", "categoria": "Imóveis" }, "procura": { "contato": "c36", "rotulo": "Alugar armazém", "categoria": "Imóveis" }, "porque": "galpão para locação é o armazém que se quer alugar" },
     { "id": "P21", "armadilha": "servico-familia", "esperado": "casa", "oferta": { "contato": "c30", "rotulo": "Contabilidade", "categoria": "Serviços" }, "procura": { "contato": "c70", "rotulo": "Procuro contador disponível aos sábados", "categoria": "Serviços" }, "porque": "pede contador; o 'disponível' ali é condição do pedido, não oferta" },
+    { "id": "P22", "armadilha": "servico-familia", "esperado": "casa", "oferta": { "contato": "c30", "rotulo": "Contabilidade", "categoria": "Serviços" }, "procura": { "contato": "c71", "rotulo": "Gostaria de um contador disponível aos sábados", "categoria": "Serviços" }, "porque": "'gostaria' é pedido: o 'disponível' ali é condição, não oferta (ressalva da validação da #259)" },
 
     { "id": "C01", "armadilha": "concorrente", "esperado": "nao-casa", "oferta": { "contato": "c37", "rotulo": "Exportar café", "categoria": "Comércio exterior" }, "procura": { "contato": "c29", "rotulo": "Exportar café", "categoria": "Comércio exterior" }, "porque": "as duas querem exportar café: concorrentes" },
     { "id": "C02", "armadilha": "concorrente", "esperado": "nao-casa", "oferta": { "contato": "c38", "rotulo": "Venda de soja", "categoria": "Commodities" }, "procura": { "contato": "c39", "rotulo": "Vender soja", "categoria": "Commodities" }, "porque": "as duas querem vender soja" },

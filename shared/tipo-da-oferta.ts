@@ -2099,6 +2099,7 @@ const LOCUCOES_DE_PEDIDO = new Set(["em", "a", "in"]);
 /** A palavra em `k` é marca de pedido usada como pedido, e não o substantivo depois de preposição ou artigo. */
 function marcaDePedidoEm(palavras: readonly string[], k: number): boolean {
   const palavra = palavras[k];
+  if (ehLikeDePedido(palavras, k)) return true;
   if (!MARCAS_DE_PEDIDO.has(palavra)) return false;
   const anterior = palavras[k - 1];
   if (!MARCAS_QUE_TAMBEM_SAO_SUBSTANTIVO.has(palavra) || anterior === undefined || LOCUCOES_DE_PEDIDO.has(anterior)) return true;
@@ -2106,7 +2107,7 @@ function marcaDePedidoEm(palavras: readonly string[], k: number): boolean {
 }
 
 /** As marcas de pedido do inglês, que põe o qualificador ANTES do serviço: "We need a MARITIME lawyer". */
-const MARCAS_DE_PEDIDO_EM_INGLES = new Set(["need", "needs", "want", "wants", "looking", "seeking", "seeks", "seek", "require", "requires", "hiring"]);
+const MARCAS_DE_PEDIDO_EM_INGLES = new Set(["need", "needs", "want", "wants", "looking", "seeking", "seeks", "seek", "require", "requires", "hiring", "like"]);
 /** Entre o pedido e o serviço, abrem outra coisa que não é o serviço: "Procuro QUEM compre consultoria", "We need SOMEONE to...". */
 const QUEM_NAO_E_O_SERVICO = new Set(["quem", "alguem", "quien", "alguien", "someone", "somebody", "anyone", "anybody", "people", "pessoas"]);
 
@@ -3022,16 +3023,27 @@ const MARCAS_DE_PEDIDO = new Set([
   "procura", "procuro", "procurar", "procurando", "busca", "busco", "buscar", "buscando", "precisa", "preciso",
   "precisar", "precisando", "necessita", "necessito", "necessitar", "quer", "quero",
   "precisamos", "buscamos", "procuramos", "queremos", "necessitamos", "desejamos", "gostariamos", "contratar", "contratamos",
+  // N7, ressalva da validação da #259: sem estas, "Gostaria de um contador disponível aos sábados" não tinha marca de
+  // pedido, o "disponível" o fazia passar por oferta (`necessidadeEhOferta`) e o par dava 0.
+  "gostaria", "desejo", "deseja", "desejam", "buscam", "procuram", "querem",
   "requer", "requerem", "solicita", "solicitam", "exige", "exigem",
   "needs", "need", "wants", "want", "looking", "seeking", "seeks", "seek", "requires", "require", "hiring",
   "necesita", "necesito", "necesitamos", "necesitan", "quiere", "quiero", "buscan", "requiere", "requieren",
+  "quisiera", "quisieramos", "quieren", "queremos", "deseo", "deseamos", "desea", "desean",
 ]);
+
+/**
+ * "We would like" e "we'd like" (o apóstrofo separa o "d"): "like" só é pedido nessa locução. Solto, é comparação
+ * ("Products like coffee") e fica fora de MARCAS_DE_PEDIDO.
+ */
+const ehLikeDePedido = (palavras: readonly string[], k: number) =>
+  palavras[k] === "like" && (palavras[k - 1] === "would" || palavras[k - 1] === "d");
 /** Saem da frente do pedido, depois da marca: "precisamos DE UM", "looking FOR", "we need TO". */
 const SAI_DA_FRENTE_DO_PEDIDO = new Set(["for", "to", "with", "por"]);
 
 /** A cabeça do pedido e se houve marca de pedido antes dela. */
 function cabecaDoPedido(palavras: readonly string[]): { indice: number; comMarca: boolean } {
-  const marca = palavras.findIndex(palavra => MARCAS_DE_PEDIDO.has(palavra));
+  const marca = palavras.findIndex((palavra, k) => MARCAS_DE_PEDIDO.has(palavra) || ehLikeDePedido(palavras, k));
   let indice = marca + 1;
   while (indice < palavras.length && (MARCADORES_FRACOS.has(palavras[indice]) || VERBOS_DE_NECESSIDADE.has(palavras[indice])
     || ARTIGOS.has(palavras[indice]) || GENITIVOS.has(palavras[indice]) || PALAVRAS_SEM_ESPECIALIDADE.has(palavras[indice])

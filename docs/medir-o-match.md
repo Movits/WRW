@@ -1,6 +1,6 @@
 # Medir o match: a rede de teste com armadilhas (N8)
 
-Uma rede FICTÍCIA (70 contatos, 43 pares, nenhum dado real) para medir os motores de match
+Uma rede FICTÍCIA (71 contatos, 44 pares, nenhum dado real) para medir os motores de match
 contra um gabarito. Serve de régua: o N7 (paráfrases e sinônimos) mede o antes e o depois
 por ela.
 
@@ -53,14 +53,15 @@ Motor privado: precisão 92% (12/13), cobertura 60% (12/20), armadilhas proibida
 
 O N7 acrescentou ao gabarito S06, S07 e S08 (a prestadora que escreve a própria oferta no
 campo de necessidade: "Ofereço contabilidade para MEI", "Contadora oferece serviços para
-MEI", "Advogado disponível para empresas", achado da validação da #154) e P21 (o pedido com
-"disponível" no meio, que continua casando). A linha "antes" é o código do N6 + N8 medido
-com o gabarito de 43 pares.
+MEI", "Advogado disponível para empresas", achado da validação da #154), P21 (o pedido com
+"disponível" no meio, que continua casando) e P22 ("Gostaria de um contador disponível aos
+sábados": "gostaria", "desejo", "quisiera" e "we'd like" são pedido, ressalva da validação
+da #259). A linha "antes" é o código do N6 + N8 medido com o gabarito de 44 pares.
 
 | Motor | Antes do N7 | Depois do N7 |
 | --- | --- | --- |
-| Privado (`match-service.ts`) | precisão 76% (13/17), cobertura 62% (13/21), proibidas 4: C06, S06, S07, S08 | precisão 100% (16/16), cobertura 76% (16/21), proibidas 0 |
-| Perfis (`matching.ts`) | precisão 77% (10/13), cobertura 48% (10/21), proibidas 3: S06, S07, S08 | precisão 100% (13/13), cobertura 62% (13/21), proibidas 0 |
+| Privado (`match-service.ts`) | precisão 78% (14/18), cobertura 64% (14/22), proibidas 4: C06, S06, S07, S08 | precisão 100% (17/17), cobertura 77% (17/22), proibidas 0 |
+| Perfis (`matching.ts`) | precisão 79% (11/14), cobertura 50% (11/22), proibidas 3: S06, S07, S08 | precisão 100% (14/14), cobertura 64% (14/22), proibidas 0 |
 
 No gabarito original do N8 (39 pares), o privado foi de 92% / 60% para 100% / 75%, e o de
 perfis (já com o N6) de 100% / 45% para 100% / 60%.

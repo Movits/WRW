@@ -288,7 +288,8 @@ que querem a mesma coisa são concorrentes.
   lugar; Natal, Salvador, Vitória, Palmas, Recife e Fortaleza não.
 - **Necessidade que na verdade OFERECE** (`necessidadeEhOferta`, `shared/tipo-da-oferta.ts`,
   validação da #154): marca de oferta ("ofereço", "oferece", "oferecemos", "disponível",
-  "prestamos", "we offer", "ofrecemos") sem nenhuma marca de pedido no texto. Diante de um
+  "prestamos", "we offer", "ofrecemos") sem nenhuma marca de pedido no texto ("gostaria",
+  "desejo", "quisiera" e "we'd like" são marca de pedido desde a validação da #259). Diante de um
   SERVIÇO não é necessidade declarada: o privado dá 0 com o bloqueio
   `servico-sem-demanda-expressa` ANTES do slug, e o `satisfaz` do de perfis devolve falso.
   "Contabilidade" × "Ofereço contabilidade para MEI" valia 100, com e-mail. "Procuro
@@ -310,10 +311,10 @@ diz que nada sai da plataforma com ele desligado: ligar em produção exige publ
 nova do termo antes (jurídico; republicar revoga os aceites). O de perfis não tem critério
 semântico.
 
-**A medida no gabarito** (`server/rede-com-armadilhas.test.ts`, 43 pares,
-`docs/medir-o-match.md`), com o semântico desligado: privado de 76% de precisão e 62% de
-cobertura (4 armadilhas proibidas: C06, S06, S07, S08) para 100% e 76% (nenhuma); perfis de
-77% e 48% (3: S06, S07, S08) para 100% e 62% (nenhuma). Com similaridade 1 para todo par, as
+**A medida no gabarito** (`server/rede-com-armadilhas.test.ts`, 44 pares,
+`docs/medir-o-match.md`), com o semântico desligado: privado de 78% de precisão e 64% de
+cobertura (4 armadilhas proibidas: C06, S06, S07, S08) para 100% e 77% (nenhuma); perfis de
+79% e 50% (3: S06, S07, S08) para 100% e 64% (nenhuma). Com similaridade 1 para todo par, as
 guardas ainda recusam toda armadilha proibida; só P08, P09, P14, P15, N01 e N02 chegam ao
 limiar.
 

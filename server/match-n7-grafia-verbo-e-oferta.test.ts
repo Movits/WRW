@@ -71,6 +71,26 @@ describe("N7 — a necessidade que na verdade OFERECE (validação da #154)", ()
     }
   });
 
+  it("positivo: gostaria, desejo, quisiera e 'we'd like' são pedido, e o 'disponível' depois deles não vira oferta", () => {
+    for (const [oferta, necessidade] of [
+      ["Contabilidade", "Gostaria de um contador disponível aos sábados"],
+      ["Contabilidade", "Gostaríamos de contador disponível"],
+      ["Contabilidade", "Desejo um contador disponível"],
+      ["Contabilidad", "Quisiera un contador disponible"],
+      ["Contabilidad", "Quisiéramos un contador disponible"],
+      ["Accounting", "We'd like an accountant available on weekends"],
+      ["Accounting", "We want an available accountant"],
+    ]) {
+      expect(necessidadeEhOferta(necessidade), necessidade).toBe(false);
+      expect(scoreMatch(item(oferta, "Serviços"), item(necessidade, "Serviços")).score, `${oferta} × ${necessidade}`).toBeGreaterThanOrEqual(50);
+    }
+  });
+
+  it("negativo: 'like' fora da locução não é pedido, e a oferta segue oferta", () => {
+    expect(necessidadeEhOferta("We offer accounting like the big firms")).toBe(true);
+    expect(scoreMatch(item("Accounting", "Serviços"), item("We offer accounting like the big firms", "Serviços")).score).toBe(0);
+  });
+
   it("positivo: o pedido continua pedindo, mesmo com 'disponível' no meio", () => {
     expect(necessidadeEhOferta("Procuro contador disponível aos sábados")).toBe(false);
     expect(necessidadeEhOferta("Contador para MEI")).toBe(false);
