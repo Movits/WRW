@@ -24,7 +24,7 @@ import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTyp
 import * as Notifications from 'expo-notifications';
 import { abaDoCaminho, barraAparece, scriptDasRotasDaBarra, scriptParaAbrir, type Aba } from './abas';
 import { BarraDeAbas } from './BarraDeAbas';
-import { lerMensagem, respostaDoMicrofone, scriptDaPonte } from './ponte';
+import { ehDaWrw, mensagemDaWrw, respostaDoMicrofone, scriptDaPonte } from './ponte';
 import { configurarAvisosNoApp, enderecoDoAviso, obterTokenDoPush, scriptDoTokenDoPush, type TokenDoPush } from './push';
 
 // Com o app aberto, o push também aparece no topo (push.ts).
@@ -64,16 +64,6 @@ async function liberarMicrofone(): Promise<boolean> {
 }
 
 const ORIGEM = 'https://wrwglobal.org';
-const HOSTS_DA_WRW = new Set(['wrwglobal.org', 'www.wrwglobal.org']);
-
-function ehDaWrw(url: string): boolean {
-  try {
-    const { protocol, hostname } = new URL(url);
-    return protocol === 'https:' && HOSTS_DA_WRW.has(hostname);
-  } catch {
-    return false;
-  }
-}
 
 /** O caminho de uma URL da WRW ("/dashboard"); null para o resto. */
 function caminhoDaWrw(url: string): string | null {
@@ -243,7 +233,8 @@ export default function App() {
 
   const aoReceberMensagem = useCallback(
     (evento: WebViewMessageEvent) => {
-      const mensagem = lerMensagem(evento.nativeEvent.data);
+      // Só a página da WRW fala com o app, e só no formato de cada tipo (ponte.ts).
+      const mensagem = mensagemDaWrw(evento.nativeEvent.url, evento.nativeEvent.data);
       if (!mensagem) return;
       if (mensagem.tipo === 'log') {
         // Vai para o terminal do `npx expo start`: é por aqui que se vê o que
