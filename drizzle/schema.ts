@@ -2659,8 +2659,9 @@ export const voiceProfileConsents = mysqlTable("voice_profile_consents", {
 // fornecedor (o Daily, no servidor de São Paulo, com 2 horas e 8 pessoas).
 // provider_room_name é o nome aleatório da sala lá. O link de visitante fica só
 // pelo hash (sha256) do segredo de 192 bits; nulo: desligado (ou nunca ligado).
-// A sala vale até expires_at (2 horas) ou até ended_at (a dona encerrou, ou o
-// fornecedor avisou o fim). Uma sala aberta por reunião. Excluir a reunião, ou
+// A sala vale até expires_at (2 horas) ou até ended_at (a dona encerrou; o aviso
+// de fim do fornecedor, que vem quando a última pessoa sai, não a fecha). Uma
+// sala aberta por reunião. Excluir a reunião, ou
 // juntá-la a outra, e excluir a conta da dona levam a sala e as presenças; o
 // consumo do mês (consumo_das_salas) fica. Nomes em inglês, como as irmãs
 // meeting_*.

@@ -339,7 +339,9 @@ async function emitirFicha(
     const ficha = await cliente.emitirFicha({ sala: pessoa.sala, nome: pessoa.nome, idDaPessoa: pessoa.presencaId, dona: pessoa.papel === "owner", expiraEm: pessoa.venceEm });
     return { salaId: pessoa.salaId, url: cliente.enderecoDaSala(pessoa.sala), ficha, expiraEm: pessoa.venceEm, papel: pessoa.papel };
   } catch (erro) {
-    await devolverLugar(pessoa.presencaId, pessoa.emitidaEm);
+    // A falha que a tela precisa ver é a do Daily; a do banco aqui só vai ao log (a ficha vence sozinha em 10 minutos).
+    await devolverLugar(pessoa.presencaId, pessoa.emitidaEm)
+      .catch(falha => console.error("[Sala de vídeo] o lugar da ficha que falhou não voltou:", falha instanceof Error ? falha.message : falha));
     throw falhaDoFornecedor(erro);
   }
 }
@@ -674,8 +676,11 @@ export async function estadoDaSala(conta: ContaDaSala, meetingId: string): Promi
  * - **entrou**: abre a sessão na presença (a primeira entrada fica em joined_at);
  * - **saiu**: soma a duração que o Daily mediu à presença e ao consumo do mês,
  *   arredondada para cima ao minuto, e marca a saída;
- * - **fim**: fecha a sala e o consumo, e fecha as sessões que ficaram abertas na
- *   hora do fim.
+ * - **fim** (o Daily o manda quando a ÚLTIMA pessoa sai, não quando a sala
+ *   vence): fecha as sessões que ficaram abertas na hora do fim e soma o tempo
+ *   delas. A sala NÃO fecha aqui: a dona que cai da rede sozinha volta para a
+ *   mesma sala. Ela fecha pelo prazo de 2 horas ou pelo encerrar da dona, e só
+ *   então o orçamento passa do teto da sala ao que foi medido.
  * O mesmo aviso repetido (o Daily tenta de novo) não soma duas vezes: a sessão
  * aberta e a última fechada ficam na presença. O aviso de sala ou presença que
  * não existe mais (a reunião foi excluída) é ignorado; a sala aberta da reunião
@@ -703,15 +708,10 @@ export async function receberAvisoDaSala(aviso: AvisoDaSala): Promise<"aplicado"
             lastSessionId: presenca.openSessionId, openSessionId: null, openSessionSince: null, updatedAt: Date.now(),
           }).where(eq(meetingRoomPresences.id, presenca.id));
         }
-        if (sala.endedAt === null) {
-          await tx.update(meetingRooms).set({ endedAt: aviso.em, guestLinkHash: null }).where(eq(meetingRooms.id, sala.id));
-        }
       }
-      if (consumo) {
-        await tx.update(consumoDasSalas).set({
-          encerradaEm: sql`coalesce(${consumoDasSalas.encerradaEm}, ${aviso.em})`,
-          segundosPessoa: sql`${consumoDasSalas.segundosPessoa} + ${somados}`,
-        }).where(eq(consumoDasSalas.salaId, consumo.salaId));
+      if (consumo && somados) {
+        await tx.update(consumoDasSalas).set({ segundosPessoa: sql`${consumoDasSalas.segundosPessoa} + ${somados}` })
+          .where(eq(consumoDasSalas.salaId, consumo.salaId));
       }
       return "aplicado";
     }

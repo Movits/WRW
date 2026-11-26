@@ -314,7 +314,7 @@ describe.skipIf(!temBanco)("Sala de vídeo (integração, Daily dublado)", () =>
     expect(await contar()).toBe(9);
   });
 
-  it("os avisos do Daily: a entrada abre a sessão, a saída soma ao consumo ao minuto, o repetido não soma, e o fim fecha a sala e as sessões abertas", async () => {
+  it("os avisos do Daily: a entrada abre a sessão, a saída soma ao consumo ao minuto, o repetido não soma, e o fim fecha as sessões abertas sem fechar a sala", async () => {
     const sala = await salaDaReuniao(R.PRINCIPAL);
     const db = (await getDb())!;
     const presencaDe = async (userId: number) => (await db.select().from(meetingRoomPresences)
@@ -344,11 +344,12 @@ describe.skipIf(!temBanco)("Sala de vídeo (integração, Daily dublado)", () =>
     // As duas sessões abertas fecham no fim: 61 s viram 120 s cada.
     expect((await presencaDe(ana.id)).secondsInRoom).toBe(300);
     expect(await presencaDe(dona.id)).toMatchObject({ openSessionId: null, secondsInRoom: 120 });
-    expect(await consumo()).toMatchObject({ segundosPessoa: 420, encerradaEm: t1 + 61_000 });
-    expect(await salaDaReuniao(R.PRINCIPAL)).toMatchObject({ endedAt: t1 + 61_000, guestLinkHash: null });
-
-    // A sala fechada não emite ficha, e abrir de novo cria outra.
-    expect(await recusa(entrarNaSala(ana, sala.id, AVISO))).toMatchObject({ code: "PRECONDITION_FAILED", message: RECUSAS_DA_SALA.salaEncerrada });
+    // O fim do Daily (a última pessoa saiu) não fecha a sala nem o consumo: quem caiu volta para a mesma sala.
+    expect(await consumo()).toMatchObject({ segundosPessoa: 420, encerradaEm: null });
+    expect(await salaDaReuniao(R.PRINCIPAL)).toMatchObject({ endedAt: null });
+    expect(await receberAvisoDaSala({ tipo: "fim", sala: sala.providerRoomName, em: t1 + 61_000 })).toBe("aplicado");
+    expect((await consumo()).segundosPessoa).toBe(420);
+    expect((await entrarNaSala(ana, sala.id, AVISO)).papel).toBe("participant");
   });
 
   it("encerrar: só a dona; a sala sai do Daily e o consumo fecha; encerrar de novo não faz nada", async () => {
