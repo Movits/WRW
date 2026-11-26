@@ -21,9 +21,14 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { WebView, type WebViewMessageEvent, type WebViewNavigation } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
+import * as Notifications from 'expo-notifications';
 import { abaDoCaminho, barraAparece, scriptDasRotasDaBarra, scriptParaAbrir, type Aba } from './abas';
 import { BarraDeAbas } from './BarraDeAbas';
 import { lerMensagem, respostaDoMicrofone, scriptDaPonte } from './ponte';
+import { configurarAvisosNoApp, enderecoDoAviso, obterTokenDoPush, scriptDoTokenDoPush, type TokenDoPush } from './push';
+
+// Com o app aberto, o push também aparece no topo (push.ts).
+configurarAvisosNoApp();
 
 const ETIQUETA_DA_GRAVACAO = 'wrw-gravacao';
 // A ponte e a lista das telas da barra, que o Menu do site deixa de repetir.
@@ -141,6 +146,65 @@ export default function App() {
     webview.current?.injectJavaScript(scriptParaAbrir(aba.caminho, ORIGEM));
   }, []);
 
+  // Push no celular (push.ts): o token vai para a página a cada carga, e o
+  // site o manda ao servidor com a sessão dela. Tocar no push abre a tela do
+  // aviso; com o app fechado, depois que a primeira página carregar.
+  const tokenDoPush = useRef<TokenDoPush | null>(null);
+  const pediuOPush = useRef(false);
+  const paginaCarregou = useRef(false);
+  const enderecoPendente = useRef<string | null>(null);
+
+  const abrirEndereco = useCallback((endereco: string) => {
+    if (!paginaCarregou.current) {
+      enderecoPendente.current = endereco;
+      return;
+    }
+    setCaminho(endereco.split('?')[0]);
+    webview.current?.injectJavaScript(scriptParaAbrir(endereco, ORIGEM));
+  }, []);
+
+  const entregarTokenDoPush = useCallback(() => {
+    if (tokenDoPush.current) webview.current?.injectJavaScript(scriptDoTokenDoPush(tokenDoPush.current));
+  }, []);
+
+  // A permissão só é pedida depois do login: na primeira tela logada.
+  const telaLogada = barraAparece({ caminho, gravando: false, semConexao: false, tecladoAberto: false });
+  useEffect(() => {
+    if (!telaLogada || pediuOPush.current) return;
+    pediuOPush.current = true;
+    void obterTokenDoPush().then(dados => {
+      if (!dados) return;
+      tokenDoPush.current = dados;
+      entregarTokenDoPush();
+    });
+  }, [telaLogada, entregarTokenDoPush]);
+
+  useEffect(() => {
+    // O push tocado com o app fechado: abre depois da primeira página.
+    void Notifications.getLastNotificationResponseAsync().then(resposta => {
+      const endereco = enderecoDoAviso(resposta);
+      if (!endereco) return;
+      void Notifications.clearLastNotificationResponseAsync();
+      abrirEndereco(endereco);
+    });
+    const assinatura = Notifications.addNotificationResponseReceivedListener(resposta => {
+      const endereco = enderecoDoAviso(resposta);
+      if (endereco) abrirEndereco(endereco);
+    });
+    return () => assinatura.remove();
+  }, [abrirEndereco]);
+
+  const aoCarregarPagina = useCallback(() => {
+    setSemConexao(false);
+    paginaCarregou.current = true;
+    entregarTokenDoPush();
+    const pendente = enderecoPendente.current;
+    if (pendente) {
+      enderecoPendente.current = null;
+      abrirEndereco(pendente);
+    }
+  }, [abrirEndereco, entregarTokenDoPush]);
+
   useEffect(() => {
     const assinatura = AppState.addEventListener('change', estado => {
       if (estado === 'background' && gravando.current && Platform.OS === 'ios') {
@@ -251,7 +315,7 @@ export default function App() {
           injectedJavaScript={SCRIPT_DA_PONTE}
           onMessage={aoReceberMensagem}
           onLoadEnd={evento => console.log(`[app ${Platform.OS}] página carregada: ${evento.nativeEvent.url}`)}
-          onLoad={() => setSemConexao(false)}
+          onLoad={aoCarregarPagina}
           onError={() => setSemConexao(true)}
           webviewDebuggingEnabled={__DEV__}
           renderError={() => <TelaDeErro aoTentarDeNovo={() => webview.current?.reload()} />}

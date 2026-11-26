@@ -39,6 +39,13 @@
           "imageWidth": 240,
           "resizeMode": "contain"
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#b87a5e",
+          "defaultChannel": "avisos"
+        }
       ]
     ],
     "extra": {
