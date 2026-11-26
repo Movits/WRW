@@ -2605,3 +2605,52 @@ export const pedidosPelaEntidade = mysqlTable("pedidos_pela_entidade", {
 }));
 
 export type PedidoPelaEntidade = typeof pedidosPelaEntidade.$inferSelect;
+
+// O índice invertido do cruzamento (N4b, docs/arquitetura/entidades.md, seção 8).
+// Uma linha por chave de cada item de contact_assets ("tem") e contact_needs
+// ("precisa"), calculada por shared/chaves-de-cruzamento.ts. A chave só acha
+// candidatos: quem decide o match continua sendo scoreMatch. Guarda o hash da
+// chave (16 hex do SHA-256), nunca o texto do item; colisão só traz candidato a
+// mais. Os itens só recebem INSERT e DELETE, então as chaves de um item nunca
+// mudam: o índice se mantém pela varredura dos itens sem chave e das chaves sem
+// item (server/indice-de-cruzamento.ts), além da indexação na hora da carga.
+export const chavesDeCruzamento = mysqlTable("chaves_de_cruzamento", {
+  id:        bigint("id", { mode: "number" }).primaryKey().autoincrement(),
+  lado:      varchar("lado", { length: 8, enum: ["tem", "precisa"] }).notNull(),
+  itemId:    bigint("item_id", { mode: "number" }).notNull(),
+  contactId: bigint("contact_id", { mode: "number" }).notNull(),
+  ownerId:   varchar("owner_id", { length: 128 }).notNull(),
+  chave:     varchar("chave", { length: 16 }).notNull(),
+}, (table) => ({
+  itemChaveUnique: uniqueIndex("cdc_lado_item_chave_unique").on(table.lado, table.itemId, table.chave),
+  chaveIdx:        index("cdc_lado_chave_contato_idx").on(table.lado, table.chave, table.contactId),
+  contatoIdx:      index("cdc_contato_idx").on(table.contactId),
+  ownerIdx:        index("cdc_owner_idx").on(table.ownerId),
+}));
+
+// A fila do cruzamento grande (N4b): a busca na rede global de uma dona com
+// muitos contatos disponíveis (a entidade) e o motor privado de uma conta com
+// muitos contatos rodam no servidor, em lotes, fora do pedido HTTP
+// (server/fila-de-cruzamento.ts). Um trabalho vivo por dona e tipo; o pedido que
+// chega com ele rodando marca `de_novo`, e o trabalho recomeça ao terminar.
+export const filaDeCruzamento = mysqlTable("fila_de_cruzamento", {
+  id:           int("id").primaryKey().autoincrement(),
+  ownerId:      varchar("owner_id", { length: 128 }).notNull(),
+  userId:       int("user_id").notNull(),
+  tipo:         varchar("tipo", { length: 10, enum: ["global", "privado"] }).notNull(),
+  estado:       varchar("estado", { length: 12, enum: ["pendente", "concluida", "falhou"] }).default("pendente").notNull(),
+  // O último contato já cruzado (a busca global anda por id, em lotes).
+  cursor:       bigint("cursor", { mode: "number" }).default(0).notNull(),
+  deNovo:       boolean("de_novo").default(false).notNull(),
+  processados:  int("processados").default(0).notNull(),
+  conexoes:     int("conexoes").default(0).notNull(),
+  tentativas:   int("tentativas").default(0).notNull(),
+  erro:         varchar("erro", { length: 300 }),
+  lockToken:    varchar("lock_token", { length: 36 }),
+  lockedUntil:  bigint("locked_until", { mode: "number" }),
+  criadaEm:     bigint("criada_em", { mode: "number" }).notNull(),
+  atualizadaEm: bigint("atualizada_em", { mode: "number" }).notNull(),
+}, (table) => ({
+  estadoIdx: index("fdc_estado_idx").on(table.estado, table.criadaEm),
+  donaIdx:   index("fdc_dona_idx").on(table.ownerId, table.tipo, table.estado),
+}));

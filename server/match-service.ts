@@ -1,11 +1,12 @@
 import crypto from "node:crypto";
-import { and, eq, gte, inArray } from "drizzle-orm";
+import { and, count, eq, gte, inArray } from "drizzle-orm";
 import { aiMatchSuggestions, contactAssets, contactNeeds, privateContacts } from "../drizzle/schema";
 import { cosineSimilarity, normalizeVector } from "./memory-service";
 import { exigirDb } from "./db";
 import { sendEmail } from "./_core/email";
 import { embedWithGemini } from "./gemini";
 import { nomeiamAMesmaCoisa, saoConcorrentes, slugDoTermo } from "@shared/direcao-do-termo";
+import { chavesDoItem } from "@shared/chaves-de-cruzamento";
 import { classificarOferta, mesmaFamiliaEEspecialidade, necessidadeDeclaraOAssuntoDoServico, necessidadeGenericaNomeiaOServico, regraNaoLeOPar } from "@shared/tipo-da-oferta";
 
 const SEMANTIC_THRESHOLD = 0.7;
@@ -183,6 +184,31 @@ export function scoreMatch(asset: MatchReason, need: MatchReason, semanticScore 
   return { score: 0, type: "semantic" as const };
 }
 
+type ItemDoMotor = { contactId: number; tagSlug: string; tagLabel: string; category: string | null };
+
+/**
+ * O índice das necessidades, em memória, para o recálculo em massa: para cada
+ * "tem", os "preciso" que têm alguma chave em comum com ele, na ORDEM original
+ * (a mesma do laço par a par, para a razão escolhida ser a mesma).
+ */
+function indiceDasNecessidades<Necessidade extends ItemDoMotor>(needs: Necessidade[]) {
+  const porChave = new Map<string, number[]>();
+  needs.forEach((need, indice) => {
+    for (const chave of chavesDoItem({ label: need.tagLabel, category: need.category, slug: need.tagSlug }, "precisa")) {
+      const lista = porChave.get(chave) ?? [];
+      lista.push(indice);
+      porChave.set(chave, lista);
+    }
+  });
+  return (asset: ItemDoMotor): Necessidade[] => {
+    const indices = new Set<number>();
+    for (const chave of chavesDoItem({ label: asset.tagLabel, category: asset.category, slug: asset.tagSlug }, "tem")) {
+      for (const indice of porChave.get(chave) ?? []) indices.add(indice);
+    }
+    return Array.from(indices).sort((a, b) => a - b).map(indice => needs[indice]);
+  };
+}
+
 async function embed(text: string) {
   return normalizeVector(await embedWithGemini(text, "SEMANTIC_SIMILARITY"));
 }
@@ -268,8 +294,40 @@ const carregarRegistro = () => (registroDeConexoes ??= import("./network-registr
   throw erro;
 }));
 
-export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: string | null) {
+/**
+ * Conta com mais contatos que isto (a entidade, com milhares de associados) não
+ * recalcula dentro do pedido: o recálculo vai para a fila
+ * (server/fila-de-cruzamento.ts) e roda no servidor, que chama de volta com
+ * `naFila` (N4b, docs/arquitetura/entidades.md, seção 8).
+ */
+export const CONTATOS_DO_RECALCULO_NA_HORA = 2000;
+/**
+ * Acima destes pares "tem" × "preciso", o laço não compara todos com todos: cada
+ * "tem" só encontra os "preciso" que têm alguma chave de cruzamento em comum com
+ * ele (shared/chaves-de-cruzamento.ts), e a decisão continua com scoreMatch. É o
+ * que tira o motor do quadrático na conta da entidade. Abaixo (toda conta comum
+ * de hoje), o laço é o de sempre, par a par.
+ */
+export const PARES_DO_LACO_DIRETO = 200_000;
+/**
+ * Em massa (a conta da entidade), quantos pares cada contato que procura pode ter: os primeiros que
+ * passam do corte, na ordem dos itens. É a lista que a entidade consegue ler, e o que cabe na memória
+ * de uma instância de 2 GB. Escolher os de nota maior, em vez dos primeiros, fica para depois (seção 8).
+ */
+export const TETO_DE_PARES_POR_CONTATO_EM_MASSA = 20;
+/** Linhas por INSERT (e por DELETE) de sugestão quando o recálculo é em massa. */
+const SUGESTOES_POR_INSERT = 500;
+
+export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: string | null, opcoes: { naFila?: boolean } = {}) {
   const db = await exigirDb();
+  if (!opcoes.naFila) {
+    const [contagem] = await db.select({ total: count() }).from(privateContacts).where(eq(privateContacts.ownerId, ownerId));
+    if ((Number(contagem?.total) || 0) > CONTATOS_DO_RECALCULO_NA_HORA) {
+      const { enfileirarRecalculoPrivado } = await import("./fila-de-cruzamento");
+      await enfileirarRecalculoPrivado(ownerId);
+      return { created: 0, updated: 0, removed: 0, total: 0, emFila: true as const };
+    }
+  }
   const [assets, needs, contacts, existing] = await Promise.all([
     db.select().from(contactAssets).where(eq(contactAssets.ownerId, ownerId)),
     db.select().from(contactNeeds).where(eq(contactNeeds.ownerId, ownerId)),
@@ -287,8 +345,18 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
   // Junta por PAR de contatos, não por encontro. É o que permite acumular todas
   // as razões e enxergar quando os dois lados se completam.
   const pares = new Map<string, Par>();
+  // Em massa (a conta grande, pela fila): só os pares com chave em comum, e a vez devolvida ao servidor de tempos em tempos.
+  const emMassa = assets.length * needs.length > PARES_DO_LACO_DIRETO;
+  const candidatosDo = emMassa ? indiceDasNecessidades(needs) : null;
+  let desdeAPausa = 0;
+  const paresPorContato = new Map<number, number>();
   for (const asset of assets) {
-    for (const need of needs) {
+    const candidatas = candidatosDo ? candidatosDo(asset) : needs;
+    if (emMassa && (desdeAPausa += candidatas.length + 1) >= 5000) {
+      desdeAPausa = 0;
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+    for (const need of candidatas) {
       if (asset.contactId === need.contactId) continue;
       // Linha gravada antes do conserto da escrita não latina tem tag_slug ""
       // (o slug antigo apagava tudo fora de [a-z0-9]). O rótulo continua lá:
@@ -308,7 +376,18 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
       const lowId = Math.min(asset.contactId, need.contactId);
       const highId = Math.max(asset.contactId, need.contactId);
       const chave = `${lowId}:${highId}`;
-      const par = pares.get(chave) ?? { lowId, highId, encontros: [] };
+      let par = pares.get(chave);
+      if (!par) {
+        // Em massa, cada contato que procura entra em no máximo TETO_DE_PARES_POR_CONTATO_EM_MASSA pares:
+        // sem isto, 50 mil associados com termos comuns davam milhões de pares, e o processo ficava sem
+        // memória (medido na carga da N4b). Os pares que já existem seguem juntando razões.
+        if (emMassa) {
+          const jaTem = paresPorContato.get(need.contactId) ?? 0;
+          if (jaTem >= TETO_DE_PARES_POR_CONTATO_EM_MASSA) continue;
+          paresPorContato.set(need.contactId, jaTem + 1);
+        }
+        par = { lowId, highId, encontros: [] };
+      }
       par.encontros.push({ deId: asset.contactId, paraId: need.contactId, asset: baseAsset, need: baseNeed, score: result.score, type: result.type });
       pares.set(chave, par);
     }
@@ -324,6 +403,7 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
 
   const existingByPair = new Map(existing.map(match => [`${match.pairLowContactId}:${match.pairHighContactId}`, match]));
   const timestamp = Date.now(); let created = 0; let updated = 0; let newHighScore = 0;
+  const novosEmMassa: Array<typeof aiMatchSuggestions.$inferInsert> = [];
 
   for (const par of Array.from(pares.values())) {
     // Direção é quem possui. Havendo encontros nos dois sentidos, cada contato
@@ -410,6 +490,14 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
       // condicional no banco — o status entra no WHERE, como em
       // `advanceEnrichmentSession` — e só quem achou a linha ainda como a leu
       // (affectedRows === 1) conta para o e-mail.
+      // Em massa, o par que não mudou nada não é regravado: na conta da entidade, cada recálculo regravava
+      // dezenas de milhares de linhas iguais. Fora do modo em massa, a regravação de sempre (o updatedAt anda).
+      if (emMassa && !reabrir && previous.matchScore === values.matchScore && previous.matchType === values.matchType
+        && previous.reasonText === values.reasonText && previous.contactAId === values.contactAId && previous.contactBId === values.contactBId
+        && JSON.stringify(previous.matchedAssets) === JSON.stringify(values.matchedAssets)
+        && JSON.stringify(previous.matchedNeeds) === JSON.stringify(values.matchedNeeds)) {
+        continue;
+      }
       let reabriuDeFato = false;
       if (reabrir) {
         const resultado = await db.update(aiMatchSuggestions)
@@ -465,6 +553,9 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
       const aindaPorDecidir = previous.status === "pending" || previous.status === "viewed";
       const cruzouOLimiar = gravouANota && previous.matchScore < EMAIL_THRESHOLD;
       if (values.matchScore >= EMAIL_THRESHOLD && (reabriuDeFato || (aindaPorDecidir && cruzouOLimiar))) newHighScore += 1;
+    } else if (emMassa) {
+      // Em massa, o par novo espera o INSERT de várias linhas (lá embaixo); a colisão com outra rodada cai no caminho de sempre.
+      novosEmMassa.push({ id: crypto.randomUUID(), ownerId, pairLowContactId: par.lowId, pairHighContactId: par.highId, status: "pending", notifiedAt: null, viewedAt: null, acceptedAt: null, dismissedAt: null, createdAt: timestamp, ...values });
     } else {
       // O par é novo para ESTA rodada, mas o índice único (dona, par) é a
       // verdade: em dois recálculos simultâneos os dois leem "não existe" e os
@@ -503,15 +594,54 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
     }
   }
 
+  for (let i = 0; i < novosEmMassa.length; i += SUGESTOES_POR_INSERT) {
+    const bloco = novosEmMassa.slice(i, i + SUGESTOES_POR_INSERT);
+    try {
+      await db.insert(aiMatchSuggestions).values(bloco);
+      created += bloco.length;
+      newHighScore += bloco.filter(linha => (linha.matchScore ?? 0) >= EMAIL_THRESHOLD).length;
+    } catch (erro) {
+      if (!ehChaveDuplicada(erro)) throw erro;
+      // Outra rodada gravou algum par do bloco no meio: linha a linha, e quem perde só atualiza a razão (como acima).
+      for (const linha of bloco) {
+        try {
+          await db.insert(aiMatchSuggestions).values(linha);
+          created += 1;
+          if ((linha.matchScore ?? 0) >= EMAIL_THRESHOLD) newHighScore += 1;
+        } catch (erroDaLinha) {
+          if (!ehChaveDuplicada(erroDaLinha)) throw erroDaLinha;
+          await db.update(aiMatchSuggestions).set({
+            contactAId: linha.contactAId, contactBId: linha.contactBId, matchScore: linha.matchScore, matchType: linha.matchType,
+            matchedAssets: linha.matchedAssets, matchedNeeds: linha.matchedNeeds, reasonText: linha.reasonText, updatedAt: linha.updatedAt,
+          }).where(and(
+            eq(aiMatchSuggestions.ownerId, ownerId),
+            eq(aiMatchSuggestions.pairLowContactId, linha.pairLowContactId),
+            eq(aiMatchSuggestions.pairHighContactId, linha.pairHighContactId),
+          ));
+          updated += 1;
+        }
+      }
+    }
+  }
+
   // Match órfão: o ativo ou a necessidade que o justificava foi apagado, e o
   // motivo exibido virou mentira. Só some o que ainda é sugestão — decisão da
   // usuária, aceita ou dispensada, permanece como histórico.
   let removed = 0;
+  const orfaos: string[] = [];
   for (const antigo of existing) {
     if (pares.has(`${antigo.pairLowContactId}:${antigo.pairHighContactId}`)) continue;
     if (antigo.status !== "pending" && antigo.status !== "viewed") continue;
+    if (emMassa) { orfaos.push(antigo.id); continue; }
     await db.delete(aiMatchSuggestions).where(and(eq(aiMatchSuggestions.id, antigo.id), eq(aiMatchSuggestions.ownerId, ownerId)));
     removed += 1;
+  }
+  for (let i = 0; i < orfaos.length; i += SUGESTOES_POR_INSERT) {
+    const ids = orfaos.slice(i, i + SUGESTOES_POR_INSERT);
+    await db.delete(aiMatchSuggestions).where(and(
+      inArray(aiMatchSuggestions.id, ids), eq(aiMatchSuggestions.ownerId, ownerId), inArray(aiMatchSuggestions.status, ["pending", "viewed"]),
+    ));
+    removed += ids.length;
   }
 
   if (newHighScore && ownerEmail) {

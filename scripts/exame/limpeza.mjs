@@ -35,6 +35,9 @@ export const PLANO_DE_LIMPEZA = [
   { tabela: "ai_match_suggestions", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "contact_assets", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "contact_needs", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O índice de cruzamento e a fila do cruzamento grande (N4b).
+  { tabela: "chaves_de_cruzamento", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "fila_de_cruzamento", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "memory_documents", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_contact_suggestions", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_entities", coluna: "owner_id", chave: "openId", acao: "apagar" },

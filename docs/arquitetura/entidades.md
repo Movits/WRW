@@ -4,7 +4,7 @@ Desenho da base das associações (federações, associações, confederações 
 mandam ao app os cadastros das empresas associadas), com as decisões do Roberto de 22/11/2026.
 Vem da reunião de 11/11 (linhas R-37 a R-49 e R-58 da auditoria) e do rascunho de 16/11. A
 primeira PR de código é a N1 (`feat/assoc-n1`), que já segue este desenho; as seções dizem o
-que está no código e o que fica para a N2, a N3 e a N4b.
+que está no código; a N4b (o volume de 50 mil associados) está na seção 8.
 
 Nada aqui é parecer jurídico: o que depende do Dr. Ronei e da Cris está na seção 10.
 
@@ -189,35 +189,165 @@ sem biblioteca nova). O arquivo não sobe; vão as linhas já mapeadas e o SHA-2
 - **Ensaio e aplicar:** o ensaio relata tudo sem gravar contato; a importação só libera na tela
   depois de um ensaio concluído do mesmo arquivo.
 
-## 8. O volume de 30 mil
+## 8. O volume: 50 mil associados (N4b)
+
+A meta (Roberto, 25/11; a cliente disse "pelo menos 30 mil associados"): o app inteiro com
+**50 mil associados, somando as entidades**, que podem ativar a conta e virar 50 mil
+usuárias. Uma entidade grande pode ter dezenas de milhares: o teto por entidade é 50 mil
+(`ASSOCIADOS_MAX_POR_ENTIDADE`, `shared/entidades.ts`; era 1000 até a N4b).
 
 - **Carga:** blocos de 500 linhas, cada um uma chamada e uma TRANSAÇÃO (a carga trava a linha
   dela; o bloco fora de ordem ou repetido recusa com CONFLICT e a contagem não dobra). A tela
   mostra o progresso bloco a bloco. 30 mil linhas são 60 chamadas no ensaio e 60 na
   importação, dentro do limite de 300 pedidos por conta da API. Carga interrompida: escolher
   o arquivo de novo e importar outra vez; os já gravados são atualizados, não duplicados.
-  Teto de 50 mil linhas por arquivo.
+  Teto de 50 mil linhas por arquivo. O bloco indexa os associados dele na mesma transação
+  (abaixo): o associado cruza assim que o bloco grava.
 - **Painel:** 50 por página, busca pelo código, pelo documento inteiro (HMAC, índice) ou por
   parte do nome (LIKE parametrizado sobre os contatos da entidade).
-- **Os motores, o que a N1 e a N4 NÃO resolvem (vai à N4b, que traz o índice invertido
-  `chaves_de_cruzamento` e a fila):**
-  1. A leitura global tem teto, sem ordem (`network-rede-global.ts`). Desde a revisão do
-     pacote, a autorização (conta ativa, termo do Smart Match e convênio vigente) filtra no
-     SQL, antes do teto, e os contatos das contas de entidade têm janela própria de 1000
-     (`TETO_DE_CONTATOS_DE_ENTIDADES`): a entidade não tira mais da janela os contatos das
-     outras donas, nem com o convênio encerrado. Mas, com 30 mil associados disponíveis
-     (decisão 4), só 1000 seriam lidos. Por isso o servidor trava a base de cada entidade em
-     1000 associados até a N4b (`ASSOCIADOS_MAX_ATE_N4B`; o aplicar recusa com
-     `BASE_ACIMA_DO_TETO`, o ensaio lê o arquivo inteiro). **Não carregar base real antes da N4b.**
-  2. O motor privado (`match-service.ts`) compara todos os "tenho" com todos os "preciso" da
-     dona a cada item novo: na conta da entidade, isso é quadrático em 30 mil. A carga não o
-     chama; mexer num contato pela Rede da entidade, sim.
-  3. O painel do Meu Network Inteligente lê todos os contatos da dona sem teto
-     (`network-inteligente.ts`); na conta da entidade, a lista própria do painel da entidade é
-     o caminho.
-  4. O motor de perfis já pagina todos os perfis por id (`matching.ts`, sem o antigo teto de
-     50). O custo de escala é outro: cada regeneração percorre todas as contas, e as contas
-     ativadas pela N3 passam a pesar nele.
+
+**O índice de cruzamento** (`chaves_de_cruzamento`, migração `0031`, e
+`shared/chaves-de-cruzamento.ts`). Cada item de "o que tem" e de "o que precisa" ganha as
+suas chaves, guardadas como hash (16 hex do SHA-256, nunca o texto): o slug (tag exata), as
+substâncias do termo (o objeto sem o verbo, o núcleo sem a cabeça transparente e os dois sem
+o lugar do fim), a família e cada lema da especialidade do serviço (o pedido com
+especialidade só acha a oferta que tem aquele lema; o de apoio também chega à advocacia, à
+contabilidade e ao sinônimo próximo), o assunto curado e a categoria. **Palavra solta nunca é
+chave**: "Exportar vinho" × "Exportar café" não têm chave em comum. A chave só acha
+candidatos; quem decide cada par continua sendo `scoreMatch`, com os concorrentes zerados e a
+demanda expressa. A garantia é medida: todo par que `scoreMatch` aceita, no vocabulário dos
+testes dos motores (cerca de 1 milhão de pares) e na tabela da CNAE diante desses termos
+(1,7 milhão), tem chave em comum (`server/chaves-de-cruzamento.test.ts`; a suíte roda uma
+amostra, e o par a par inteiro com `CHAVES_DE_CRUZAMENTO_COMPLETO=1`, rodado em 25/11 sem
+nenhum par perdido). Critério novo em `scoreMatch` precisa de chave nova lá.
+
+- **Como o índice se mantém:** os itens só recebem INSERT e DELETE, então as chaves de um item
+  nunca mudam. A carga e o "refazer as ofertas da CNAE" indexam na transação
+  (`indexarContatos`); o que a tela, o enriquecimento e a reunião gravam entra pela varredura
+  do laço da fila (`server/fila-de-cruzamento.ts`): a cada 2 s, os itens de id acima da última
+  marca; de 10 em 10 minutos, as tabelas inteiras e as chaves órfãs. O item novo fica de fora
+  do lado de LÁ do cruzamento até a próxima volta; o lado de quem procura é calculado na hora.
+
+**A leitura global, paginada e ordenada** (`lerRedeGlobalAnonima` e `lerRedeGlobalPaginada`,
+`network-rede-global.ts`). As duas janelas de 1000 sem ordem saíram: uma consulta só, em
+páginas de 1000 pela ordem do id, com a autorização no SQL (conta ativa, termo do Smart Match,
+convênio vigente, associado não ativado) e os itens lidos com a dona no WHERE (o índice das
+duas tabelas é dona + contato). A busca não lê mais a rede inteira: pergunta ao índice quem
+pode casar com os contatos de quem procura e lê só esses, pela mesma leitura autorizada. A
+regra de consulta segue: de `private_contacts` só saem id, dona e código anônimo.
+
+**A fila** (`fila_de_cruzamento`, `server/fila-de-cruzamento.ts`), no próprio processo, como as
+filas da reunião: a conta com mais de 300 contatos disponíveis (a entidade) busca na rede pela
+fila, em lotes de 200 contatos pela ordem do id, com o cursor gravado, e a tela avisa que a
+busca roda em segundo plano (`networkInteligente.global.queued`); a conta com mais de 2000
+contatos recalcula o motor privado pela fila. Um trabalho vivo por dona e tipo (o pedido que
+chega no meio marca `de_novo`, e o trabalho recomeça ao terminar); os trabalhos se revezam por
+lote; o termo do Smart Match é conferido na hora de rodar; a reserva vence em 30 minutos se o
+processo cair, e o SIGTERM a devolve.
+
+**O motor privado na conta grande** (`match-service.ts`): acima de 200 mil pares "tem" ×
+"preciso", o laço não compara todos com todos; cada "tem" só encontra os "preciso" que têm
+chave em comum com ele (o índice em memória, na mesma ordem do laço de sempre). A sugestão
+nova vai em INSERT de 500 linhas, a que não mudou não é regravada e a órfã sai em lote. E cada
+contato que procura entra em no máximo 20 pares (`TETO_DE_PARES_POR_CONTATO_EM_MASSA`, os
+primeiros que passam do corte): sem isso, 50 mil associados com termos comuns davam milhões de
+pares e o processo ficava sem memória (medido: 4 GB de heap e queda). Abaixo de 200 mil pares
+(toda conta comum de hoje), nada mudou.
+
+**O Meu Network Inteligente** (`network-inteligente.ts`): o resumo lê os contatos em páginas
+de 1000 pela ordem do id, com os "tem" e "preciso" de cada página, e guarda só a amostra dos
+incompletos mais recentes, em vez de segurar a base inteira na memória.
+
+### As medidas (carga local, 25/11)
+
+`server/carga-das-entidades.carga.test.ts`, com `RODAR_CARGA_N4B=1`, num banco novo em utf8mb4
+(MariaDB 11.4 local, notebook; produção é MySQL 8.4 no Aiven): associados fictícios com CNAE
+sorteada da tabela do IBGE (uma principal e até duas secundárias), 20% com "o que tem" escrito
+e 10% com "o que precisa", de um vocabulário de 18 termos comuns de cada lado (denso de
+propósito: o pior caso para o motor privado); uma membra com 40 contatos disponíveis e 20
+perfis. O "antes" é a `main` (ad855b6), com o teto de associados subido só para a medida. O
+"depois" de 50 mil é uma entidade com os 50 mil; o de 100 mil, duas entidades de 50 mil, para
+saber a folga. Os tempos incluem a CPU do teste e do banco na mesma máquina.
+
+| Passo | Antes, 50 mil | Depois, 50 mil | Depois, 100 mil |
+|---|---|---|---|
+| Importação pelo painel (blocos de 500) | 25,5 s | 17,9 s | 36,6 s (duas entidades) |
+| Leitura global: associados alcançados | 1000 de 50 mil (janela) | 50 mil de 50 mil (5,0 s, a leitura inteira) | 100 mil de 100 mil (19,1 s) |
+| Busca de uma membra (40 contatos), no pedido | 8,0 s, incompleta | 5,0 s (31 conexões, 10 com associados) | 10,0 s (31 conexões, 20 com associados) |
+| Busca da base inteira da entidade | 6,9 s no pedido, parou no orçamento (100 conexões, uma fração da base) | fila: 251 lotes em 63,5 s, completa, 14.499 conexões | fila: 251 lotes em 28 min (com a outra entidade de 50 mil do outro lado), completa, 9.978 conexões |
+| Motor privado na conta da entidade | 786 milhões de pares; estimativa de 6,5 a 16,5 h (13 a 33 mil pares/s), dentro do pedido | fila: 205 s, 66.660 sugestões, pico de 1,44 GB no processo do teste | fila: 207 s, 66.660 sugestões, pico de 1,47 GB |
+| Resumo do Meu Network da entidade | 0,25 s, 29 MB de heap | 0,62 s, 65 MB de heap, em páginas | 0,62 s, 63 MB de heap |
+| Motor de perfis, uma rodada (50 mil / 100 mil usuárias) | — | 1,2 s, memória estável (500 perfis por página) | 2,5 s, memória estável |
+| Tamanho no banco (dados + índices) | — | 454 MB | 652 MB |
+
+Leitura das medidas:
+
+- **A busca de uma membra fica incompleta** pelo teto de sempre: 10 conexões por contraparte
+  numa rodada (`TETO_POR_CONTRAPARTE_POR_RODADA`), e a entidade é UMA dona. Com isso, a membra
+  vê no máximo 10 associados de uma entidade por busca (os de nota maior, quase sempre os
+  mesmos). O teto protege a dona de ser inundada; para a entidade, a inundação é o produto.
+  Contar a contraparte por associado é decisão de produto (próximos passos).
+- **O motor privado em massa** cabe em 2 GB, mas com pouca folga: o pico do processo do teste
+  foi 1,44 GB, sobre uma base de 0,85 GB do próprio teste (o vitest e as 50 mil linhas da
+  planilha na memória); o acréscimo do recálculo foi de cerca de 0,6 GB.
+- **A busca de uma membra cresce com a rede:** 5 s com 50 mil associados, 10 s com 100 mil,
+  dentro do pedido. Quase todo o tempo é `scoreMatch` nos candidatos que o índice traz (o
+  vocabulário da medida é denso) e a leitura deles. Cabe hoje; é o primeiro a ir para a fila
+  se a rede passar de 50 mil (próximos passos).
+- **A busca de uma entidade diante de outra entidade grande é lenta:** com 50 mil de cada
+  lado, a base de uma entidade levou 28 min na fila (uns 30 associados por segundo), contra
+  63 s quando do outro lado só havia contas comuns. Roda fora do pedido, mas ocupa a CPU única
+  esse tempo todo.
+- **O motor de perfis não é quadrático numa rodada**: cada rodada lê todos os perfis em
+  páginas de 500, pela ordem do id, e guarda só as 100 melhores (1,2 s com 50 mil). O custo
+  quadrático aparece se TODAS as contas regenerarem: 50 mil rodadas de 1,2 s são uns 17 h de
+  CPU. Hoje a rodada é por conta, quando a dona pede ou muda o perfil; o "buscar" em massa
+  pela fila é o próximo passo, se as contas ativadas regenerarem juntas.
+
+### Cabe no que temos em produção?
+
+- **Disco (Aiven Developer-1, 8 GB):** sim. 454 MB para 50 mil associados e 50 mil usuárias,
+  com as conexões e sugestões da carga; 652 MB para 100 mil. O que mais cresce é o índice
+  (≈ 6 chaves por item, 96 MB a 50 mil) e o registro de conexões. Sobra para áudio? O áudio
+  vai ao Backblaze, não ao banco.
+- **Memória do banco (1 GB):** o conjunto quente (índice, itens, contatos) a 50 mil é de uns
+  300 MB e cabe no buffer do InnoDB; a 100 mil, encosta. Acima disso, Aiven com 2 GB.
+- **CPU (1 CPU no Aiven e no Render):** a busca na rede e o motor privado da entidade rodam na
+  fila, em lotes, e devolvem a vez ao servidor, mas a CPU é uma só: durante os 205 s do
+  recálculo privado de uma entidade de 50 mil (e os 28 min da busca de uma entidade diante de
+  outra de 50 mil), o servidor fica mais lento para todas. Para a
+  primeira carga real, uma janela de pouco uso; com várias entidades grandes, Render com 2
+  CPUs ou um worker à parte.
+- **Memória do servidor (Render, 2 GB):** cabe, com a ressalva do motor privado em massa
+  (acima). Não rodar dois recálculos em massa ao mesmo tempo: a fila roda um lote por vez.
+
+### Próximos passos, com a medida que os motiva
+
+1. **Teto por contraparte na entidade:** contar a contraparte por associado, e não pela conta
+   da entidade, para a membra ver mais de 10 associados por busca (medida: 10 de 31 conexões).
+   Decisão de produto.
+2. **Índice para os perfis de membras:** a busca global ainda lê no máximo 1000 perfis
+   (`TETO_DE_MEMBROS`, agora em ordem de id); com 50 mil usuárias, os perfis acima do id
+   1000 não entram no `NETWORK_PLATFORM_MATCH`. O mesmo índice, com o perfil como item.
+3. **Oportunidades × perfis** (`routers/matching.ts`): lê 200 perfis sem ordem para sugerir a
+   oportunidade; com 50 mil usuárias, a escolha fica no acaso do banco.
+4. **Motor privado em massa:** escolher os 20 pares de nota maior por contato, e não os
+   primeiros; e registrar as conexões internas em lote (hoje uma a uma, boa parte dos 205 s).
+5. **Motor de perfis para todas:** se as contas ativadas pela N3 regenerarem juntas, levar o
+   "buscar" à fila (17 h de CPU a 50 mil, uma rodada por conta).
+6. **`scoreMatch` custa 30 a 75 µs por par** (13 a 33 mil pares/s): é o que faz a busca de uma
+   membra levar 5 s (10 s com 100 mil). Guardar a análise do termo por rótulo, como as chaves
+   já fazem, e levar a busca da membra à fila quando os candidatos passarem de um teto.
+7. **Entidade × entidade:** 28 min por base de 50 mil quando outra entidade grande está do
+   outro lado. Ler os candidatos de cada chave uma vez por trabalho (e não a cada lote) e
+   pontuar só os pares de itens com chave em comum.
+8. `listarPrataParaReavaliacao` (`db.ts`) lê todas as contas Prata de uma vez: é o script da
+   reavaliação única, roda uma vez; paginar se voltar a rodar com 50 mil contas.
+9. **O critério semântico estreito (N7) não passa pelo índice:** ele casa paráfrase sem
+   palavra em comum, que nenhuma chave léxica acha. Desligado por padrão
+   (`MATCH_SEMANTICO_ESTREITO`), nada muda; ligado, o par só por semântica não aparece no
+   motor privado em massa (a busca global já não o usava). Ligar com a base grande pede um
+   índice de vetores.
 
 ## 9. O convite ao app
 
@@ -317,14 +447,16 @@ Leitura técnica do fluxo, para orientar as perguntas. Não é parecer.
 1. **N8** `chore/rede-de-teste-com-armadilhas`: 30 mil empresas sintéticas com CNAE, só no
    banco local, para medir.
 2. **N4** `feat/cnae-como-oferta`: a tabela da CNAE do IBGE e as ofertas com origem
-   "cnae" (seção 4). **N4b** `feat/indice-de-cruzamento`: o índice invertido e a fila; troca
-   o teto de 1000 da leitura global pelo índice. **Antes da primeira carga real.**
+   "cnae" (seção 4). **N4b** `feat/n4b-escala-das-entidades`: o índice invertido, a leitura
+   global paginada, a fila e o Meu Network paginado, com o teto de 50 mil associados por
+   entidade e as medidas de 50 e 100 mil (seção 8). Os próximos passos medidos estão no fim
+   da seção 8.
 3. **N2** `feat/assoc-n2`: o pedido de contato pela entidade. Feita: seção 12. Os textos
    seguem marcados para a Cris, e as pendências a, d e g seguem com o Dr. Ronei.
 4. ~~`fix/motor-de-perfis-sem-teto-de-50`~~: já estava feito na `main` (seção 8). A **N3** (`feat/assoc-n3`, a ativação do cadastro
    importado) já está desenhada e feita: seção 9a.
 
-**A primeira carga real é operação, não PR:** depois da N4b, com o convênio assinado e as
+**A primeira carga real é operação, não PR:** com a N4b na `main`, o convênio assinado e as
 pendências a, b e e respondidas. Ensaio, leitura do relatório, e só então a importação.
 
 ## 12. O pedido de contato pela entidade (N2)

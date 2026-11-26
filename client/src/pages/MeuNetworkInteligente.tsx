@@ -148,7 +148,9 @@ export default function MeuNetworkInteligente() {
   const conexoes = trpc.networkInteligente.conexoes.useQuery();
   const procurar = trpc.networkInteligente.procurarNaRedeGlobal.useMutation({
     onSuccess: r => {
-      if (!r.contatosDisponiveis) toast.info(t("networkInteligente.global.noneAvailable"));
+      // A conta com muitos contatos (a entidade, N4b): a busca vai para a fila do servidor e roda em lotes.
+      if (r.emFila) toast.info(t("networkInteligente.global.queued", { quantidade: r.contatosDisponiveis.toLocaleString() }));
+      else if (!r.contatosDisponiveis) toast.info(t("networkInteligente.global.noneAvailable"));
       else if (r.conexoes.length) toast.success(t("networkInteligente.global.found", { quantidade: r.conexoes.length }));
       else toast.info(t("networkInteligente.global.noneFound"));
       void utils.networkInteligente.conexoes.invalidate();

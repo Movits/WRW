@@ -3742,6 +3742,7 @@
       "searching": "Suche läuft…",
       "found": "Gefundene und erfasste Verbindungen: {{quantidade}}.",
       "noneFound": "Derzeit keine neuen Verbindungen mit dem globalen Netzwerk.",
+      "queued": "Die Suche über Ihre {{quantidade}} Kontakte hat begonnen und läuft im Hintergrund. Verbindungen erscheinen hier, sobald sie gefunden werden.",
       "noneAvailable": "Keiner Ihrer Kontakte ist freigegeben. Öffnen Sie einen Kontakt und wählen Sie JA bei „Diesen Kontakt für Chancen im Netzwerk freigeben“.",
       "error": "Suche derzeit nicht möglich."
     },

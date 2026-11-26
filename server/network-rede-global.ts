@@ -1,4 +1,4 @@
-import { and, eq, exists, inArray, isNotNull, isNull, lte, ne, notExists, or } from "drizzle-orm";
+import { and, asc, count, eq, exists, gt, inArray, isNotNull, isNull, lte, ne, notExists, or } from "drizzle-orm";
 import {
   consents, contactAssets, contactNeeds, documentVersions, entidadeMembros, entidades, privateContacts, userProfiles, users,
 } from "../drizzle/schema";
@@ -10,6 +10,8 @@ import { garantirCodigosAnonimos } from "./network-codigo-anonimo";
 import { registrarConexao, type ItemDaConexao } from "./network-registro";
 import { necessidadesEscritasDoPerfil } from "./portao-da-demanda-expressa";
 import { mascararContatosEmTexto } from "../shared/contato-em-texto";
+import { chavesDoContato, podemCasar } from "../shared/chaves-de-cruzamento";
+import { candidatosPelasChaves } from "./indice-de-cruzamento";
 
 /**
  * O network particular diante da rede global — Meu Network Inteligente, spec
@@ -50,15 +52,23 @@ import { mascararContatosEmTexto } from "../shared/contato-em-texto";
 /** O mesmo corte do motor privado (SAVE_THRESHOLD): scoreMatch devolve 0, 45, 60 ou 100. */
 export const LIMIAR_DA_CONEXAO = 50;
 /**
- * Teto de leitura: o cruzamento é uma consulta, não uma exportação da rede.
- * Os contatos das contas de ENTIDADE (a base das associações) têm janela
- * própria: uma entidade com milhares de associados enchia sozinha a janela de
- * 1000 e tirava do cruzamento os contatos de todas as outras donas. O índice
- * invertido da N4b troca as duas janelas (docs/arquitetura/entidades.md, seção 8).
+ * O cruzamento é uma consulta, não uma exportação da rede: desde a N4b ele não
+ * lê a rede inteira, pergunta ao índice (`chaves_de_cruzamento`) quem pode
+ * casar com os contatos de quem procura e lê só esses, pela leitura autorizada
+ * (docs/arquitetura/entidades.md, seção 8). As duas janelas de 1000 (contatos
+ * comuns e de entidades, sem ordem) saíram.
+ *
+ * Os perfis de membras ainda são lidos por página, em ordem de id, até
+ * TETO_DE_MEMBROS: o índice dos perfis fica para a próxima PR (seção 8).
  */
-export const TETO_DE_CONTATOS = 1000;
-export const TETO_DE_CONTATOS_DE_ENTIDADES = 1000;
-const TETO_DE_MEMBROS = 1000;
+export const TETO_DE_MEMBROS = 1000;
+/**
+ * Acima destes contatos disponíveis, a busca vai para a fila (server/fila-de-cruzamento.ts)
+ * e roda em lotes no servidor, fora do pedido: é a conta da entidade, com milhares de associados.
+ */
+export const CONTATOS_DA_BUSCA_NA_HORA = 300;
+/** Contatos de quem procura cruzados por lote da fila. */
+export const CONTATOS_POR_LOTE = 200;
 export const TETO_DE_REGISTROS_POR_RODADA = 100;
 /**
  * Tetos de TRABALHO. O cruzamento é CPU síncrona (scoreMatch par a par) na
@@ -133,13 +143,20 @@ export function projecaoAnonima(contato: ContatoAnonimo): ContatoAnonimo {
   };
 }
 
-async function itensDosContatos(db: Awaited<ReturnType<typeof exigirDb>>, ids: number[]) {
-  if (!ids.length) return { tenho: new Map<number, ItemDeNegocio[]>(), preciso: new Map<number, ItemDeNegocio[]>() };
+/**
+ * Os itens dos contatos lidos. A dona entra no WHERE junto com os ids: as duas
+ * tabelas só têm índice por (dona, contato), e o IN só por contato varria a
+ * tabela inteira a cada página (medido na carga de 50 mil associados, N4b).
+ */
+async function itensDosContatos(db: Awaited<ReturnType<typeof exigirDb>>, contatos: Array<{ id: number; ownerId: string }>) {
+  if (!contatos.length) return { tenho: new Map<number, ItemDeNegocio[]>(), preciso: new Map<number, ItemDeNegocio[]>() };
+  const ids = contatos.map(c => c.id);
+  const donas = Array.from(new Set(contatos.map(c => c.ownerId)));
   const [possui, procura] = await Promise.all([
     db.select({ contactId: contactAssets.contactId, label: contactAssets.tagLabel, category: contactAssets.category })
-      .from(contactAssets).where(inArray(contactAssets.contactId, ids)),
+      .from(contactAssets).where(and(inArray(contactAssets.ownerId, donas), inArray(contactAssets.contactId, ids))),
     db.select({ contactId: contactNeeds.contactId, label: contactNeeds.tagLabel, category: contactNeeds.category })
-      .from(contactNeeds).where(inArray(contactNeeds.contactId, ids)),
+      .from(contactNeeds).where(and(inArray(contactNeeds.ownerId, donas), inArray(contactNeeds.contactId, ids))),
   ]);
   const agrupar = (linhas: Array<{ contactId: number; label: string; category: string | null }>) => {
     const mapa = new Map<number, ItemDeNegocio[]>();
@@ -159,19 +176,72 @@ async function itensDosContatos(db: Awaited<ReturnType<typeof exigirDb>>, ids: n
  * owner e ID anônimo — mais nada. Só entra contato com SIM, com ID anônimo e
  * cuja dona tem o termo do Smart Match vigente. `excetoDona` tira a própria
  * rede de quem pergunta; `somenteDona` lê só a dela (os contatos que ELA
- * disponibilizou, lado de cá do cruzamento).
+ * disponibilizou, lado de cá do cruzamento); `ids` lê só os candidatos que o
+ * índice achou (server/indice-de-cruzamento.ts).
+ *
+ * Paginada e ORDENADA pelo id (N4b): `aPartirDoId` e `limite` dão uma página;
+ * sem `limite`, a função percorre todas as páginas e devolve tudo. Não há mais
+ * janela: os associados de uma entidade com convênio vigente entram todos, como
+ * os contatos das outras donas (antes eram duas janelas de 1000, sem ordem).
  */
-export async function lerRedeGlobalAnonima(opcoes: { excetoDona?: string; somenteDona?: string; contactId?: number } = {}): Promise<ContatoDaRede[]> {
+export async function lerRedeGlobalAnonima(opcoes: OpcoesDaLeitura = {}): Promise<ContatoDaRede[]> {
+  if (opcoes.limite !== undefined) return lerUmaPagina(opcoes, opcoes.limite);
+  let todos: ContatoDaRede[] = [];
+  for await (const pagina of lerRedeGlobalPaginada(opcoes)) todos = todos.concat(pagina);
+  return todos;
+}
+
+type OpcoesDaLeitura = {
+  excetoDona?: string; somenteDona?: string; contactId?: number; ids?: number[];
+  aPartirDoId?: number; limite?: number;
+};
+
+/** Contatos por página da leitura global (o IN dos itens e o da autorização seguem abaixo do teto do MySQL). */
+export const CONTATOS_POR_PAGINA = 1000;
+
+/** Todas as páginas, em ordem de id: a busca grande (a fila) e a medida de carga leem assim. */
+export async function* lerRedeGlobalPaginada(opcoes: Omit<OpcoesDaLeitura, "aPartirDoId" | "limite"> = {}, tamanho = CONTATOS_POR_PAGINA): AsyncGenerator<ContatoDaRede[]> {
+  if (opcoes.ids) {
+    const ids = Array.from(new Set(opcoes.ids)).sort((a, b) => a - b);
+    for (let i = 0; i < ids.length; i += tamanho) {
+      const pagina = await lerUmaPagina({ ...opcoes, ids: ids.slice(i, i + tamanho) }, tamanho);
+      if (pagina.length) yield pagina;
+    }
+    return;
+  }
+  let depoisDe = 0;
+  for (;;) {
+    const { contatos, ultimoId } = await lerPaginaCrua({ ...opcoes, aPartirDoId: depoisDe }, tamanho);
+    if (contatos.length) yield contatos;
+    // A página veio incompleta (a última) ou o id não andou: fim.
+    if (ultimoId === null || !(ultimoId > depoisDe)) return;
+    depoisDe = ultimoId;
+  }
+}
+
+async function lerUmaPagina(opcoes: OpcoesDaLeitura, limite: number): Promise<ContatoDaRede[]> {
+  return (await lerPaginaCrua(opcoes, limite)).contatos;
+}
+
+/**
+ * Uma página: as linhas autorizadas com id depois de `aPartirDoId`, em ordem, e
+ * o último id lido (null quando a página veio incompleta, isto é, acabou).
+ */
+async function lerPaginaCrua(opcoes: OpcoesDaLeitura, limite: number): Promise<{ contatos: ContatoDaRede[]; ultimoId: number | null }> {
   const db = await exigirDb();
   const agora = Date.now();
   // A autorização da dona (conta ativa e termo do Smart Match) e o convênio da entidade
-  // filtram NO SQL, ANTES do teto: filtrados depois, as 1000 linhas da janela podiam vir
-  // todas de uma dona sem autorização, ser descartadas, e o cruzamento ficava vazio para
-  // todas as usuárias, sem erro. O filtro em memória abaixo continua como segunda trava.
+  // filtram NO SQL, antes do LIMIT: filtrados depois, a página podia vir inteira de uma
+  // dona sem autorização. O filtro em memória abaixo continua como segunda trava.
   const condicoes = [eq(privateContacts.disponivelRedeGlobal, true), isNotNull(privateContacts.codigoAnonimo), eq(users.isActive, true)];
   if (opcoes.excetoDona) condicoes.push(ne(privateContacts.ownerId, opcoes.excetoDona));
   if (opcoes.somenteDona) condicoes.push(eq(privateContacts.ownerId, opcoes.somenteDona));
   if (opcoes.contactId !== undefined) condicoes.push(eq(privateContacts.id, opcoes.contactId));
+  if (opcoes.ids) {
+    if (!opcoes.ids.length) return { contatos: [], ultimoId: null };
+    condicoes.push(inArray(privateContacts.id, opcoes.ids));
+  }
+  if (opcoes.aPartirDoId) condicoes.push(gt(privateContacts.id, opcoes.aPartirDoId));
   const [termo] = await db.select({ id: documentVersions.id }).from(documentVersions)
     .where(and(eq(documentVersions.type, "termo_smart_match"), eq(documentVersions.isCurrent, true))).limit(1);
   if (termo) {
@@ -179,16 +249,10 @@ export async function lerRedeGlobalAnonima(opcoes: { excetoDona?: string; soment
       eq(consents.userId, users.id), eq(consents.documentVersionId, termo.id), isNull(consents.revokedAt),
     ))));
   }
-  const ler = (extra: ReturnType<typeof and>, teto: number) => db
-    .select({ id: privateContacts.id, ownerId: privateContacts.ownerId, codigoAnonimo: privateContacts.codigoAnonimo })
-    .from(privateContacts)
-    .innerJoin(users, eq(users.openId, privateContacts.ownerId))
-    .where(and(...condicoes, extra))
-    .limit(teto);
-  const [comuns, deEntidades] = await Promise.all([
-    ler(and(eq(users.isEntidade, false)), TETO_DE_CONTATOS),
-    ler(and(
-      eq(users.isEntidade, true),
+  // O contato de conta de ENTIDADE só entra com o convênio vigente e se o associado não ativou a conta.
+  condicoes.push(or(
+    eq(users.isEntidade, false),
+    and(
       // Convênio que não vale hoje (o mesmo corte de convenioVigente: o dia do fim ainda vale).
       notExists(db.select({ um: entidades.id }).from(entidades).where(and(
         eq(entidades.ownerId, privateContacts.ownerId),
@@ -198,10 +262,17 @@ export async function lerRedeGlobalAnonima(opcoes: { excetoDona?: string; soment
       notExists(db.select({ um: entidadeMembros.id }).from(entidadeMembros).where(and(
         eq(entidadeMembros.contactId, privateContacts.id), eq(entidadeMembros.estado, "ativado"),
       ))),
-    ), TETO_DE_CONTATOS_DE_ENTIDADES),
-  ]);
-  const linhas = [...comuns, ...deEntidades];
-  if (!linhas.length) return [];
+    ),
+  )!);
+  const linhas = await db
+    .select({ id: privateContacts.id, ownerId: privateContacts.ownerId, codigoAnonimo: privateContacts.codigoAnonimo })
+    .from(privateContacts)
+    .innerJoin(users, eq(users.openId, privateContacts.ownerId))
+    .where(and(...condicoes))
+    .orderBy(asc(privateContacts.id))
+    .limit(limite);
+  const ultimoId = linhas.length >= limite ? Number(linhas[linhas.length - 1].id) : null;
+  if (!linhas.length) return { contatos: [], ultimoId };
 
   // A dona autoriza o cruzamento pelo termo do Smart Match, conferido agora; conta desativada não entra.
   const donas = await db.select({ id: users.id, openId: users.openId }).from(users)
@@ -215,14 +286,17 @@ export async function lerRedeGlobalAnonima(opcoes: { excetoDona?: string; soment
   const donaAutorizada = new Set(donas.filter(d => autorizadas.has(d.id) && !semConvenio.has(d.openId)).map(d => d.openId));
   const validas = linhas.filter(l => donaAutorizada.has(l.ownerId));
 
-  const { tenho, preciso } = await itensDosContatos(db, validas.map(l => Number(l.id)));
-  return validas.map(linha => ({
-    contactId: Number(linha.id),
-    ownerId: linha.ownerId,
-    codigoAnonimo: linha.codigoAnonimo as string,
-    tenho: tenho.get(Number(linha.id)) ?? [],
-    preciso: preciso.get(Number(linha.id)) ?? [],
-  }));
+  const { tenho, preciso } = await itensDosContatos(db, validas.map(l => ({ id: Number(l.id), ownerId: l.ownerId })));
+  return {
+    ultimoId,
+    contatos: validas.map(linha => ({
+      contactId: Number(linha.id),
+      ownerId: linha.ownerId,
+      codigoAnonimo: linha.codigoAnonimo as string,
+      tenho: tenho.get(Number(linha.id)) ?? [],
+      preciso: preciso.get(Number(linha.id)) ?? [],
+    })),
+  };
 }
 
 type MembroDaRede = { userId: number; tenho: ItemDeNegocio[]; preciso: ItemDeNegocio[] };
@@ -254,6 +328,7 @@ export async function lerMembrosParaCruzamento(excetoUserId: number): Promise<Me
     .from(userProfiles)
     .innerJoin(users, eq(users.id, userProfiles.userId))
     .where(and(ne(userProfiles.userId, excetoUserId), eq(users.isActive, true)))
+    .orderBy(asc(userProfiles.userId))
     .limit(TETO_DE_MEMBROS);
   const comDeclaracao = perfis
     .map(perfil => ({
@@ -337,21 +412,77 @@ export type ConexaoGlobalEncontrada = {
  * global e registra cada conexão relevante. Devolve só o que a dona pode ver:
  * o ID anônimo do contato dela, o tipo e o ID anônimo do outro lado (membra
  * não tem ID anônimo e não é identificada) e os itens que se encontraram.
+ *
+ * Com mais de CONTATOS_DA_BUSCA_NA_HORA contatos disponíveis (a conta da
+ * entidade), a busca vai para a fila e responde `emFila`: os lotes rodam no
+ * servidor (server/fila-de-cruzamento.ts), sem segurar o pedido.
  */
 export async function procurarConexoesNaRedeGlobal(
   quem: { id: number; openId: string },
   opcoes: { contactId?: number } = {},
-): Promise<{ contatosDisponiveis: number; conexoes: ConexaoGlobalEncontrada[]; completa: boolean }> {
+): Promise<{ contatosDisponiveis: number; conexoes: ConexaoGlobalEncontrada[]; completa: boolean; emFila?: boolean }> {
   // A vaga é reservada antes de qualquer await: uma rajada (ou um lote do httpBatchLink) não passa inteira.
   tetoDeBuscaNaRedeGlobal.reservar(quem.openId);
   const db = await exigirDb();
   await garantirCodigosAnonimos(quem.openId);
+  if (opcoes.contactId === undefined) {
+    const [contagem] = await db.select({ total: count() }).from(privateContacts).where(and(
+      eq(privateContacts.ownerId, quem.openId), eq(privateContacts.disponivelRedeGlobal, true), isNotNull(privateContacts.codigoAnonimo),
+    ));
+    const disponiveis = Number(contagem?.total) || 0;
+    if (disponiveis > CONTATOS_DA_BUSCA_NA_HORA) {
+      const { enfileirarCruzamento } = await import("./fila-de-cruzamento");
+      await enfileirarCruzamento({ ownerId: quem.openId, userId: quem.id, tipo: "global" });
+      return { contatosDisponiveis: disponiveis, conexoes: [], completa: false, emFila: true };
+    }
+  }
   const meus = await lerRedeGlobalAnonima({ somenteDona: quem.openId, contactId: opcoes.contactId });
   if (!meus.length) return { contatosDisponiveis: 0, conexoes: [], completa: true };
-  const [outros, membros] = await Promise.all([
-    lerRedeGlobalAnonima({ excetoDona: quem.openId }),
-    lerMembrosParaCruzamento(quem.id),
-  ]);
+  const membros = await lerMembrosParaCruzamento(quem.id);
+  const { conexoes, completa } = await cruzarERegistrar(db, quem.openId, meus, membros);
+  return { contatosDisponiveis: meus.length, conexoes, completa };
+}
+
+/**
+ * Um lote da busca grande (a fila): os próximos CONTATOS_POR_LOTE contatos
+ * disponíveis da dona depois de `aPartirDoId`, em ordem de id, cruzados com a
+ * rede pelo índice. `proximoId` null quer dizer que a base acabou.
+ */
+export async function cruzarUmLoteNaRedeGlobal(
+  quem: { id: number; openId: string },
+  aPartirDoId: number,
+  membros?: MembroDaRede[],
+): Promise<{ proximoId: number | null; processados: number; conexoes: number; completa: boolean }> {
+  const db = await exigirDb();
+  const { contatos, ultimoId } = await lerPaginaCrua({ somenteDona: quem.openId, aPartirDoId }, CONTATOS_POR_LOTE);
+  if (!contatos.length) return { proximoId: ultimoId, processados: 0, conexoes: 0, completa: true };
+  const r = await cruzarERegistrar(db, quem.openId, contatos, membros ?? await lerMembrosParaCruzamento(quem.id));
+  return { proximoId: ultimoId, processados: contatos.length, conexoes: r.conexoes.length, completa: r.completa };
+}
+
+/**
+ * O coração da busca: pergunta ao índice quem pode casar com `meus`, lê esses
+ * candidatos pela leitura autorizada e compara só os pares com chave em comum
+ * (`podemCasar`); quem decide cada par é `encontrosEntre` (scoreMatch). Depois
+ * registra, com os tetos por rodada e por contraparte.
+ */
+async function cruzarERegistrar(
+  db: Awaited<ReturnType<typeof exigirDb>>,
+  donaQueProcura: string,
+  meus: ContatoDaRede[],
+  membros: MembroDaRede[],
+): Promise<{ conexoes: ConexaoGlobalEncontrada[]; completa: boolean }> {
+  const chavesDosMeus = meus.map(chavesDoContato);
+  const todas = { tem: new Set<string>(), precisa: new Set<string>() };
+  for (const chaves of chavesDosMeus) {
+    for (const chave of Array.from(chaves.tem)) todas.tem.add(chave);
+    for (const chave of Array.from(chaves.precisa)) todas.precisa.add(chave);
+  }
+  const candidatos = await candidatosPelasChaves(db, todas);
+  const outros: ContatoDaRede[] = [];
+  for await (const pagina of lerRedeGlobalPaginada({ excetoDona: donaQueProcura, ids: candidatos })) outros.push(...pagina);
+  const chavesDosOutros = outros.map(chavesDoContato);
+  const chavesDosMembros = membros.map(chavesDoContato);
 
   // 1) Cruzar, dentro do orçamento, devolvendo a vez ao event loop a cada fatia.
   type Candidata =
@@ -374,15 +505,20 @@ export async function procurarConexoesNaRedeGlobal(
     return true;
   };
 
-  cruzamento: for (const meu of meus) {
-    for (const outro of outros) {
+  cruzamento: for (let i = 0; i < meus.length; i += 1) {
+    const meu = meus[i];
+    for (let j = 0; j < outros.length; j += 1) {
+      const outro = outros[j];
+      if (!podemCasar(chavesDosMeus[i], chavesDosOutros[j])) continue;
       const custo = custoDoPar(meu, outro);
       if (!custo) continue;
       if (!(await cabeNoOrcamento(custo))) break cruzamento;
       const resultado = encontrosEntre(meu, outro);
       if (resultado.pontuacao >= LIMIAR_DA_CONEXAO) candidatas.push({ origem: "NETWORK_NETWORK_MATCH", meu, outro, contraparte: `dona:${outro.ownerId}`, resultado });
     }
-    for (const membro of membros) {
+    for (let k = 0; k < membros.length; k += 1) {
+      const membro = membros[k];
+      if (!podemCasar(chavesDosMeus[i], chavesDosMembros[k])) continue;
       const custo = custoDoPar(meu, membro);
       if (!custo) continue;
       if (!(await cabeNoOrcamento(custo))) break cruzamento;
@@ -433,5 +569,5 @@ export async function procurarConexoesNaRedeGlobal(
       });
     }
   }
-  return { contatosDisponiveis: meus.length, conexoes, completa };
+  return { conexoes, completa };
 }

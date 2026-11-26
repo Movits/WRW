@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ASSOCIADOS_MAX_ATE_N4B, linhasComProblema, ordenarProblemas, passaDoTeto, type ProblemaDaLinha } from "../shared/entidades";
+import { ASSOCIADOS_MAX_POR_ENTIDADE, linhasComProblema, ordenarProblemas, passaDoTeto, type ProblemaDaLinha } from "../shared/entidades";
 
 /**
  * O relatório da importação na tela da entidade (conferência de tela, 25/11):
@@ -22,9 +22,13 @@ describe("relatório da importação", () => {
     ]);
   });
 
-  it("o teto: até ASSOCIADOS_MAX_ATE_N4B entra; um a mais passa", () => {
-    expect(passaDoTeto(ASSOCIADOS_MAX_ATE_N4B - 10, 10)).toBe(false);
-    expect(passaDoTeto(ASSOCIADOS_MAX_ATE_N4B - 10, 11)).toBe(true);
-    expect(passaDoTeto(0, 1100)).toBe(true);
+  it("o teto: até ASSOCIADOS_MAX_POR_ENTIDADE entra; um a mais passa", () => {
+    expect(passaDoTeto(ASSOCIADOS_MAX_POR_ENTIDADE - 10, 10)).toBe(false);
+    expect(passaDoTeto(ASSOCIADOS_MAX_POR_ENTIDADE - 10, 11)).toBe(true);
+    // N4b: o teto subiu de 1000 para 50 mil por entidade (a meta é 50 mil associados no app inteiro, e uma
+    // entidade grande pode ter dezenas de milhares). A base de 30 mil da reunião de 11/11 cabe inteira.
+    expect(ASSOCIADOS_MAX_POR_ENTIDADE).toBe(50_000);
+    expect(passaDoTeto(0, 30_000)).toBe(false);
+    expect(passaDoTeto(0, 50_001)).toBe(true);
   });
 });

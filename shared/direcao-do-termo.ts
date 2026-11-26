@@ -832,6 +832,25 @@ export function mesmoObjetoAMenosDoLugar(objetoA: string, objetoB: string): bool
 }
 
 /**
+ * As SUBSTÂNCIAS de um termo, para o índice de cruzamento (N4b,
+ * shared/chaves-de-cruzamento.ts): o objeto (sem o verbo de direção), o núcleo
+ * (atravessada a cabeça transparente) e os dois sem o qualificador de lugar do
+ * fim. São exatamente o que `nomeiamAMesmaCoisa` compara por igualdade: duas
+ * pontas que ela aceita têm ao menos uma substância em comum. Não decide nada
+ * (as guardas de lugar e de concorrência continuam lá); só acha candidatos.
+ */
+export function substanciasDoTermo(rotulo: string): string[] {
+  const substancias = new Set<string>();
+  for (const termo of [analisarTermo(rotulo).objeto, nucleoDoTermo(rotulo)]) {
+    if (!termo) continue;
+    substancias.add(termo);
+    const { base } = separarLugaresDoFim(termo);
+    if (base) substancias.add(base);
+  }
+  return Array.from(substancias);
+}
+
+/**
  * As duas pontas nomeiam a MESMA coisa? É a equivalência que o motor privado
  * (`scoreMatch`) sempre usou depois do slug: mesmo objeto (tirado o verbo de
  * direção e os marcadores fracos) ou mesmo núcleo (atravessada a cabeça

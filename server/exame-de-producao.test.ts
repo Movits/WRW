@@ -641,7 +641,8 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // 88: os 85, mais os espaços de equipe (R2): meeting_folder_members.owner_id e
     // userId, e meeting_folder_tasks.owner_id; com a conta Google (A8, contas_google.userId), 89.
     // 95: os 89 das associações somados aos 6 das reuniões, das equipes e da conta Google.
-    expect(paresDeUsuariaNoSchema).toHaveLength(95);
+    // 97: os 95, mais o índice e a fila do cruzamento (N4b): chaves_de_cruzamento.owner_id e fila_de_cruzamento.owner_id.
+    expect(paresDeUsuariaNoSchema).toHaveLength(97);
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_members", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_members", coluna: "userId" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_tasks", coluna: "owner_id" });

@@ -3742,6 +3742,7 @@
       "searching": "Recherche…",
       "found": "Connexions trouvées et enregistrées : {{quantidade}}.",
       "noneFound": "Aucune nouvelle connexion avec le réseau mondial pour le moment.",
+      "queued": "La recherche sur vos {{quantidade}} contacts a commencé et se poursuit en arrière-plan. Les connexions apparaissent ici au fur et à mesure.",
       "noneAvailable": "Aucun de vos contacts n'est disponible. Ouvrez un contact et choisissez OUI dans « Rendre ce contact disponible pour les opportunités du réseau ».",
       "error": "Impossible de rechercher pour le moment."
     },

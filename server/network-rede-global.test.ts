@@ -74,8 +74,8 @@ function redeDeTeste(opcoes: {
     new Set(ids.filter(id => !(opcoes.outraSemTermo && id === 20))));
   estado.responder = (sql, params) => {
     if (/from `private_contacts`/.test(sql) && /is null/.test(sql)) return []; // garantirCodigosAnonimos
-    // A janela das contas de entidade (a que traz o not exists do convênio): sem entidade nesta rede.
-    if (/from `private_contacts`/.test(sql) && /not exists/.test(sql)) return [];
+    // O índice de cruzamento (N4b): o contato 2 da outra dona é o candidato de tudo o que a dona procura.
+    if (/from `chaves_de_cruzamento`/.test(sql)) return [[2]];
     if (/from `private_contacts`/.test(sql) && /`ownerId` <> \?/.test(sql)) return [[2, OUTRA, "NW-BBBBBB"]];
     if (/from `private_contacts`/.test(sql)) return [[1, DONA, "NW-AAAAAA"]];
     if (/from `users`/.test(sql)) return opcoes.outraInativa && filtraAtivas(sql) ? [[10, DONA]] : [[10, DONA], [20, OUTRA]];
@@ -123,8 +123,8 @@ describe("rede global — privacidade é regra de consulta", () => {
     redeDeTeste();
     await lerRedeGlobalAnonima({ excetoDona: DONA });
     const leituras = estado.consultas.filter(c => /from `private_contacts`/.test(c.sql));
-    // Duas janelas: a das donas comuns e a das contas de entidade.
-    expect(leituras).toHaveLength(2);
+    // Uma leitura só, paginada e em ordem de id (N4b): as duas janelas de 1000 saíram.
+    expect(leituras).toHaveLength(1);
     for (const leitura of leituras) {
       expect(leitura.sql).toMatch(/^select `private_contacts`\.`id`, `private_contacts`\.`ownerId`, `private_contacts`\.`codigo_anonimo` from `private_contacts`/);
       expect(leitura.sql).toContain("`private_contacts`.`disponivel_rede_global` = ?");
@@ -133,7 +133,7 @@ describe("rede global — privacidade é regra de consulta", () => {
     }
   });
 
-  it("a autorização da dona filtra no SQL, antes do teto; a entidade tem janela própria, sem convênio vencido nem associado ativado", async () => {
+  it("a autorização da dona filtra no SQL, antes do limit da página; o contato de entidade só com convênio vigente e sem associado ativado", async () => {
     redeDeTeste();
     estado.responder = (sql) => {
       if (/from `document_versions`/.test(sql)) return [["termo-vigente"]];
@@ -141,19 +141,20 @@ describe("rede global — privacidade é regra de consulta", () => {
     };
     await lerRedeGlobalAnonima({ excetoDona: DONA });
     const leituras = estado.consultas.filter(c => /from `private_contacts`/.test(c.sql));
-    expect(leituras).toHaveLength(2);
+    expect(leituras).toHaveLength(1);
     for (const leitura of leituras) {
-      // A conta ativa e o termo do Smart Match entram ANTES do limit (sem isto, a janela vinha de donas descartadas depois).
+      // A conta ativa e o termo do Smart Match entram ANTES do limit (sem isto, a página vinha de donas descartadas depois).
       const antesDoLimit = leitura.sql.slice(0, leitura.sql.lastIndexOf(" limit "));
       expect(antesDoLimit).toContain("`users`.`isActive` = ?");
       expect(antesDoLimit).toMatch(/exists \(select .* from `consents`/);
       expect(leitura.params).toContain("termo-vigente");
     }
-    const [comuns, deEntidades] = leituras;
-    expect(comuns.sql).toContain("`users`.`isEntidade` = ?");
-    expect(comuns.sql).not.toContain("not exists");
-    expect(deEntidades.sql).toMatch(/not exists \(select .* from `entidades`/);
-    expect(deEntidades.sql).toMatch(/not exists \(select .* from `entidade_membros`/);
+    const [leitura] = leituras;
+    expect(leitura.sql).toContain("`users`.`isEntidade` = ?");
+    expect(leitura.sql).toMatch(/not exists \(select .* from `entidades`/);
+    expect(leitura.sql).toMatch(/not exists \(select .* from `entidade_membros`/);
+    // Paginada e ordenada (N4b): a leitura alcança todos, página a página, sem janela.
+    expect(leitura.sql).toMatch(/order by `private_contacts`\.`id` asc limit \?$/);
   });
 
   it("a projeção que pode sair tem só ID anônimo, O que tenho e O que preciso", async () => {
@@ -386,6 +387,9 @@ describe("rede global — tetos de trabalho", () => {
   /**
    * Uma dona com muitos contatos diante de muitos contatos de outras donas. Os
    * contatos alheios antes de `casamAPartirDe` não casam com nada; os de depois casam.
+   * Os que não casam têm chave em comum com a dona ("Exportar café" dos dois
+   * lados) e são concorrentes: o índice os traz como candidatos (N4b) e
+   * scoreMatch os zera, então eles gastam o orçamento sem virar conexão.
    */
   function redeGrande(opcoes: { meus: number; outros: number; donasDosOutros: number; itensPorContato: number; casamAPartirDe?: number }) {
     const meusIds = Array.from({ length: opcoes.meus }, (_, i) => i + 1);
@@ -397,7 +401,7 @@ describe("rede global — tetos de trabalho", () => {
     const naoCasam = (ids: number[]) => ids.filter(id => id >= 10_000 && id < 10_000 + (opcoes.casamAPartirDe ?? 0));
     estado.responder = (sql, params) => {
       if (/from `private_contacts`/.test(sql) && /is null/.test(sql)) return [];
-      if (/from `private_contacts`/.test(sql) && /not exists/.test(sql)) return [];
+      if (/from `chaves_de_cruzamento`/.test(sql)) return outrosIds.map(id => [id]);
       if (/from `private_contacts`/.test(sql) && /`ownerId` <> \?/.test(sql)) return outrosIds.map(id => [id, donaDe(id), `NW-${id}`]);
       if (/from `private_contacts`/.test(sql)) return meusIds.map(id => [id, DONA, `NW-${id}`]);
       if (/from `users`/.test(sql)) {
@@ -406,10 +410,10 @@ describe("rede global — tetos de trabalho", () => {
       }
       const ids = params.filter((p): p is number => typeof p === "number");
       if (/from `contact_assets`/.test(sql)) {
-        return [...itens(meusDe(ids), "Distribuição de medicamentos"), ...itens(casam(ids), "Capital para expansão"), ...itens(naoCasam(ids), "Parafusos industriais")];
+        return [...itens(meusDe(ids), "Distribuição de medicamentos"), ...itens(casam(ids), "Capital para expansão"), ...itens(naoCasam(ids), "Exportar café")];
       }
       if (/from `contact_needs`/.test(sql)) {
-        return [...itens(meusDe(ids), "Capital para expansão"), ...itens(casam(ids), "Distribuição de medicamentos"), ...itens(naoCasam(ids), "Tinta acrílica")];
+        return [...itens(meusDe(ids), "Exportar café"), ...itens(casam(ids), "Distribuição de medicamentos"), ...itens(naoCasam(ids), "Tinta acrílica")];
       }
       if (/from `user_profiles`/.test(sql)) return [];
       if (/from `conexoes_registradas`/.test(sql)) return [[`conexao-${estado.consultas.length}`]];

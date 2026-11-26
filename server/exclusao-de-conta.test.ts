@@ -125,7 +125,8 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // 88: os 85, mais os espaços de equipe (R2): meeting_folder_members.owner_id e
     // userId, e meeting_folder_tasks.owner_id; com a conta Google (A8, contas_google.userId), 89.
     // 95: os 89 das associações somados aos 6 das reuniões, das equipes e da conta Google.
-    expect(PARES).toHaveLength(95);
+    // 97: os 95, mais o índice e a fila do cruzamento (N4b): chaves_de_cruzamento.owner_id e fila_de_cruzamento.owner_id.
+    expect(PARES).toHaveLength(97);
     expect(PARES).toContainEqual({ tabela: "meeting_folder_members", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "meeting_folder_members", coluna: "userId" });
     expect(PARES).toContainEqual({ tabela: "meeting_folder_tasks", coluna: "owner_id" });

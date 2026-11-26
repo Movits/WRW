@@ -15,7 +15,7 @@ const {
 } = await import("../drizzle/schema");
 const { lerRedeGlobalAnonima } = await import("./network-rede-global");
 const { appRouter } = await import("./routers");
-const { ASSOCIADOS_MAX_ATE_N4B } = await import("../shared/entidades");
+const { ASSOCIADOS_MAX_POR_ENTIDADE } = await import("../shared/entidades");
 
 /**
  * Os achados da revisão do pacote da base das associações, contra um banco
@@ -159,11 +159,11 @@ describe.skipIf(!temBanco)("Base das associações: achados da revisão (integra
     await db.delete(contactAssets).where(eq(contactAssets.ownerId, ENTIDADE));
   });
 
-  it("até a N4b, o aplicar recusa a base acima do teto; o ensaio lê o arquivo inteiro", async () => {
+  it("o aplicar recusa a base acima do teto (50 mil desde a N4b); o ensaio lê o arquivo inteiro", async () => {
     const rota = daEntidade();
-    await expect(rota.entidades.iniciarImportacao({ modo: "aplicar", arquivoSha256: "e".repeat(64), totalLinhas: ASSOCIADOS_MAX_ATE_N4B + 1 }))
+    await expect(rota.entidades.iniciarImportacao({ modo: "aplicar", arquivoSha256: "e".repeat(64), totalLinhas: ASSOCIADOS_MAX_POR_ENTIDADE + 1 }))
       .rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: "BASE_ACIMA_DO_TETO" });
-    const ensaio = await rota.entidades.iniciarImportacao({ modo: "ensaio", arquivoSha256: "e".repeat(64), totalLinhas: ASSOCIADOS_MAX_ATE_N4B + 1 });
+    const ensaio = await rota.entidades.iniciarImportacao({ modo: "ensaio", arquivoSha256: "e".repeat(64), totalLinhas: ASSOCIADOS_MAX_POR_ENTIDADE + 1 });
     expect(ensaio.importacaoId).toBeGreaterThan(0);
     await rota.entidades.concluirImportacao({ importacaoId: ensaio.importacaoId });
 
@@ -171,16 +171,18 @@ describe.skipIf(!temBanco)("Base das associações: achados da revisão (integra
     const db = (await getDb())!;
     const [entidade] = await db.select({ id: entidades.id }).from(entidades).where(eq(entidades.ownerId, ENTIDADE));
     const agora = Date.now();
-    await db.insert(entidadeMembros).values(Array.from({ length: ASSOCIADOS_MAX_ATE_N4B }, (_, i) => ({
+    // 50 mil linhas desde a N4b: em lotes de 2000 (o INSERT único passava do teto de parâmetros do MySQL).
+    const cheia = Array.from({ length: ASSOCIADOS_MAX_POR_ENTIDADE }, (_, i) => ({
       ownerId: ENTIDADE, entidadeId: entidade.id, contactId: null, paisDocumento: "BR", tipoDocumento: "cnpj",
       documentoHmac: crypto.createHash("sha256").update(`cheio-${sufixo}-${i}`).digest("hex"), estado: "importado" as const,
       createdAt: agora, updatedAt: agora,
-    })));
+    }));
+    for (let i = 0; i < cheia.length; i += 2000) await db.insert(entidadeMembros).values(cheia.slice(i, i + 2000));
     await expect(importar("aplicar", [{ documento: doc(2), nome: "Empresa que não cabe", o_que_tem: "Frete" }]))
       .rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: "BASE_ACIMA_DO_TETO" });
     expect(await db.select().from(privateContacts).where(eq(privateContacts.ownerId, ENTIDADE))).toHaveLength(0);
     await db.delete(entidadeMembros).where(and(eq(entidadeMembros.ownerId, ENTIDADE), eq(entidadeMembros.estado, "importado")));
-  });
+  }, 120_000);
 
   it("uma entidade com mais de 1000 contatos disponíveis não tira da leitura global os contatos das outras donas", async () => {
     const db = (await getDb())!;

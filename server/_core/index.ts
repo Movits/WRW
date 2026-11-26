@@ -439,17 +439,22 @@ async function startServer() {
   // a varredura das gravações vencidas (server/varredura-de-gravacoes.ts): tira
   // do bucket, com todas as versões, o áudio de reunião que passou dos 30 dias,
   // já no boot (sem atrasar o listen, que já foi chamado aqui) e de 5 em 5 min.
+  // O quinto é a fila do cruzamento grande (N4b, server/fila-de-cruzamento.ts):
+  // a busca na rede global e o motor privado da conta com milhares de contatos,
+  // em lotes, e o índice de cruzamento em dia.
   // Sem banco (dev sem DATABASE_URL), nenhum liga.
   if (process.env.DATABASE_URL) {
     const { iniciarFila, pararFila } = await import("../fila-de-transcricao");
     const { iniciarFilaDoResumo, pararFilaDoResumo } = await import("../fila-do-resumo");
     const { iniciarVarreduraDeGravacoes, pararVarreduraDeGravacoes } = await import("../varredura-de-gravacoes");
     const { iniciarLembretes, pararLembretes } = await import("../lembretes");
+    const { iniciarFilaDeCruzamento, pararFilaDeCruzamento } = await import("../fila-de-cruzamento");
     const { descreverErroDeBanco } = await import("../banco-indisponivel");
     iniciarFila();
     iniciarFilaDoResumo();
     iniciarVarreduraDeGravacoes();
     iniciarLembretes();
+    iniciarFilaDeCruzamento();
     // Desligamento: o Render manda SIGTERM no deploy; no dev, o Ctrl+C é
     // SIGINT. Os três laços param de reservar e devolvem as reservas desta
     // instância ANTES de o processo sair, para o próximo retomar na hora (e não
@@ -474,6 +479,9 @@ async function startServer() {
         pararLembretes()
           .then(r => console.log(`[Lembretes] devolvidos: ${r.lembretes} lembrete(s).`))
           .catch(erro => console.error("[Lembretes] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
+        pararFilaDeCruzamento()
+          .then(r => console.log(`[Cruzamento] devolvidos: ${r.trabalhos} trabalho(s).`))
+          .catch(erro => console.error("[Cruzamento] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
       ]).finally(() => {
           server.close(() => process.exit(0));
           // Conexão presa não segura o processo: o Render mata em 30 s de todo jeito.

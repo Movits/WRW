@@ -149,6 +149,9 @@ export function motivoAnonimo(sugestao: {
   };
 }
 
+/** Valores por IN: o MySQL recusa consulta com mais de 65535 parâmetros. */
+const FATIA_DO_IN = 1000;
+
 /**
  * Registra toda sugestão do motor privado (ai_match_suggestions) desta dona
  * que ainda não está no registro — origem PRIVATE_NETWORK_MATCH. Todas contam
@@ -172,17 +175,23 @@ export async function sincronizarConexoesInternas(ownerId: string): Promise<numb
   const participanteDe = (contactId: number, codigo: string | null): ParticipanteParaRegistro =>
     ({ tipo: "contato", ownerId, contactId: Number(contactId), codigoAnonimo: codigo, originador: false });
   const chaves = sugestoes.map(s => chaveDoPar("PRIVATE_NETWORK_MATCH", participanteDe(s.contactAId, null), participanteDe(s.contactBId, null)));
-  const jaRegistradas = new Set((await db.select({ chave: conexoesRegistradas.chaveDoPar }).from(conexoesRegistradas)
-    .where(inArray(conexoesRegistradas.chaveDoPar, chaves))).map(linha => linha.chave));
+  // Em fatias: na conta da entidade (N4b) as sugestões passam de dezenas de milhares, e o IN tem teto de parâmetros.
+  const jaRegistradas = new Set<string>();
+  for (let i = 0; i < chaves.length; i += FATIA_DO_IN) {
+    for (const linha of await db.select({ chave: conexoesRegistradas.chaveDoPar }).from(conexoesRegistradas)
+      .where(inArray(conexoesRegistradas.chaveDoPar, chaves.slice(i, i + FATIA_DO_IN)))) jaRegistradas.add(linha.chave);
+  }
   const faltando = sugestoes.filter((_, indice) => !jaRegistradas.has(chaves[indice]));
   if (!faltando.length) return 0;
 
   await garantirCodigosAnonimos(ownerId);
   const ids = Array.from(new Set(faltando.flatMap(s => [Number(s.contactAId), Number(s.contactBId)])));
-  const codigos = new Map((await db.select({ id: privateContacts.id, codigo: privateContacts.codigoAnonimo })
-    .from(privateContacts)
-    .where(and(eq(privateContacts.ownerId, ownerId), inArray(privateContacts.id, ids))))
-    .map(linha => [Number(linha.id), linha.codigo]));
+  const codigos = new Map<number, string | null>();
+  for (let i = 0; i < ids.length; i += FATIA_DO_IN) {
+    for (const linha of await db.select({ id: privateContacts.id, codigo: privateContacts.codigoAnonimo })
+      .from(privateContacts)
+      .where(and(eq(privateContacts.ownerId, ownerId), inArray(privateContacts.id, ids.slice(i, i + FATIA_DO_IN))))) codigos.set(Number(linha.id), linha.codigo);
+  }
 
   let registradas = 0;
   for (const sugestao of faltando) {
