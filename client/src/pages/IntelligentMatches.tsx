@@ -121,16 +121,23 @@ export default function IntelligentMatches() {
   const [contactId, setContactId] = useState("");
   const [tagLabel, setTagLabel] = useState("");
   const [category, setCategory] = useState("");
+  // A conta grande (mais de 2000 contatos, a entidade) recalcula pela fila do servidor: a resposta vem com
+  // emFila e total 0, e anunciar "0 oportunidades analisadas" seria mentira (N4b).
   const recalculate = trpc.intelligentMatches.recalculate.useMutation({
-    onSuccess: result => { utils.intelligentMatches.list.invalidate(); toast.success(t("intelligentMatches.toastRecalculado", { total: result.total })); },
+    onSuccess: result => {
+      utils.intelligentMatches.list.invalidate();
+      if ("emFila" in result && result.emFila) toast.info(t("intelligentMatches.recalculoNaFila"));
+      else toast.success(t("intelligentMatches.toastRecalculado", { total: result.total }));
+    },
     onError: error => toast.error(error.message || t("intelligentMatches.erroAtualizarMatches")),
   });
   const createAsset = trpc.intelligentMatches.addAsset.useMutation({ onSuccess: refresh });
   const createNeed = trpc.intelligentMatches.addNeed.useMutation({ onSuccess: refresh });
-  const aposRemover = () => {
+  const aposRemover = (result: { emFila?: boolean }) => {
     utils.intelligentMatches.list.invalidate();
     utils.intelligentMatches.contacts.invalidate();
-    toast.success(t("intelligentMatches.toastItemRemovido"));
+    if (result.emFila) toast.info(t("intelligentMatches.alteracaoNaFila"));
+    else toast.success(t("intelligentMatches.toastItemRemovido"));
   };
   const removeAsset = trpc.intelligentMatches.removeAsset.useMutation({
     onSuccess: aposRemover,
@@ -142,11 +149,12 @@ export default function IntelligentMatches() {
   });
   const updateStatus = trpc.intelligentMatches.updateStatus.useMutation({ onSuccess: () => utils.intelligentMatches.list.invalidate() });
 
-  function refresh() {
+  function refresh(result: { emFila?: boolean }) {
     utils.intelligentMatches.list.invalidate();
     utils.intelligentMatches.contacts.invalidate();
     setTagLabel(""); setCategory("");
-    toast.success(kind === "asset" ? t("intelligentMatches.toastOfertaSalva") : t("intelligentMatches.toastNecessidadeSalva"));
+    if (result.emFila) toast.info(t("intelligentMatches.alteracaoNaFila"));
+    else toast.success(kind === "asset" ? t("intelligentMatches.toastOfertaSalva") : t("intelligentMatches.toastNecessidadeSalva"));
   }
   /**
    * Trocar de aba limpa o que foi digitado, mas mantém o contato escolhido.

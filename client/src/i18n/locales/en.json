@@ -2844,6 +2844,8 @@
     "toastRevogado": "Authorization revoked. Cross-referencing has been turned off.",
     "erroRevogar": "Could not revoke.",
     "toastRecalculado": "{{total}} opportunity(ies) analyzed.",
+    "recalculoNaFila": "Your network is large: suggestions are being recalculated in the background and will show up here in a few minutes.",
+    "alteracaoNaFila": "Saved. Your network is large: suggestions are updated in the background and will show up here in a few minutes.",
     "erroAtualizarMatches": "Could not update the suggested connections.",
     "toastItemRemovido": "Item removed and suggestions updated.",
     "erroRemoverItem": "Could not remove the item.",

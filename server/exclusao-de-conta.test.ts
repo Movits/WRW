@@ -128,7 +128,9 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // 97: os 95, mais o perfil de voz (H3d): voice_profiles.owner_id (sai) e
     // voice_profile_consents.owner_id (fica: a prova do consentimento e da revogação).
     // 99: os 97, mais o índice e a fila do cruzamento (N4b): chaves_de_cruzamento.owner_id e fila_de_cruzamento.owner_id.
-    expect(PARES).toHaveLength(99);
+    // 100: os 99, mais fila_de_cruzamento.user_id (o regex não reconhecia user_id; revisão da N4b).
+    expect(PARES).toHaveLength(100);
+    expect(PARES).toContainEqual({ tabela: "fila_de_cruzamento", coluna: "user_id" });
     expect(PARES).toContainEqual({ tabela: "voice_profiles", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "voice_profile_consents", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "chaves_de_cruzamento", coluna: "owner_id" });

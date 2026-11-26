@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, ne, or } from "drizzle-orm";
 import { contactAssets, contactNeeds, privateContacts } from "../drizzle/schema";
 import { exigirDb } from "./db";
+import { indexarContatos } from "./indice-de-cruzamento";
 import { slugifyMatchTag } from "./match-service";
 import { RECUSAS_DO_ITEM_DA_FICHA, type TipoDoItemDaFicha } from "@shared/possui-procura-da-ficha";
 
@@ -56,7 +57,10 @@ export async function acrescentarItemDaFicha(ownerId: string, contactId: number,
 /**
  * Corrige o texto de um item do possui ou do procura. A categoria e a
  * descrição ficam como estão; o slug acompanha o texto novo, e o cruzamento é
- * refeito por quem chama.
+ * refeito por quem chama. As chaves de cruzamento do contato são refeitas na
+ * mesma transação do UPDATE (server/indice-de-cruzamento.ts): a varredura do
+ * índice só acha item sem chave e chave sem item, e o rótulo antigo ficaria no
+ * índice para sempre, com o par do rótulo novo fora da busca na rede global.
  */
 export async function editarItemDaFicha(ownerId: string, id: number, tipo: TipoDoItemDaFicha, texto: string) {
   const { rotulo, slug } = rotuloESlug(texto);
@@ -66,7 +70,10 @@ export async function editarItemDaFicha(ownerId: string, id: number, tipo: TipoD
     .where(and(eq(tabela.id, id), eq(tabela.ownerId, ownerId))).limit(1);
   if (!item) throw new TRPCError({ code: "NOT_FOUND" });
   if (await jaTem(db, tipo, ownerId, item.contactId, slug, rotulo, id)) throw new TRPCError({ code: "CONFLICT", message: RECUSAS_DO_ITEM_DA_FICHA.repetido });
-  await db.update(tabela).set({ tagLabel: rotulo, tagSlug: slug, updatedAt: Date.now() })
-    .where(and(eq(tabela.id, id), eq(tabela.ownerId, ownerId)));
+  await db.transaction(async tx => {
+    await tx.update(tabela).set({ tagLabel: rotulo, tagSlug: slug, updatedAt: Date.now() })
+      .where(and(eq(tabela.id, id), eq(tabela.ownerId, ownerId)));
+    await indexarContatos(tx, ownerId, [item.contactId]);
+  });
   return { id, contactId: item.contactId };
 }

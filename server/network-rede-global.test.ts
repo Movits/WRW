@@ -419,7 +419,7 @@ describe("rede global — tetos de trabalho", () => {
    * lados) e são concorrentes: o índice os traz como candidatos (N4b) e
    * scoreMatch os zera, então eles gastam o orçamento sem virar conexão.
    */
-  function redeGrande(opcoes: { meus: number; outros: number; donasDosOutros: number; itensPorContato: number; casamAPartirDe?: number }) {
+  function redeGrande(opcoes: { meus: number; outros: number; donasDosOutros: number; itensPorContato: number; casamAPartirDe?: number; naoCasamSemChave?: boolean }) {
     const meusIds = Array.from({ length: opcoes.meus }, (_, i) => i + 1);
     const outrosIds = Array.from({ length: opcoes.outros }, (_, i) => 10_000 + i);
     const donaDe = (id: number) => `dona-outra-${(id - 10_000) % opcoes.donasDosOutros}`;
@@ -438,10 +438,10 @@ describe("rede global — tetos de trabalho", () => {
       }
       const ids = params.filter((p): p is number => typeof p === "number");
       if (/from `contact_assets`/.test(sql)) {
-        return [...itens(meusDe(ids), "Distribuição de medicamentos"), ...itens(casam(ids), "Capital para expansão"), ...itens(naoCasam(ids), "Exportar café")];
+        return [...itens(meusDe(ids), "Distribuição de medicamentos"), ...itens(casam(ids), "Capital para expansão"), ...itens(naoCasam(ids), opcoes.naoCasamSemChave ? "Tinta acrílica" : "Exportar café")];
       }
       if (/from `contact_needs`/.test(sql)) {
-        return [...itens(meusDe(ids), "Exportar café"), ...itens(casam(ids), "Distribuição de medicamentos"), ...itens(naoCasam(ids), "Tinta acrílica")];
+        return [...itens(meusDe(ids), "Exportar café"), ...itens(casam(ids), "Distribuição de medicamentos"), ...itens(naoCasam(ids), opcoes.naoCasamSemChave ? "Rolhas de cortiça" : "Tinta acrílica")];
       }
       if (/from `user_profiles`/.test(sql)) return [];
       if (/from `conexoes_registradas`/.test(sql)) return [[`conexao-${estado.consultas.length}`]];
@@ -478,6 +478,16 @@ describe("rede global — tetos de trabalho", () => {
     expect(resposta.conexoes).toEqual([]);
     expect(estado.consultas.some(c => /^insert/.test(c.sql))).toBe(false);
   }, 60_000);
+
+  it("a vez volta ao event loop também nos pares que podemCasar recusa sem comparar (não gastam orçamento, gastam CPU)", async () => {
+    // 100 × 120 pares, nenhum com chave em comum: antes, o laço inteiro corria sem pausa nenhuma.
+    redeGrande({ meus: 100, outros: 120, donasDosOutros: 120, itensPorContato: 1, casamAPartirDe: 120, naoCasamSemChave: true });
+    const pausas = vi.spyOn(globalThis, "setImmediate");
+    const resposta = await procurarConexoesNaRedeGlobal({ id: 10, openId: DONA });
+    expect(resposta.conexoes).toEqual([]);
+    expect(pausas.mock.calls.length).toBeGreaterThanOrEqual(2);
+    pausas.mockRestore();
+  });
 
   it("dentro do orçamento, os mesmos contatos que casam viram conexão (o teto não esconde o que cabe)", async () => {
     redeGrande({ meus: 1, outros: 3, donasDosOutros: 3, itensPorContato: 2 });

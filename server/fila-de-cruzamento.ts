@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
-import { and, asc, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { filaDeCruzamento, users } from "../drizzle/schema";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 import { exigirDb } from "./db";
-import { indexarPendentes, limparOrfas, maioresIdsDosItens } from "./indice-de-cruzamento";
+import { indexarPendentes, indexarPendentesDesde, ITENS_POR_VARREDURA, limparOrfas, maioresIdsDosItens, type MarcaDosItens } from "./indice-de-cruzamento";
 
 /**
  * A fila do cruzamento grande (N4b, docs/arquitetura/entidades.md, seção 8).
@@ -15,17 +15,27 @@ import { indexarPendentes, limparOrfas, maioresIdsDosItens } from "./indice-de-c
  * processo, em lotes, com o laço de `iniciarFilaDeCruzamento`:
  *
  *   - "global": CONTATOS_POR_LOTE contatos por rodada, em ordem de id, com o
- *     cursor gravado; cada lote pergunta ao índice e registra as conexões com
- *     os tetos de sempre por rodada e por contraparte;
+ *     cursor gravado; cada lote pergunta ao índice e registra as conexões. O
+ *     cursor só anda até o último contato cruzado POR INTEIRO (o lote que para
+ *     no orçamento recomeça dele), e os tetos de registro valem pelo TRABALHO
+ *     inteiro, como numa busca só: o total e o por contraparte ficam na linha;
  *   - "privado": o recálculo inteiro numa rodada, já indexado (sem o laço
  *     quadrático) e devolvendo a vez ao servidor no meio.
  *
- * Um trabalho vivo por dona e tipo: o pedido que chega com ele na fila só marca
- * `de_novo`, e ele recomeça do início ao terminar. O termo do Smart Match é
- * conferido na hora de rodar (revogado, o trabalho termina sem cruzar). A
- * reserva (`lock_token`, `locked_until`) vence sozinha se o processo cair; o
- * SIGTERM a devolve. O mesmo laço mantém o índice (`indexarPendentes` e
- * `limparOrfas`).
+ * Um trabalho vivo por dona e tipo, garantido no banco (índice único com
+ * `vivo`): o pedido que chega com ele na fila só marca `de_novo`, e ele recomeça
+ * do início ao terminar. O termo do Smart Match é conferido na hora de rodar
+ * (revogado, o trabalho termina sem cruzar).
+ *
+ * A reserva (`lock_token`, `locked_until`) é curta e renovada enquanto o lote
+ * roda; vence sozinha se o processo cair. Cada reserva conta uma tentativa (zera
+ * quando o lote termina bem): o lote que derruba o processo (falta de memória,
+ * SIGKILL) desiste depois de TENTATIVAS_DO_CRUZAMENTO, em vez de voltar para
+ * sempre. Antes de cada bloco de gravação, o lote confere que a linha e a
+ * reserva ainda são dele (a exclusão da conta apaga a linha; outra instância pode
+ * ter tomado a reserva) e para sem gravar se não forem. O SIGTERM não devolve a
+ * reserva de lote em andamento: encurta-a para depois do fim do processo. O
+ * mesmo laço mantém o índice (`indexarPendentes` e `limparOrfas`).
  */
 
 type Banco = Awaited<ReturnType<typeof exigirDb>>;
@@ -34,11 +44,18 @@ export type TipoDoCruzamento = "global" | "privado";
 /** De quanto em quanto tempo o laço olha a fila. */
 export const INTERVALO_DA_FILA_MS = 2000;
 /**
- * A reserva de um lote: passado isso sem terminar, outra rodada o retoma. O recálculo privado da
- * conta grande é um lote só (e registra as conexões internas uma a uma): 30 minutos de folga.
+ * A reserva de um lote, renovada a cada RENOVACAO_DA_RESERVA_MS enquanto ele roda: passado isso sem
+ * renovar (o processo caiu), outra rodada o retoma. O recálculo privado da conta grande é um lote só
+ * e leva minutos; a renovação é que o segura, não a folga.
  */
-export const RESERVA_DO_LOTE_MS = 30 * 60_000;
-/** Falhas seguidas antes de o trabalho desistir. */
+export const RESERVA_DO_LOTE_MS = 2 * 60_000;
+export const RENOVACAO_DA_RESERVA_MS = 30_000;
+/**
+ * No SIGTERM, a reserva do lote em andamento passa a vencer daqui a isto: depois do fim do processo
+ * antigo (`server/_core/index.ts` sai em até 10 s), para a instância nova não rodar o mesmo lote junto.
+ */
+export const PRAZO_DO_DESLIGAMENTO_MS = 15_000;
+/** Reservas sem o lote terminar bem antes de o trabalho desistir. */
 export const TENTATIVAS_DO_CRUZAMENTO = 3;
 /** Por quanto tempo uma volta do laço roda lotes antes de devolver a vez. */
 const TEMPO_POR_VOLTA_MS = 1500;
@@ -51,24 +68,28 @@ function linhas(resultado: unknown): number {
   return (cabecalho as { affectedRows?: number } | undefined)?.affectedRows ?? 0;
 }
 
+/** A linha da fila sumiu (a exclusão da conta) ou a reserva passou a outra rodada: o lote para sem gravar. */
+export class ReservaPerdida extends Error {
+  constructor() { super("A reserva do trabalho de cruzamento não é mais deste lote."); this.name = "ReservaPerdida"; }
+}
+
 /**
  * Põe um cruzamento na fila (ou marca o vivo para recomeçar). Idempotente
- * para a mesma dona e tipo: a fila nunca tem dois vivos.
+ * para a mesma dona e tipo, também com dois pedidos ao mesmo tempo: o índice
+ * único (dona, tipo, vivo) recusa o segundo vivo, e o INSERT vira a marca de_novo.
  */
 export async function enfileirarCruzamento(trabalho: { ownerId: string; userId: number; tipo: TipoDoCruzamento }): Promise<{ id: number; novo: boolean }> {
   const db = await exigirDb();
   const agora = Date.now();
-  const [vivo] = await db.select({ id: filaDeCruzamento.id }).from(filaDeCruzamento).where(and(
-    eq(filaDeCruzamento.ownerId, trabalho.ownerId), eq(filaDeCruzamento.tipo, trabalho.tipo), eq(filaDeCruzamento.estado, "pendente"),
+  await db.insert(filaDeCruzamento).values({
+    ownerId: trabalho.ownerId, userId: trabalho.userId, tipo: trabalho.tipo, vivo: true, criadaEm: agora, atualizadaEm: agora,
+  }).onDuplicateKeyUpdate({ set: { deNovo: true, atualizadaEm: agora } });
+  const [vivo] = await db.select({ id: filaDeCruzamento.id, deNovo: filaDeCruzamento.deNovo }).from(filaDeCruzamento).where(and(
+    eq(filaDeCruzamento.ownerId, trabalho.ownerId), eq(filaDeCruzamento.tipo, trabalho.tipo), eq(filaDeCruzamento.vivo, true),
   )).limit(1);
-  if (vivo) {
-    await db.update(filaDeCruzamento).set({ deNovo: true, atualizadaEm: agora }).where(eq(filaDeCruzamento.id, vivo.id));
-    return { id: vivo.id, novo: false };
-  }
-  const [resultado] = await db.insert(filaDeCruzamento).values({
-    ownerId: trabalho.ownerId, userId: trabalho.userId, tipo: trabalho.tipo, criadaEm: agora, atualizadaEm: agora,
-  });
-  return { id: Number((resultado as unknown as { insertId: number }).insertId), novo: true };
+  // O vivo que já existia ganhou de_novo; o que acabou de nascer, não.
+  if (!vivo) return { id: 0, novo: false };
+  return { id: Number(vivo.id), novo: !vivo.deNovo };
 }
 
 /** O recálculo privado de uma conta grande (quem chama só tem o openId da dona). */
@@ -81,21 +102,44 @@ export async function enfileirarRecalculoPrivado(ownerId: string): Promise<void>
 
 type Trabalho = typeof filaDeCruzamento.$inferSelect;
 
+/** O JSON {hash da contraparte: conexões} da linha, lido sem confiar na forma. */
+function lerPorContraparte(texto: string | null): Map<string, number> {
+  const mapa = new Map<string, number>();
+  if (!texto) return mapa;
+  try {
+    const objeto = JSON.parse(texto) as Record<string, unknown>;
+    for (const [chave, valor] of Object.entries(objeto ?? {})) if (typeof valor === "number") mapa.set(chave, valor);
+  } catch { /* linha estragada: os tetos recomeçam do zero, o total continua na coluna conexoes */ }
+  return mapa;
+}
+
 async function reservar(db: Banco, escopo: { ownerId?: string }, agora: number): Promise<{ trabalho: Trabalho; token: string } | null> {
+  const daDona = escopo.ownerId ? eq(filaDeCruzamento.ownerId, escopo.ownerId) : undefined;
+  // O trabalho cuja reserva venceu sem o lote terminar, TENTATIVAS vezes, derrubou o processo nelas: desiste.
+  await db.update(filaDeCruzamento).set({
+    estado: "falhou", vivo: null, lockToken: null, lockedUntil: null, atualizadaEm: agora,
+    erro: `O lote parou sem terminar ${TENTATIVAS_DO_CRUZAMENTO} vezes (o processo caiu no meio).`,
+  }).where(and(
+    eq(filaDeCruzamento.estado, "pendente"), isNotNull(filaDeCruzamento.lockedUntil), lt(filaDeCruzamento.lockedUntil, agora),
+    gte(filaDeCruzamento.tentativas, TENTATIVAS_DO_CRUZAMENTO), daDona,
+  ));
   const livres = and(
     eq(filaDeCruzamento.estado, "pendente"),
     or(isNull(filaDeCruzamento.lockedUntil), lt(filaDeCruzamento.lockedUntil, agora)),
-    escopo.ownerId ? eq(filaDeCruzamento.ownerId, escopo.ownerId) : undefined,
+    lt(filaDeCruzamento.tentativas, TENTATIVAS_DO_CRUZAMENTO),
+    daDona,
   );
   // O que foi mexido há mais tempo primeiro: os trabalhos se revezam por lote, e a base grande não segura a fila.
   const [candidato] = await db.select().from(filaDeCruzamento).where(livres).orderBy(asc(filaDeCruzamento.atualizadaEm), asc(filaDeCruzamento.id)).limit(1);
   if (!candidato) return null;
   const token = crypto.randomUUID();
-  const r = await db.update(filaDeCruzamento).set({ lockToken: token, lockedUntil: agora + RESERVA_DO_LOTE_MS })
-    .where(and(eq(filaDeCruzamento.id, candidato.id), livres));
+  // A reserva conta a tentativa: se o processo cair no meio do lote, ela já está contada.
+  const r = await db.update(filaDeCruzamento).set({
+    lockToken: token, lockedUntil: agora + RESERVA_DO_LOTE_MS, tentativas: sql`${filaDeCruzamento.tentativas} + 1`,
+  }).where(and(eq(filaDeCruzamento.id, candidato.id), livres));
   if (!linhas(r)) return null;
   reservasVivas.set(token, candidato.id);
-  return { trabalho: candidato, token };
+  return { trabalho: { ...candidato, tentativas: candidato.tentativas + 1 }, token };
 }
 
 /**
@@ -103,7 +147,7 @@ async function reservar(db: Banco, escopo: { ownerId?: string }, agora: number):
  * Devolve o que fez, ou null sem trabalho. Exportada para os testes e para a
  * medida de carga; em produção, quem chama é o laço.
  */
-export async function rodarUmLote(escopo: { ownerId?: string } = {}): Promise<{ trabalhoId: number; tipo: TipoDoCruzamento; terminou: boolean; conexoes: number } | null> {
+export async function rodarUmLote(escopo: { ownerId?: string } = {}): Promise<{ trabalhoId: number; tipo: TipoDoCruzamento; terminou: boolean; conexoes: number; abandonado?: boolean } | null> {
   if (parada) return null;
   const db = await exigirDb();
   const agora = Date.now();
@@ -111,6 +155,21 @@ export async function rodarUmLote(escopo: { ownerId?: string } = {}): Promise<{ 
   if (!reserva) return null;
   const { trabalho, token } = reserva;
   const minha = and(eq(filaDeCruzamento.id, trabalho.id), eq(filaDeCruzamento.lockToken, token));
+  const situacao = { perdida: false };
+  // A reserva é curta: o lote a renova enquanto roda. Renovar não casou linha = a reserva não é mais dele.
+  const renovacao = setInterval(() => {
+    if (parada || situacao.perdida) return;
+    db.update(filaDeCruzamento).set({ lockedUntil: Date.now() + RESERVA_DO_LOTE_MS }).where(minha)
+      .then(r => { if (!linhas(r)) situacao.perdida = true; })
+      .catch(erro => console.warn(`[Cruzamento] não deu para renovar a reserva do trabalho ${trabalho.id}:`, descreverErroDeBanco(erro).slice(0, 300)));
+  }, RENOVACAO_DA_RESERVA_MS);
+  renovacao.unref?.();
+  /** Antes de cada bloco de gravação: a linha e a reserva ainda são deste lote? */
+  const antesDeGravar = async () => {
+    if (situacao.perdida) throw new ReservaPerdida();
+    const [linha] = await db.select({ id: filaDeCruzamento.id }).from(filaDeCruzamento).where(minha).limit(1);
+    if (!linha) { situacao.perdida = true; throw new ReservaPerdida(); }
+  };
   try {
     const { hasValidConsent } = await import("./routers/consent");
     const autorizada = await hasValidConsent(trabalho.userId, "termo_smart_match");
@@ -118,9 +177,10 @@ export async function rodarUmLote(escopo: { ownerId?: string } = {}): Promise<{ 
     let conexoes = 0;
     let processados = 0;
     let proximoCursor = 0;
+    const tetos = { conexoes: trabalho.conexoes, porContraparte: lerPorContraparte(trabalho.porContraparte) };
     if (autorizada && trabalho.tipo === "global") {
       const { cruzarUmLoteNaRedeGlobal } = await import("./network-rede-global");
-      const lote = await cruzarUmLoteNaRedeGlobal({ id: trabalho.userId, openId: trabalho.ownerId }, Number(trabalho.cursor));
+      const lote = await cruzarUmLoteNaRedeGlobal({ id: trabalho.userId, openId: trabalho.ownerId }, Number(trabalho.cursor), undefined, { tetos, antesDeGravar });
       conexoes = lote.conexoes;
       processados = lote.processados;
       terminou = lote.proximoId === null;
@@ -128,66 +188,113 @@ export async function rodarUmLote(escopo: { ownerId?: string } = {}): Promise<{ 
     } else if (autorizada) {
       const [conta] = await db.select({ email: users.email }).from(users).where(eq(users.id, trabalho.userId)).limit(1);
       const { recalculatePrivateMatches } = await import("./match-service");
-      const r = await recalculatePrivateMatches(trabalho.ownerId, conta?.email ?? null, { naFila: true });
+      const r = await recalculatePrivateMatches(trabalho.ownerId, conta?.email ?? null, { naFila: true, antesDeGravar });
       processados = r.total;
     }
     const fim = Date.now();
+    const porContraparte = tetos.porContraparte.size ? JSON.stringify(Object.fromEntries(tetos.porContraparte)) : null;
     if (!terminou) {
       await db.update(filaDeCruzamento).set({
         cursor: proximoCursor, processados: sql`${filaDeCruzamento.processados} + ${processados}`,
-        conexoes: sql`${filaDeCruzamento.conexoes} + ${conexoes}`, tentativas: 0, lockToken: null, lockedUntil: null, atualizadaEm: fim,
+        conexoes: sql`${filaDeCruzamento.conexoes} + ${conexoes}`, porContraparte,
+        tentativas: 0, lockToken: null, lockedUntil: null, atualizadaEm: fim,
       }).where(minha);
     } else {
-      // Terminou. O pedido que chegou no meio (de_novo) recomeça do início; senão, concluída.
+      // Terminou. O pedido que chegou no meio (de_novo) recomeça do início, com os tetos da busca zerados;
+      // senão, concluída, e a vaga de vivo se abre para o próximo pedido.
       await db.update(filaDeCruzamento).set({
         estado: sql`case when ${filaDeCruzamento.deNovo} then 'pendente' else 'concluida' end`,
+        vivo: sql`case when ${filaDeCruzamento.deNovo} then 1 else null end`,
+        conexoes: sql`case when ${filaDeCruzamento.deNovo} then 0 else ${filaDeCruzamento.conexoes} + ${conexoes} end`,
+        porContraparte: sql`case when ${filaDeCruzamento.deNovo} then null else ${porContraparte} end`,
         cursor: 0, deNovo: false, processados: sql`${filaDeCruzamento.processados} + ${processados}`,
-        conexoes: sql`${filaDeCruzamento.conexoes} + ${conexoes}`, tentativas: 0, lockToken: null, lockedUntil: null, atualizadaEm: fim,
+        tentativas: 0, lockToken: null, lockedUntil: null, atualizadaEm: fim,
       }).where(minha);
     }
     return { trabalhoId: trabalho.id, tipo: trabalho.tipo, terminou, conexoes };
   } catch (erro) {
-    if (ehErroDeBancoIndisponivel(erro)) throw erro;
-    const mensagem = (erro instanceof Error ? erro.message : String(erro)).slice(0, 300);
+    if (erro instanceof ReservaPerdida) {
+      console.info(`[Cruzamento] o trabalho ${trabalho.id} saiu da fila ou passou a outra rodada no meio do lote: parou sem gravar o resto.`);
+      return { trabalhoId: trabalho.id, tipo: trabalho.tipo, terminou: false, conexoes: 0, abandonado: true };
+    }
+    if (ehErroDeBancoIndisponivel(erro)) {
+      // A reserva não fica presa até vencer: tenta soltá-la (o banco pode ter voltado) sem engolir o erro de origem.
+      // A queda do banco não é culpa do trabalho: a tentativa desta reserva não conta.
+      try {
+        await db.update(filaDeCruzamento).set({
+          lockToken: null, lockedUntil: null, tentativas: sql`greatest(${filaDeCruzamento.tentativas} - 1, 0)`,
+        }).where(minha);
+      } catch (erroAoSoltar) {
+        console.warn(`[Cruzamento] não deu para soltar a reserva do trabalho ${trabalho.id}:`, descreverErroDeBanco(erroAoSoltar).slice(0, 300));
+      }
+      throw erro;
+    }
+    // Só o SQL, nunca os parâmetros (podem trazer dado pessoal): no log e na linha.
+    const mensagem = descreverErroDeBanco(erro).slice(0, 300);
     console.warn(`[Cruzamento] o lote do trabalho ${trabalho.id} falhou:`, mensagem);
-    const tentativas = trabalho.tentativas + 1;
+    const desistiu = trabalho.tentativas >= TENTATIVAS_DO_CRUZAMENTO;
     await db.update(filaDeCruzamento).set({
-      tentativas, erro: mensagem, estado: tentativas >= TENTATIVAS_DO_CRUZAMENTO ? "falhou" : "pendente",
+      erro: mensagem, estado: desistiu ? "falhou" : "pendente", vivo: desistiu ? null : true,
       lockToken: null, lockedUntil: null, atualizadaEm: Date.now(),
     }).where(minha);
-    return { trabalhoId: trabalho.id, tipo: trabalho.tipo, terminou: tentativas >= TENTATIVAS_DO_CRUZAMENTO, conexoes: 0 };
+    return { trabalhoId: trabalho.id, tipo: trabalho.tipo, terminou: desistiu, conexoes: 0 };
   } finally {
+    clearInterval(renovacao);
     reservasVivas.delete(token);
   }
 }
 
-/** De quanto em quanto tempo a manutenção do índice varre as tabelas inteiras (e as órfãs). */
+/** De quanto em quanto tempo a manutenção do índice começa uma passada pela tabela inteira (e as órfãs). */
 export const VARREDURA_COMPLETA_DO_INDICE_MS = 10 * 60_000;
 /** Folga da varredura curta: item gravado por transação que terminou fora de ordem. */
 const FOLGA_DA_MARCA = 2000;
-let marca: { tem: number; precisa: number } | null = null;
+let marca: MarcaDosItens | null = null;
 let ultimaVarreduraCompleta = 0;
+/** O cursor da passada pela tabela inteira em andamento (null: nenhuma). */
+let passada: MarcaDosItens | null = null;
+const FIM_DO_LADO = Number.MAX_SAFE_INTEGER;
 
 /**
- * O índice em dia. A cada volta do laço, só os itens novos desde a última
- * marca (com folga), para não varrer as duas tabelas a cada 2 s; de 10 em 10
- * minutos (ou com `completa`), as tabelas inteiras e as chaves órfãs.
- * Devolve quantas linhas mexeu.
+ * O índice em dia. A cada volta do laço, os itens novos desde a última marca
+ * (com folga), para não varrer as duas tabelas a cada 2 s. De 10 em 10 minutos
+ * (ou com `completa`) começa uma passada pela tabela inteira, em ordem de id e
+ * em lotes de ITENS_POR_VARREDURA: a passada que não acaba numa volta continua
+ * na seguinte, do cursor (a troca de VERSAO_DAS_CHAVES reindexa tudo assim,
+ * sem esperar 10 minutos por lote). No fim da passada, as chaves órfãs.
+ * Devolve quantas linhas mexeu; zero quer dizer índice em dia.
  */
 export async function manterOIndice(opcoes: { completa?: boolean } = {}): Promise<number> {
   const db = await exigirDb();
   const agora = Date.now();
   const novaMarca = await maioresIdsDosItens(db);
-  let mexidas: number;
-  if (opcoes.completa || !marca || agora - ultimaVarreduraCompleta > VARREDURA_COMPLETA_DO_INDICE_MS) {
-    mexidas = (await indexarPendentes(db)) + (await limparOrfas(db));
-    ultimaVarreduraCompleta = agora;
-  } else {
-    mexidas = await indexarPendentes(db, undefined, { tem: Math.max(0, marca.tem - FOLGA_DA_MARCA), precisa: Math.max(0, marca.precisa - FOLGA_DA_MARCA) });
+  let mexidas = 0;
+  if (marca) {
+    const curtas = await indexarPendentes(db, undefined, { tem: Math.max(0, marca.tem - FOLGA_DA_MARCA), precisa: Math.max(0, marca.precisa - FOLGA_DA_MARCA) });
+    mexidas += curtas;
+    // Se a volta curta não deu conta de tudo, a marca não anda: a próxima continua de onde estava.
+    if (curtas === 0) marca = novaMarca;
   }
-  // Se a volta não deu conta de tudo, a marca não anda: a próxima continua de onde estava.
-  if (mexidas === 0 || !marca) marca = mexidas === 0 ? novaMarca : { tem: 0, precisa: 0 };
+  if (opcoes.completa || passada || !marca || agora - ultimaVarreduraCompleta > VARREDURA_COMPLETA_DO_INDICE_MS) {
+    const desde = passada ?? { tem: 0, precisa: 0 };
+    const r = await indexarPendentesDesde(db, ITENS_POR_VARREDURA, desde);
+    mexidas += r.total;
+    if (r.proximo.tem === null && r.proximo.precisa === null) {
+      mexidas += await limparOrfas(db);
+      passada = null;
+      ultimaVarreduraCompleta = agora;
+      if (!marca) marca = novaMarca;
+    } else {
+      passada = { tem: r.proximo.tem ?? FIM_DO_LADO, precisa: r.proximo.precisa ?? FIM_DO_LADO };
+    }
+  }
   return mexidas;
+}
+
+/** Só para os testes: a manutenção do índice esquece a marca e a passada (como num processo novo). */
+export function esquecerAMarcaDoIndice() {
+  marca = null;
+  passada = null;
+  ultimaVarreduraCompleta = 0;
 }
 
 /**
@@ -232,7 +339,13 @@ export function iniciarFilaDeCruzamento(intervaloMs = INTERVALO_DA_FILA_MS) {
   proxima();
 }
 
-/** Desligamento: para de reservar e devolve as reservas desta instância. */
+/**
+ * Desligamento: para de reservar e de renovar. A reserva do lote em andamento NÃO
+ * é devolvida (a instância nova rodaria o mesmo lote junto com este, que ainda
+ * roda até o processo sair): ela passa a vencer em PRAZO_DO_DESLIGAMENTO_MS,
+ * depois do fim do processo, e a tentativa dela não conta. Se o lote terminar
+ * antes, a gravação final dele solta a reserva como sempre.
+ */
 export async function pararFilaDeCruzamento(): Promise<{ trabalhos: number }> {
   parada = true;
   clearTimeout(timer);
@@ -241,10 +354,10 @@ export async function pararFilaDeCruzamento(): Promise<{ trabalhos: number }> {
   const db = await exigirDb();
   let trabalhos = 0;
   for (const [token, id] of reservas) {
-    trabalhos += linhas(await db.update(filaDeCruzamento).set({ lockToken: null, lockedUntil: null })
-      .where(and(eq(filaDeCruzamento.id, id), eq(filaDeCruzamento.lockToken, token))));
+    trabalhos += linhas(await db.update(filaDeCruzamento).set({
+      lockedUntil: Date.now() + PRAZO_DO_DESLIGAMENTO_MS, tentativas: sql`greatest(${filaDeCruzamento.tentativas} - 1, 0)`,
+    }).where(and(eq(filaDeCruzamento.id, id), eq(filaDeCruzamento.lockToken, token))));
   }
-  reservasVivas.clear();
   return { trabalhos };
 }
 

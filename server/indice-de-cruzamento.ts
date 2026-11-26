@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
-import { and, eq, gt, inArray, max, notExists, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, max, notExists, sql } from "drizzle-orm";
 import { chavesDeCruzamento, contactAssets, contactNeeds } from "../drizzle/schema";
-import { chavesDoItem, type LadoDoItem } from "../shared/chaves-de-cruzamento";
+import { chavesDoItem, VERSAO_DAS_CHAVES, type LadoDoItem } from "../shared/chaves-de-cruzamento";
 import { exigirDb } from "./db";
 
 /**
@@ -13,18 +13,25 @@ import { exigirDb } from "./db";
  *
  * A chave não decide nada: `scoreMatch` continua decidindo cada par, com os
  * concorrentes zerados e a regra da demanda expressa. O índice guarda o HASH da
- * chave, não o texto do item.
+ * chave, não o texto do item. O hash é SHA-256 sem sal, cortado, de termos
+ * curtos: quem tem a tabela o reverte por dicionário ("s:cafe-torrado"). Trate
+ * a tabela como dado pessoal da dona (ela sai na exclusão da conta e na faxina
+ * do exame), nunca como anonimizada.
  *
- * Como ele se mantém: `contact_assets` e `contact_needs` só recebem INSERT e
- * DELETE (não há edição de item), então as chaves de um item nunca mudam. A
- * carga das entidades indexa o bloco na hora (`indexarContatos`); o resto (a
- * tela, o enriquecimento, a reunião) é alcançado por `indexarPendentes`, que
- * acha os itens sem chave, e a chave de item apagado sai em `limparOrfas`. Os
- * dois rodam no laço da fila (server/fila-de-cruzamento.ts): a cada volta, só os
- * itens novos (id acima da última marca, com folga); de 10 em 10 minutos, a
- * tabela inteira e as órfãs. A chave órfã só traz candidato a mais (o item é lido de
- * novo das tabelas de verdade); o item ainda sem chave só fica de fora até a
- * próxima varredura.
+ * Como ele se mantém. As chaves de um item mudam em dois casos: o rótulo muda
+ * (a edição da ficha, T45: `editarItemDaFicha` reindexa o contato na mesma
+ * transação do UPDATE, com `indexarContatos`) e o cálculo muda (cada linha
+ * guarda a `VERSAO_DAS_CHAVES` de quem a gravou, e a varredura trata versão
+ * diferente como item sem chave). A carga das entidades indexa o bloco na hora
+ * (`indexarContatos`); o resto (a tela, o enriquecimento, a reunião) é
+ * alcançado por `indexarPendentes`, que acha os itens sem chave da versão de
+ * agora, e a chave de item apagado sai em `limparOrfas`. Os dois rodam no laço
+ * da fila (server/fila-de-cruzamento.ts): a cada volta, os itens novos (id acima
+ * da última marca, com folga); de 10 em 10 minutos, uma passada pela tabela
+ * inteira, em ordem de id e em lotes (o cursor anda de volta em volta até o
+ * fim), e as órfãs. A chave órfã só traz candidato a mais (o item é lido de novo
+ * das tabelas de verdade); o item ainda sem chave só fica de fora até a
+ * varredura chegar nele.
  */
 
 type Banco = Awaited<ReturnType<typeof exigirDb>>;
@@ -49,7 +56,7 @@ function linhasDoIndice(lado: LadoDoItem, itens: ItemLido[]) {
     const chaves = new Set(chavesDoItem({ label: item.tagLabel, category: item.category, slug: item.tagSlug }, lado).map(hashDaChave));
     // O item sem chave nenhuma (rótulo sem letra) ganha a marca, para a varredura não o ler de novo a cada volta.
     if (!chaves.size) chaves.add(hashDaChave("-"));
-    return Array.from(chaves).map(chave => ({ lado, itemId: Number(item.id), contactId: Number(item.contactId), ownerId: item.ownerId, chave }));
+    return Array.from(chaves).map(chave => ({ lado, itemId: Number(item.id), contactId: Number(item.contactId), ownerId: item.ownerId, chave, versao: VERSAO_DAS_CHAVES }));
   });
 }
 
@@ -57,7 +64,7 @@ async function gravarLinhas(ex: Executor, linhas: ReturnType<typeof linhasDoIndi
   for (let i = 0; i < linhas.length; i += LINHAS_POR_INSERT) {
     // A mesma chave do mesmo item duas vezes (duas varreduras ao mesmo tempo) não é erro: o índice único a recusa.
     await ex.insert(chavesDeCruzamento).values(linhas.slice(i, i + LINHAS_POR_INSERT))
-      .onDuplicateKeyUpdate({ set: { chave: sql`${chavesDeCruzamento.chave}` } });
+      .onDuplicateKeyUpdate({ set: { versao: sql`values(${chavesDeCruzamento.versao})` } });
   }
 }
 
@@ -65,29 +72,50 @@ const colunasDoItem = (tabela: typeof contactAssets | typeof contactNeeds) => ({
   id: tabela.id, ownerId: tabela.ownerId, contactId: tabela.contactId, tagSlug: tabela.tagSlug, tagLabel: tabela.tagLabel, category: tabela.category,
 });
 
+export type MarcaDosItens = { tem: number; precisa: number };
+
 /**
- * Indexa os itens ainda sem chave (os dois lados), até `limite` por lado.
- * Devolve quantos itens indexou; zero quer dizer que o índice está em dia.
+ * Indexa os itens sem chave DA VERSÃO DE AGORA (os dois lados), em ordem de id,
+ * até `limite` por lado e depois de `desde`. O item com chaves de outra versão
+ * perde as antigas e ganha as novas. Devolve quantos indexou e, por lado, o
+ * último id lido quando o lote veio cheio (`null` quando o lado chegou ao fim):
+ * é o cursor da passada pela tabela inteira.
  */
-export async function indexarPendentes(db?: Banco, limite = ITENS_POR_VARREDURA, desde?: { tem: number; precisa: number }): Promise<number> {
-  const banco = db ?? await exigirDb();
+export async function indexarPendentesDesde(banco: Banco, limite: number, desde: MarcaDosItens): Promise<{ total: number; proximo: { tem: number | null; precisa: number | null } }> {
   let total = 0;
+  const proximo: { tem: number | null; precisa: number | null } = { tem: null, precisa: null };
   for (const [lado, tabela] of [["tem", contactAssets], ["precisa", contactNeeds]] as const) {
     const semChave = notExists(banco.select({ um: chavesDeCruzamento.id }).from(chavesDeCruzamento)
-      .where(and(eq(chavesDeCruzamento.lado, lado), eq(chavesDeCruzamento.itemId, tabela.id))));
-    // Com `desde`, só os itens de id maior (a varredura curta do laço); sem, a tabela inteira.
+      .where(and(eq(chavesDeCruzamento.lado, lado), eq(chavesDeCruzamento.itemId, tabela.id), eq(chavesDeCruzamento.versao, VERSAO_DAS_CHAVES))));
     const itens = await banco.select(colunasDoItem(tabela)).from(tabela)
-      .where(desde ? and(gt(tabela.id, desde[lado]), semChave) : semChave)
+      .where(and(gt(tabela.id, desde[lado]), semChave))
+      .orderBy(asc(tabela.id))
       .limit(limite);
+    if (itens.length >= limite) proximo[lado] = Number(itens[itens.length - 1].id);
     if (!itens.length) continue;
+    // As chaves de outra versão saem antes: o índice único (lado, item, chave) vale para as duas.
+    const idsDosItens = itens.map(item => Number(item.id));
+    for (let i = 0; i < idsDosItens.length; i += CHAVES_POR_CONSULTA) {
+      await banco.delete(chavesDeCruzamento).where(and(eq(chavesDeCruzamento.lado, lado), inArray(chavesDeCruzamento.itemId, idsDosItens.slice(i, i + CHAVES_POR_CONSULTA))));
+    }
     await gravarLinhas(banco, linhasDoIndice(lado, itens as ItemLido[]));
     total += itens.length;
   }
-  return total;
+  return { total, proximo };
+}
+
+/**
+ * Indexa os itens ainda sem chave da versão de agora (os dois lados), até
+ * `limite` por lado. Com `desde`, só os de id maior (a varredura curta do laço).
+ * Devolve quantos itens indexou; zero quer dizer que o índice está em dia.
+ */
+export async function indexarPendentes(db?: Banco, limite = ITENS_POR_VARREDURA, desde?: MarcaDosItens): Promise<number> {
+  const banco = db ?? await exigirDb();
+  return (await indexarPendentesDesde(banco, limite, desde ?? { tem: 0, precisa: 0 })).total;
 }
 
 /** O maior id de item de cada lado: a marca de onde a varredura curta recomeça. */
-export async function maioresIdsDosItens(db?: Banco): Promise<{ tem: number; precisa: number }> {
+export async function maioresIdsDosItens(db?: Banco): Promise<MarcaDosItens> {
   const banco = db ?? await exigirDb();
   const [[tem], [precisa]] = await Promise.all([
     banco.select({ maior: max(contactAssets.id) }).from(contactAssets),
@@ -112,9 +140,10 @@ export async function limparOrfas(db?: Banco, limite = ITENS_POR_VARREDURA): Pro
 }
 
 /**
- * Refaz o índice dos contatos dados, da dona (a carga das entidades chama, dentro da
- * transação do bloco, para o associado cruzar na hora): apaga as chaves deles e
- * grava as dos itens de agora.
+ * Refaz o índice dos contatos dados, da dona: apaga as chaves deles e grava as dos
+ * itens de agora. A carga das entidades chama dentro da transação do bloco (o
+ * associado cruza na hora), e a edição de item da ficha, na transação do UPDATE
+ * (as chaves do rótulo antigo não ficam no índice).
  */
 export async function indexarContatos(ex: Executor, ownerId: string, contactIds: number[]): Promise<void> {
   if (!contactIds.length) return;

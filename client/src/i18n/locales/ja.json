@@ -2844,6 +2844,8 @@
     "toastRevogado": "許可を取り消しました。照合は無効になりました。",
     "erroRevogar": "取り消せませんでした。",
     "toastRecalculado": "{{total}}件の案件を分析しました。",
+    "recalculoNaFila": "ネットワークが大きいため、提案はバックグラウンドで再計算中です。数分後にここに表示されます。",
+    "alteracaoNaFila": "保存しました。ネットワークが大きいため、提案はバックグラウンドで更新され、数分後にここに表示されます。",
     "erroAtualizarMatches": "おすすめのつながりを更新できませんでした。",
     "toastItemRemovido": "項目を削除し、提案を更新しました。",
     "erroRemoverItem": "項目を削除できませんでした。",

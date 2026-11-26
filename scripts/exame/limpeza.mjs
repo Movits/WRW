@@ -38,6 +38,8 @@ export const PLANO_DE_LIMPEZA = [
   // O índice de cruzamento e a fila do cruzamento grande (N4b).
   { tabela: "chaves_de_cruzamento", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "fila_de_cruzamento", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // A mesma linha, pelo id da conta (o regex reconhece user_id desde a revisão da N4b).
+  { tabela: "fila_de_cruzamento", coluna: "user_id", chave: "id", acao: "apagar" },
   { tabela: "memory_documents", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_contact_suggestions", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_entities", coluna: "owner_id", chave: "openId", acao: "apagar" },
@@ -218,7 +220,7 @@ export const EXCECOES = [
 ];
 
 /** Colunas do schema que apontam para usuária; o teste deriva os pares a partir delas. */
-export const COLUNAS_DE_USUARIA = /^(userId|ownerId|owner_id|grantedTo|grantedBy|revokedBy|senderId|recipientId|interestedId|publishedBy|moderatedBy|uploadedBy|uploaded_by|validatedBy|resolvedBy|createdBy|nominatedBy|matchedUserId|identifier|requesterId|memberIds)$/;
+export const COLUNAS_DE_USUARIA = /^(userId|ownerId|owner_id|grantedTo|grantedBy|revokedBy|senderId|recipientId|interestedId|publishedBy|moderatedBy|uploadedBy|uploaded_by|user_id|validatedBy|resolvedBy|createdBy|nominatedBy|matchedUserId|identifier|requesterId|memberIds)$/;
 
 function placeholders(valores) {
   return valores.map(() => "?").join(", ");

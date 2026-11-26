@@ -11,7 +11,7 @@ import { registrarConexao, type ItemDaConexao } from "./network-registro";
 import { necessidadesEscritasDoPerfil } from "./portao-da-demanda-expressa";
 import { mascararContatosEmTexto } from "../shared/contato-em-texto";
 import { chavesDoContato, podemCasar } from "../shared/chaves-de-cruzamento";
-import { candidatosPelasChaves } from "./indice-de-cruzamento";
+import { candidatosPelasChaves, hashDaChave } from "./indice-de-cruzamento";
 
 /**
  * O network particular diante da rede global — Meu Network Inteligente, spec
@@ -64,7 +64,10 @@ export const LIMIAR_DA_CONEXAO = 50;
 export const TETO_DE_MEMBROS = 1000;
 /**
  * Acima destes contatos disponíveis, a busca vai para a fila (server/fila-de-cruzamento.ts)
- * e roda em lotes no servidor, fora do pedido: é a conta da entidade, com milhares de associados.
+ * e roda em lotes no servidor, fora do pedido: é a conta da entidade, com milhares de associados,
+ * mas vale para qualquer conta desse tamanho (300 contatos já não cabem num pedido). A fila não
+ * abre porta nova: os tetos de registro (o total e o por contraparte) valem pelo TRABALHO inteiro,
+ * como numa busca na hora, e o pedido que a enfileira gasta a vaga de `tetoDeBuscaNaRedeGlobal`.
  */
 export const CONTATOS_DA_BUSCA_NA_HORA = 300;
 /** Contatos de quem procura cruzados por lote da fila. */
@@ -79,13 +82,17 @@ export const TETO_DE_REGISTROS_POR_RODADA = 100;
  * - itens por lado: um contato ou perfil com lista enorme não multiplica o custo;
  * - orçamento de comparações (scoreMatch) por rodada: esgotado, a rodada para e
  *   diz que ficou incompleta; a cada fatia o laço devolve a vez ao event loop;
- * - por contraparte: uma rodada registra no máximo N conexões com a mesma outra
- *   dona ou a mesma membra (as de nota maior primeiro);
+ * - por contraparte: uma busca registra no máximo N conexões com a mesma outra
+ *   dona ou a mesma membra (as de nota maior primeiro); na fila, a busca é o
+ *   trabalho inteiro, com o total e as contagens guardados na linha dele;
+ * - a vez ao event loop sai a cada fatia do orçamento E a cada tantos pares
+ *   olhados, também os que `podemCasar` recusa sem comparar;
  * - por conta: poucas buscas a cada 10 minutos (`tetoDeBuscaNaRedeGlobal`).
  */
 export const TETO_DE_ITENS_POR_LADO = 20;
 export const ORCAMENTO_DE_COMPARACOES = 100_000;
 const COMPARACOES_POR_FATIA = 2_000;
+const PARES_OLHADOS_POR_FATIA = 5_000;
 export const TETO_POR_CONTRAPARTE_POR_RODADA = 10;
 export const BUSCAS_NA_REDE_GLOBAL_POR_JANELA = 10;
 
@@ -455,34 +462,52 @@ export async function procurarConexoesNaRedeGlobal(
 }
 
 /**
+ * Os tetos de registro de uma busca que anda em lotes (a fila): as conexões já
+ * registradas pelo trabalho e, por contraparte (hash), quantas. O lote soma aqui.
+ */
+export type TetosDaBusca = { conexoes: number; porContraparte: Map<string, number> };
+
+/**
  * Um lote da busca grande (a fila): os próximos CONTATOS_POR_LOTE contatos
  * disponíveis da dona depois de `aPartirDoId`, em ordem de id, cruzados com a
- * rede pelo índice. `proximoId` null quer dizer que a base acabou.
+ * rede pelo índice. `proximoId` null quer dizer que a busca acabou: a base
+ * chegou ao fim ou o teto de registros do trabalho encheu. O cursor só anda até o
+ * último contato cruzado POR INTEIRO: o lote que para no orçamento devolve esse
+ * id, e o próximo recomeça do contato seguinte (sem pular o resto do lote).
  */
 export async function cruzarUmLoteNaRedeGlobal(
   quem: { id: number; openId: string },
   aPartirDoId: number,
   membros?: MembroDaRede[],
+  opcoes: { tetos?: TetosDaBusca; antesDeGravar?: () => Promise<void> } = {},
 ): Promise<{ proximoId: number | null; processados: number; conexoes: number; completa: boolean }> {
   const db = await exigirDb();
   const { contatos, ultimoId } = await lerPaginaCrua({ somenteDona: quem.openId, aPartirDoId }, CONTATOS_POR_LOTE);
   if (!contatos.length) return { proximoId: ultimoId, processados: 0, conexoes: 0, completa: true };
-  const r = await cruzarERegistrar(db, quem.openId, contatos, membros ?? await lerMembrosParaCruzamento(quem.id));
-  return { proximoId: ultimoId, processados: contatos.length, conexoes: r.conexoes.length, completa: r.completa };
+  const r = await cruzarERegistrar(db, quem.openId, contatos, membros ?? await lerMembrosParaCruzamento(quem.id), opcoes);
+  if (r.tetoCheio) return { proximoId: null, processados: r.cruzados, conexoes: r.conexoes.length, completa: false };
+  const proximoId = r.cruzados < contatos.length ? contatos[r.cruzados - 1].contactId : ultimoId;
+  return { proximoId, processados: r.cruzados, conexoes: r.conexoes.length, completa: r.completa };
 }
 
 /**
  * O coração da busca: pergunta ao índice quem pode casar com `meus`, lê esses
  * candidatos pela leitura autorizada e compara só os pares com chave em comum
  * (`podemCasar`); quem decide cada par é `encontrosEntre` (scoreMatch). Depois
- * registra, com os tetos por rodada e por contraparte.
+ * registra, com os tetos da busca (total e por contraparte; com `tetos`, os do
+ * trabalho da fila, somados aqui). Devolve quantos de `meus` foram cruzados por
+ * inteiro (`cruzados`): o orçamento que acaba no meio de um contato descarta as
+ * candidatas dele, para o lote seguinte o cruzar inteiro (o primeiro contato
+ * sempre conta como cruzado, para o cursor andar), e `tetoCheio` diz que o total
+ * do trabalho encheu.
  */
 async function cruzarERegistrar(
   db: Awaited<ReturnType<typeof exigirDb>>,
   donaQueProcura: string,
   meus: ContatoDaRede[],
   membros: MembroDaRede[],
-): Promise<{ conexoes: ConexaoGlobalEncontrada[]; completa: boolean }> {
+  opcoes: { tetos?: TetosDaBusca; antesDeGravar?: () => Promise<void> } = {},
+): Promise<{ conexoes: ConexaoGlobalEncontrada[]; completa: boolean; cruzados: number; tetoCheio: boolean }> {
   const chavesDosMeus = meus.map(chavesDoContato);
   const todas = { tem: new Set<string>(), precisa: new Set<string>() };
   for (const chaves of chavesDosMeus) {
@@ -504,50 +529,74 @@ async function cruzarERegistrar(
     a.tenho.length * b.preciso.length + b.tenho.length * a.preciso.length;
   let gasto = 0;
   let desdeAPausa = 0;
+  let olhadosDesdeAPausa = 0;
   let completa = true;
+  let cruzados = meus.length;
+  const pausa = () => new Promise<void>(resolve => setImmediate(resolve));
   const cabeNoOrcamento = async (custo: number) => {
     if (gasto + custo > ORCAMENTO_DE_COMPARACOES) { completa = false; return false; }
     gasto += custo;
     desdeAPausa += custo;
     if (desdeAPausa >= COMPARACOES_POR_FATIA) {
       desdeAPausa = 0;
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await pausa();
     }
     return true;
+  };
+  // O par recusado por podemCasar não gasta orçamento, mas gasta CPU: a vez também sai por contagem.
+  const olhou = async () => {
+    if (++olhadosDesdeAPausa >= PARES_OLHADOS_POR_FATIA) {
+      olhadosDesdeAPausa = 0;
+      await pausa();
+    }
   };
 
   cruzamento: for (let i = 0; i < meus.length; i += 1) {
     const meu = meus[i];
+    const candidatasAntesDoContato = candidatas.length;
+    const acabouOOrcamento = () => {
+      // Na fila, o contato que ficou pela metade não conta como cruzado: as candidatas dele saem, e o próximo
+      // lote o refaz. O primeiro fica, para o cursor andar mesmo quando um contato sozinho passa do orçamento.
+      // Na busca na hora não há próximo lote: o que foi achado fica, e a resposta diz que ficou incompleta.
+      if (opcoes.tetos && i > 0) { candidatas.length = candidatasAntesDoContato; cruzados = i; } else cruzados = i + 1;
+    };
     for (let j = 0; j < outros.length; j += 1) {
       const outro = outros[j];
+      await olhou();
       if (!podemCasar(chavesDosMeus[i], chavesDosOutros[j])) continue;
       const custo = custoDoPar(meu, outro);
       if (!custo) continue;
-      if (!(await cabeNoOrcamento(custo))) break cruzamento;
+      if (!(await cabeNoOrcamento(custo))) { acabouOOrcamento(); break cruzamento; }
       const resultado = encontrosEntre(meu, outro);
-      if (resultado.pontuacao >= LIMIAR_DA_CONEXAO) candidatas.push({ origem: "NETWORK_NETWORK_MATCH", meu, outro, contraparte: `dona:${outro.ownerId}`, resultado });
+      // A contraparte vai em hash: na fila, a contagem fica gravada na linha do trabalho, sem o openId de outra conta.
+      if (resultado.pontuacao >= LIMIAR_DA_CONEXAO) candidatas.push({ origem: "NETWORK_NETWORK_MATCH", meu, outro, contraparte: hashDaChave(`dona:${outro.ownerId}`), resultado });
     }
     for (let k = 0; k < membros.length; k += 1) {
       const membro = membros[k];
+      await olhou();
       if (!podemCasar(chavesDosMeus[i], chavesDosMembros[k])) continue;
       const custo = custoDoPar(meu, membro);
       if (!custo) continue;
-      if (!(await cabeNoOrcamento(custo))) break cruzamento;
+      if (!(await cabeNoOrcamento(custo))) { acabouOOrcamento(); break cruzamento; }
       const resultado = encontrosEntre(meu, membro);
-      if (resultado.pontuacao >= LIMIAR_DA_CONEXAO) candidatas.push({ origem: "NETWORK_PLATFORM_MATCH", meu, membro, contraparte: `membra:${membro.userId}`, resultado });
+      if (resultado.pontuacao >= LIMIAR_DA_CONEXAO) candidatas.push({ origem: "NETWORK_PLATFORM_MATCH", meu, membro, contraparte: hashDaChave(`membra:${membro.userId}`), resultado });
     }
   }
 
-  // 2) Registrar as de nota maior primeiro, com teto por rodada e por contraparte.
+  // 2) Registrar as de nota maior primeiro, com o teto da busca no total e por contraparte.
   candidatas.sort((x, y) => y.resultado.pontuacao - x.resultado.pontuacao);
   const conexoes: ConexaoGlobalEncontrada[] = [];
-  const porContraparte = new Map<string, number>();
+  const porContraparte = opcoes.tetos?.porContraparte ?? new Map<string, number>();
+  const jaDoTrabalho = opcoes.tetos?.conexoes ?? 0;
+  let tetoCheio = false;
   const paraMim = (e: ReturnType<typeof encontrosEntre>["encontros"][number]) => ({ de: e.de === "a" ? "meu" as const : "outro" as const, tem: e.tem, precisa: e.precisa });
 
   for (const candidata of candidatas) {
-    if (conexoes.length >= TETO_DE_REGISTROS_POR_RODADA) { completa = false; break; }
+    if (jaDoTrabalho + conexoes.length >= TETO_DE_REGISTROS_POR_RODADA) { completa = false; tetoCheio = true; break; }
     const jaRegistradas = porContraparte.get(candidata.contraparte) ?? 0;
     if (jaRegistradas >= TETO_POR_CONTRAPARTE_POR_RODADA) { completa = false; continue; }
+    // Na fila: a linha e a reserva ainda são deste lote (a conta pode ter sido excluída no meio)?
+    if (opcoes.antesDeGravar) await opcoes.antesDeGravar();
     porContraparte.set(candidata.contraparte, jaRegistradas + 1);
     const { meu, resultado } = candidata;
     const ladoA = { tipo: "contato" as const, ownerId: meu.ownerId, contactId: meu.contactId, codigoAnonimo: meu.codigoAnonimo, originador: true };
@@ -580,5 +629,5 @@ async function cruzarERegistrar(
       });
     }
   }
-  return { conexoes, completa };
+  return { conexoes, completa, cruzados, tetoCheio };
 }

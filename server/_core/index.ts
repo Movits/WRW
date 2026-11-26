@@ -476,8 +476,8 @@ async function startServer() {
           .then(r => console.log(`[Lembretes] devolvidos: ${r.lembretes} lembrete(s).`))
           .catch(erro => console.error("[Lembretes] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
         pararFilaDeCruzamento()
-          .then(r => console.log(`[Cruzamento] devolvidos: ${r.trabalhos} trabalho(s).`))
-          .catch(erro => console.error("[Cruzamento] não foi possível devolver as reservas:", descreverErroDeBanco(erro))),
+          .then(r => console.log(`[Cruzamento] ${r.trabalhos} lote(s) em andamento: a reserva vence depois da saída do processo.`))
+          .catch(erro => console.error("[Cruzamento] não foi possível encurtar as reservas:", descreverErroDeBanco(erro))),
       ]).finally(() => {
           server.close(() => process.exit(0));
           // Conexão presa não segura o processo: o Render mata em 30 s de todo jeito.

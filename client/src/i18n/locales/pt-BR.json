@@ -2844,6 +2844,8 @@
     "toastRevogado": "Autorização revogada. O cruzamento foi desligado.",
     "erroRevogar": "Não foi possível revogar.",
     "toastRecalculado": "{{total}} oportunidade(s) analisada(s).",
+    "recalculoNaFila": "Sua rede é grande: as sugestões estão sendo recalculadas em segundo plano e aparecem aqui em alguns minutos.",
+    "alteracaoNaFila": "Salvo. Sua rede é grande: as sugestões são atualizadas em segundo plano e aparecem aqui em alguns minutos.",
     "erroAtualizarMatches": "Não foi possível atualizar as conexões sugeridas.",
     "toastItemRemovido": "Item removido e sugestões atualizadas.",
     "erroRemoverItem": "Não foi possível remover o item.",

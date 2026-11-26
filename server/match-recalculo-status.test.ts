@@ -108,10 +108,16 @@ function condicaoDe(tabela: unknown, condicao: unknown) {
 const chaveDoPar = (linha: Record<string, unknown>) =>
   `${linha.ownerId}:${linha.pairLowContactId}:${linha.pairHighContactId}`;
 
+// A leitura dos itens leva ORDER BY id (o corte do modo em massa sai igual entre rodadas): o dublê aceita.
+const comOrderBy = vi.hoisted(() => <T>(leitura: () => Promise<T>) => () => {
+  const promessa = leitura();
+  return Object.assign(promessa, { orderBy: () => promessa });
+});
+
 vi.mock("./db", () => ({
   exigirDb: async () => ({
     // Cópia: quem leu antes da escrita alheia continua com o retrato antigo.
-    select: () => ({ from: (tabela: unknown) => ({ where: async () => {
+    select: () => ({ from: (tabela: unknown) => ({ where: comOrderBy(async () => {
       const retrato = (estado.linhas.get(tabela) ?? []).map(linha => ({ ...linha }));
       if (tabela === aiMatchSuggestions && estado.entreALeituraEAEscrita) {
         const acontecer = estado.entreALeituraEAEscrita;
@@ -119,7 +125,7 @@ vi.mock("./db", () => ({
         acontecer();
       }
       return retrato;
-    } }) }),
+    }) }) }),
     // Insert com o índice único de verdade: o segundo par igual levanta
     // ER_DUP_ENTRY embrulhado num DrizzleQueryError, como o par
     // drizzle + MariaDB levanta (conferido contra MariaDB 12.3).

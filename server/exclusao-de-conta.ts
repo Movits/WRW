@@ -199,6 +199,7 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // O índice de cruzamento (N4b): as chaves dos itens da dona (hash, não o texto) e a fila dela.
   { tabela: chavesDeCruzamento, coluna: chavesDeCruzamento.ownerId, origem: "openId" },
   { tabela: filaDeCruzamento, coluna: filaDeCruzamento.ownerId, origem: "openId" },
+  { tabela: filaDeCruzamento, coluna: filaDeCruzamento.userId, origem: "id" },
   { tabela: memoryDocuments, coluna: memoryDocuments.ownerId, origem: "openId" },
   { tabela: meetingContactSuggestions, coluna: meetingContactSuggestions.ownerId, origem: "openId" },
   { tabela: meetingEntities, coluna: meetingEntities.ownerId, origem: "openId" },

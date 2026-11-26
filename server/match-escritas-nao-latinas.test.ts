@@ -21,7 +21,8 @@ const estado = vi.hoisted(() => ({
 }));
 vi.mock("./db", () => ({
   exigirDb: async () => ({
-    select: () => ({ from: (tabela: unknown) => ({ where: async () => estado.linhas.get(tabela) ?? [] }) }),
+    // A leitura dos itens leva ORDER BY id: o dublê aceita.
+    select: () => ({ from: (tabela: unknown) => ({ where: () => { const p = Promise.resolve(estado.linhas.get(tabela) ?? []); return Object.assign(p, { orderBy: () => p }); } }) }),
     insert: (_t: unknown) => ({ values: async (v: Record<string, unknown>) => { estado.inseridos.push(v); } }),
     update: () => ({ set: () => ({ where: async () => undefined }) }),
     delete: () => ({ where: async () => undefined }),

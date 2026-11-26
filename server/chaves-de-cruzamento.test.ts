@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { chavesDoContato, chavesDoItem, podemCasar } from "../shared/chaves-de-cruzamento";
+import crypto from "node:crypto";
+import { chavesDoContato, chavesDoItem, podemCasar, VERSAO_DAS_CHAVES } from "../shared/chaves-de-cruzamento";
 import { scoreMatch, slugifyMatchTag } from "./match-service";
 import { ofertaDoCnae } from "./cnae";
 
@@ -120,4 +121,42 @@ describe("chaves de cruzamento", () => {
     }
     expect(perdidos).toEqual([]);
   }, 600_000);
+});
+
+/**
+ * O instantâneo das chaves (N4b, revisão de 26/11). O índice guarda as chaves já
+ * calculadas, e só a troca de VERSAO_DAS_CHAVES faz a varredura refazê-las: se
+ * `chavesDoItem` mudar de resultado sem a versão subir, o lado de quem procura
+ * sai com a chave nova e o lado gravado continua com a antiga, e o par some
+ * calado. A amostra é fixa (não lê o vocabulário dos testes, que muda à toa).
+ *
+ * Este teste ficou vermelho? Suba VERSAO_DAS_CHAVES em shared/chaves-de-cruzamento.ts
+ * e acrescente aqui a impressão da versão nova. Nunca troque a impressão de uma
+ * versão que já existe.
+ */
+const AMOSTRA_FIXA: Array<{ label: string; category?: string; lado: "tem" | "precisa" }> = [
+  { label: "Exportação de café", lado: "tem" }, { label: "Importação de café do Brasil", lado: "precisa" },
+  { label: "Exportamos frutas", lado: "tem" }, { label: "Vendo vinhos", lado: "tem" },
+  { label: "Soja em grão", lado: "tem" }, { label: "soja em graos", lado: "precisa" },
+  { label: "Embalagens sustentáveis", lado: "tem" }, { label: "Transporte de cargas", lado: "tem" },
+  { label: "Trasporte de carga pra Manaus", lado: "precisa" }, { label: "Contabilidade", lado: "tem" },
+  { label: "Contador para MEI", lado: "precisa" }, { label: "Advogado tributarista", lado: "tem" },
+  { label: "Preciso de advogado marítimo", lado: "precisa" }, { label: "Assessoria tributária", lado: "tem" },
+  { label: "Logística", lado: "tem" }, { label: "logística para exportar meu café", lado: "precisa" },
+  { label: "Marketing para restaurantes", lado: "precisa" }, { label: "Consultoria jurídica", category: "Serviços", lado: "tem" },
+  { label: "Caixas de papelão", category: "Embalagens", lado: "tem" }, { label: "Investidores para a fábrica", lado: "precisa" },
+  { label: "Coffee beans for export", lado: "tem" }, { label: "Granos de café", lado: "precisa" },
+  { label: "Vin rouge", category: "Boissons", lado: "tem" }, { label: "咖啡豆", lado: "precisa" },
+];
+const IMPRESSAO_POR_VERSAO: Record<number, string> = {
+  1: "11295ab8322f650666beb047d6f1311aad2d9d26a41e7946e0c8201d9a7cecc9",
+};
+
+describe("instantâneo das chaves de cruzamento", () => {
+  it("as chaves da amostra fixa são as da versão de agora (mudou o cálculo, suba VERSAO_DAS_CHAVES)", () => {
+    const chaves = AMOSTRA_FIXA.map(item => [item.lado, item.label, item.category ?? null, [...chavesDoItem({ label: item.label, category: item.category ?? null }, item.lado)].sort()]);
+    const impressao = crypto.createHash("sha256").update(JSON.stringify(chaves)).digest("hex");
+    expect(IMPRESSAO_POR_VERSAO[VERSAO_DAS_CHAVES], `VERSAO_DAS_CHAVES = ${VERSAO_DAS_CHAVES} sem impressão: acrescente ${impressao}`).toBeDefined();
+    expect(impressao, "as chaves mudaram sem VERSAO_DAS_CHAVES subir").toBe(IMPRESSAO_POR_VERSAO[VERSAO_DAS_CHAVES]);
+  });
 });

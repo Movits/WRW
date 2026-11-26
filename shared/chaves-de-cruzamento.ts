@@ -11,9 +11,12 @@ import { chavesDeServico } from "./tipo-da-oferta";
  * `scoreMatch` (server/match-service.ts), com todas as regras de sempre:
  * concorrentes zeram, serviço só casa com necessidade declarada, nada de
  * palavra solta. Por isso as chaves são um SUPERCONJUNTO do que o motor aceita:
- * cada critério de `scoreMatch` que dá 50 ou mais tem a sua chave, e o par que
- * ele aceitaria tem sempre uma chave em comum (`server/chaves-de-cruzamento.test.ts`
- * confere sobre o vocabulário dos testes dos motores e a tabela da CNAE):
+ * cada critério DETERMINÍSTICO de `scoreMatch` que dá 50 ou mais tem a sua chave,
+ * e o par que ele aceitaria tem sempre uma chave em comum
+ * (`server/chaves-de-cruzamento.test.ts` confere sobre o vocabulário dos testes
+ * dos motores e a tabela da CNAE). A exceção é o critério semântico estreito do
+ * N7 (55, `NOTA_SEMANTICA_ESTREITA`, desligado por padrão): ele não tem chave, e
+ * o par só por semântica fica fora do índice e do motor privado em massa.
  *
  *   - `s:` o slug do termo (tag exata), o gravado e o calculado;
  *   - `t:` as substâncias (objeto sem o verbo, núcleo sem a cabeça
@@ -27,6 +30,18 @@ import { chavesDeServico } from "./tipo-da-oferta";
  * Palavra solta nunca é chave: "exportar" sozinho não junta ninguém.
  */
 export type LadoDoItem = "tem" | "precisa";
+
+/**
+ * A versão do cálculo das chaves. O índice guarda, em cada linha, a versão de
+ * quem a gravou, e a varredura trata versão diferente como item sem chave
+ * (reindexa em lotes). SUBA este número sempre que `chavesDoItem` mudar de
+ * resultado (vocabulário, famílias, lemas, direção): sem isso, o lado de quem
+ * procura sai com a chave nova, calculada na hora, e o lado de lá continua com a
+ * antiga, gravada no banco, e o par novo some calado da busca e do motor em
+ * massa. O instantâneo de `server/chaves-de-cruzamento.test.ts` fica vermelho
+ * quando as chaves mudam sem a versão subir.
+ */
+export const VERSAO_DAS_CHAVES = 1;
 
 export type ItemParaChaves = { label: string; category?: string | null; slug?: string | null };
 

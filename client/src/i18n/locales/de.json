@@ -2844,6 +2844,8 @@
     "toastRevogado": "Autorisierung widerrufen. Der Abgleich wurde deaktiviert.",
     "erroRevogar": "Der Widerruf war nicht möglich.",
     "toastRecalculado": "{{total}} Möglichkeit(en) analysiert.",
+    "recalculoNaFila": "Ihr Netzwerk ist groß: Die Vorschläge werden im Hintergrund neu berechnet und erscheinen in einigen Minuten hier.",
+    "alteracaoNaFila": "Gespeichert. Ihr Netzwerk ist groß: Die Vorschläge werden im Hintergrund aktualisiert und erscheinen in einigen Minuten hier.",
     "erroAtualizarMatches": "Die vorgeschlagenen Verbindungen konnten nicht aktualisiert werden.",
     "toastItemRemovido": "Eintrag entfernt und Vorschläge aktualisiert.",
     "erroRemoverItem": "Der Eintrag konnte nicht entfernt werden.",

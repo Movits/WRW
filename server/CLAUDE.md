@@ -234,8 +234,14 @@ candidatos, pela leitura autorizada, paginada e em ordem de id (sem janela). A c
 entidades indexa o bloco na transação (`indexarContatos`); o resto dos itens entra pela
 varredura do laço (`server/fila-de-cruzamento.ts`, a cada 2 s os novos, de 10 em 10 min a
 tabela e as órfãs). Conta com mais de 300 contatos disponíveis busca pela fila, em lotes de
-200 (`emFila`); conta com mais de 2000 contatos recalcula o motor privado pela fila, e o
-laço com mais de 200 mil pares "tem" × "preciso" só compara os que têm chave em comum.
+200 (`emFila`), com os tetos de registro (100 e 10 por contraparte) valendo pelo trabalho
+inteiro e o cursor andando só até o último contato cruzado por inteiro; conta com mais de 2000
+contatos recalcula o motor privado pela fila, e o laço com mais de 200 mil pares "tem" ×
+"preciso" só compara os que têm chave em comum e guarda os 20 MELHORES pares por contato (mais
+os que já existiam). Editar item (T45) reindexa o contato na transação, e mudar o resultado de
+`chavesDoItem` exige subir `VERSAO_DAS_CHAVES` (o instantâneo do teste fica vermelho): a
+varredura reindexa as linhas de outra versão. A reserva do lote é curta e renovada, conta
+tentativa e é conferida antes de cada gravação (`antesDeGravar`).
 Consulta nova a `contact_assets` ou `contact_needs` leva a dona no WHERE (o índice é
 dona + contato).
 

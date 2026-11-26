@@ -2844,6 +2844,8 @@
     "toastRevogado": "授权已撤销。智能比对已关闭。",
     "erroRevogar": "无法撤销。",
     "toastRecalculado": "已分析 {{total}} 个机会。",
+    "recalculoNaFila": "您的网络很大：建议正在后台重新计算，几分钟后会显示在这里。",
+    "alteracaoNaFila": "已保存。您的网络很大：建议会在后台更新，几分钟后会显示在这里。",
     "erroAtualizarMatches": "无法更新推荐连接。",
     "toastItemRemovido": "项目已删除，建议已更新。",
     "erroRemoverItem": "无法删除该项目。",

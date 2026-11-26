@@ -644,7 +644,9 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // 97: os 95, mais o perfil de voz (H3d): voice_profiles.owner_id e
     // voice_profile_consents.owner_id.
     // 99: os 97, mais o índice e a fila do cruzamento (N4b): chaves_de_cruzamento.owner_id e fila_de_cruzamento.owner_id.
-    expect(paresDeUsuariaNoSchema).toHaveLength(99);
+    // 100: os 99, mais fila_de_cruzamento.user_id (o regex não reconhecia user_id; revisão da N4b).
+    expect(paresDeUsuariaNoSchema).toHaveLength(100);
+    expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "fila_de_cruzamento", coluna: "user_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_members", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_members", coluna: "userId" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_folder_tasks", coluna: "owner_id" });

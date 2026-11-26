@@ -2844,6 +2844,8 @@
     "toastRevogado": "Autorisation révoquée. Le croisement a été désactivé.",
     "erroRevogar": "Impossible de révoquer.",
     "toastRecalculado": "{{total}} opportunité(s) analysée(s).",
+    "recalculoNaFila": "Votre réseau est grand : les suggestions sont recalculées en arrière-plan et apparaîtront ici dans quelques minutes.",
+    "alteracaoNaFila": "Enregistré. Votre réseau est grand : les suggestions sont mises à jour en arrière-plan et apparaîtront ici dans quelques minutes.",
     "erroAtualizarMatches": "Impossible de mettre à jour les connexions suggérées.",
     "toastItemRemovido": "Élément supprimé et suggestions mises à jour.",
     "erroRemoverItem": "Impossible de supprimer l'élément.",

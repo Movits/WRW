@@ -206,9 +206,11 @@ usuárias. Uma entidade grande pode ter dezenas de milhares: o teto por entidade
 - **Painel:** 50 por página, busca pelo código, pelo documento inteiro (HMAC, índice) ou por
   parte do nome (LIKE parametrizado sobre os contatos da entidade).
 
-**O índice de cruzamento** (`chaves_de_cruzamento`, migração `0031`, e
+**O índice de cruzamento** (`chaves_de_cruzamento`, migração `0032`, e
 `shared/chaves-de-cruzamento.ts`). Cada item de "o que tem" e de "o que precisa" ganha as
-suas chaves, guardadas como hash (16 hex do SHA-256, nunca o texto): o slug (tag exata), as
+suas chaves, guardadas como hash (16 hex do SHA-256, sem sal; o texto do item não fica na
+tabela, mas o hash de termo curto se reverte por dicionário, então a tabela é dado pessoal da
+dona: sai na exclusão da conta e na faxina do exame): o slug (tag exata), as
 substâncias do termo (o objeto sem o verbo, o núcleo sem a cabeça transparente e os dois sem
 o lugar do fim, cada um também na outra grafia do N7: singular, genitivo e a palavra longa com
 erro de digitação), a família e cada lema da especialidade e do público do serviço (o pedido
@@ -223,14 +225,23 @@ desses termos (1,7 milhão) e na rede com armadilhas (N8), tem chave em comum
 (`server/chaves-de-cruzamento.test.ts`; a suíte roda uma amostra, e o par a par inteiro com
 `CHAVES_DE_CRUZAMENTO_COMPLETO=1`, rodado em 26/11 sobre a `main` 644b6be sem nenhum par
 perdido; as duas rodadas anteriores acharam os furos que viraram as chaves do público e da
-oferta genérica). Critério novo em `scoreMatch` precisa de chave nova lá.
+oferta genérica). Critério novo em `scoreMatch` precisa de chave nova lá. A exceção é o
+critério semântico estreito do N7 (55, desligado por padrão): não tem chave, e o par só por
+semântica fica fora do índice e do motor privado em massa.
 
-- **Como o índice se mantém:** os itens só recebem INSERT e DELETE, então as chaves de um item
-  nunca mudam. A carga e o "refazer as ofertas da CNAE" indexam na transação
-  (`indexarContatos`); o que a tela, o enriquecimento e a reunião gravam entra pela varredura
-  do laço da fila (`server/fila-de-cruzamento.ts`): a cada 2 s, os itens de id acima da última
-  marca; de 10 em 10 minutos, as tabelas inteiras e as chaves órfãs. O item novo fica de fora
-  do lado de LÁ do cruzamento até a próxima volta; o lado de quem procura é calculado na hora.
+- **Como o índice se mantém:** as chaves de um item mudam em dois casos, e os dois estão
+  cobertos. O rótulo muda: a edição na ficha (T45, `editarItemDaFicha`) reindexa o contato na
+  mesma transação do UPDATE. O cálculo muda: cada linha guarda a `VERSAO_DAS_CHAVES` de quem a
+  gravou (`shared/chaves-de-cruzamento.ts`), a varredura trata versão diferente como item sem
+  chave e o reindexa, e um instantâneo das chaves de uma amostra fixa
+  (`server/chaves-de-cruzamento.test.ts`) fica vermelho quando as chaves mudam sem a versão
+  subir. A carga e o "refazer as ofertas da CNAE" indexam na transação (`indexarContatos`); o
+  que a tela, o enriquecimento e a reunião gravam entra pela varredura do laço da fila
+  (`server/fila-de-cruzamento.ts`): a cada 2 s, os itens de id acima da última marca; de 10 em
+  10 minutos, uma passada pelas tabelas inteiras, em ordem de id e em lotes de 5000 (a passada
+  que não acaba numa volta continua na seguinte), e as chaves órfãs no fim dela. O item novo
+  fica de fora do lado de LÁ do cruzamento até a próxima volta; o lado de quem procura é
+  calculado na hora.
 
 **A leitura global, paginada e ordenada** (`lerRedeGlobalAnonima` e `lerRedeGlobalPaginada`,
 `network-rede-global.ts`). As duas janelas de 1000 sem ordem saíram: uma consulta só, em
@@ -244,19 +255,38 @@ regra de consulta segue: de `private_contacts` só saem id, dona e código anôn
 filas da reunião: a conta com mais de 300 contatos disponíveis (a entidade) busca na rede pela
 fila, em lotes de 200 contatos pela ordem do id, com o cursor gravado, e a tela avisa que a
 busca roda em segundo plano (`networkInteligente.global.queued`); a conta com mais de 2000
-contatos recalcula o motor privado pela fila. Um trabalho vivo por dona e tipo (o pedido que
-chega no meio marca `de_novo`, e o trabalho recomeça ao terminar); os trabalhos se revezam por
-lote; o termo do Smart Match é conferido na hora de rodar; a reserva vence em 30 minutos se o
-processo cair, e o SIGTERM a devolve.
+contatos recalcula o motor privado pela fila, e a tela de Conexões Inteligentes avisa que as
+sugestões chegam em segundo plano (`intelligentMatches.recalculoNaFila` e `alteracaoNaFila`).
+Vale para toda conta desse tamanho, não só para a entidade: a fila não abre porta nova, porque
+os tetos de registro valem pelo TRABALHO inteiro, como numa busca na hora (100 conexões e 10 por
+contraparte, contadas na linha do trabalho, a contraparte em hash), e o pedido que enfileira
+gasta a vaga de `tetoDeBuscaNaRedeGlobal`. O cursor só anda até o último contato cruzado por
+inteiro: o lote que para no orçamento de comparações recomeça dele, em vez de pular o resto.
+
+Um trabalho vivo por dona e tipo, garantido no banco (índice único com a coluna `vivo`, que fica
+nula ao concluir; o pedido que chega no meio marca `de_novo`, e o trabalho recomeça ao
+terminar, com os tetos zerados); os trabalhos se revezam por lote; o termo do Smart Match é
+conferido na hora de rodar. A reserva é de 2 minutos, renovada a cada 30 s enquanto o lote roda;
+cada reserva conta uma tentativa (zera quando o lote termina bem), e o trabalho que derruba o
+processo três vezes desiste, em vez de voltar para sempre. Com o banco fora do ar, a reserva é
+solta antes de o erro subir. O SIGTERM não devolve a reserva do lote em andamento: ela passa a
+vencer depois do fim do processo (15 s), para a instância nova não rodar o mesmo lote junto.
+Antes de cada bloco de gravação o lote confere que a linha e a reserva ainda são dele: a exclusão
+da conta apaga a linha, e o lote para sem gravar sugestões nem conexões da conta que saiu. O erro
+guardado na linha e o do log levam só o SQL, nunca os parâmetros (`descreverErroDeBanco`).
 
 **O motor privado na conta grande** (`match-service.ts`): acima de 200 mil pares "tem" ×
 "preciso", o laço não compara todos com todos; cada "tem" só encontra os "preciso" que têm
 chave em comum com ele (o índice em memória, na mesma ordem do laço de sempre). A sugestão
 nova vai em INSERT de 500 linhas, a que não mudou não é regravada e a órfã sai em lote. E cada
-contato que procura entra em no máximo 20 pares (`TETO_DE_PARES_POR_CONTATO_EM_MASSA`, os
-primeiros que passam do corte): sem isso, 50 mil associados com termos comuns davam milhões de
-pares e o processo ficava sem memória (medido: 4 GB de heap e queda). Abaixo de 200 mil pares
-(toda conta comum de hoje), nada mudou.
+contato que procura entra em no máximo 20 pares (`TETO_DE_PARES_POR_CONTATO_EM_MASSA`): sem
+isso, 50 mil associados com termos comuns davam milhões de pares e o processo ficava sem
+memória (medido: 4 GB de heap e queda). São os 20 MELHORES (por nota, depois o mútuo, depois o
+id), em duas voltas para a memória não guardar os encontros de todos os pares: a primeira só
+anota a nota máxima dos melhores de cada contato, a segunda junta os encontros só desses e dos
+pares que já existiam. O par que já existia passa pelo teto: a sugestão na tela não some por
+causa do corte, nem vira órfã na limpeza. Os itens são lidos em ordem de id, para o corte sair
+igual de uma rodada para outra. Abaixo de 200 mil pares (toda conta comum de hoje), nada mudou.
 
 **O Meu Network Inteligente** (`network-inteligente.ts`): o resumo lê os contatos em páginas
 de 1000 pela ordem do id, com os "tem" e "preciso" de cada página, e guarda só a amostra dos
@@ -339,8 +369,9 @@ Leitura das medidas:
    1000 não entram no `NETWORK_PLATFORM_MATCH`. O mesmo índice, com o perfil como item.
 3. **Oportunidades × perfis** (`routers/matching.ts`): lê 200 perfis sem ordem para sugerir a
    oportunidade; com 50 mil usuárias, a escolha fica no acaso do banco.
-4. **Motor privado em massa:** escolher os 20 pares de nota maior por contato, e não os
-   primeiros; e registrar as conexões internas em lote (hoje uma a uma, boa parte dos 349 s).
+4. **Motor privado em massa:** registrar as conexões internas em lote (hoje uma a uma, boa
+   parte dos 349 s). Os 20 pares de nota maior por contato já entraram (revisão da N4b, 26/11),
+   ao custo de uma segunda volta pelos pares escolhidos; o tempo não foi medido de novo.
 5. **Motor de perfis para todas:** se as contas ativadas pela N3 regenerarem juntas, levar o
    "buscar" à fila (17 h de CPU a 50 mil, uma rodada por conta).
 6. **`scoreMatch` custa 30 a 75 µs por par** (13 a 33 mil pares/s): é o que faz a busca de uma

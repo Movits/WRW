@@ -2844,6 +2844,8 @@
     "toastRevogado": "Autorización revocada. El cruce fue desactivado.",
     "erroRevogar": "No se pudo revocar.",
     "toastRecalculado": "{{total}} oportunidad(es) analizada(s).",
+    "recalculoNaFila": "Tu red es grande: las sugerencias se están recalculando en segundo plano y aparecerán aquí en unos minutos.",
+    "alteracaoNaFila": "Guardado. Tu red es grande: las sugerencias se actualizan en segundo plano y aparecerán aquí en unos minutos.",
     "erroAtualizarMatches": "No se pudieron actualizar las conexiones sugeridas.",
     "toastItemRemovido": "Elemento eliminado y sugerencias actualizadas.",
     "erroRemoverItem": "No se pudo eliminar el elemento.",
