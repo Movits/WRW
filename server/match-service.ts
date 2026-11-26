@@ -5,10 +5,9 @@ import { cosineSimilarity, normalizeVector } from "./memory-service";
 import { exigirDb } from "./db";
 import { sendEmail } from "./_core/email";
 import { embedWithGemini } from "./gemini";
-import { nomeiamAMesmaCoisa, saoConcorrentes, slugDoTermo } from "@shared/direcao-do-termo";
-import { classificarOferta, mesmaFamiliaEEspecialidade, necessidadeDeclaraOAssuntoDoServico, necessidadeGenericaNomeiaOServico, regraNaoLeOPar } from "@shared/tipo-da-oferta";
+import { direcaoEfetiva, nomeiamAMesmaCoisa, palavrasDeConteudo, saoConcorrentes, slugDoTermo } from "@shared/direcao-do-termo";
+import { classificarOferta, mesmaFamiliaEEspecialidade, necessidadeEhOferta, necessidadeDeclaraOAssuntoDoServico, necessidadeGenericaNomeiaOServico, regraNaoLeOPar } from "@shared/tipo-da-oferta";
 
-const SEMANTIC_THRESHOLD = 0.7;
 const SAVE_THRESHOLD = 50;
 const EMAIL_THRESHOLD = 70;
 
@@ -20,21 +19,52 @@ const EMAIL_THRESHOLD = 70;
 const NOTA_DO_ASSUNTO = 60;
 
 /**
- * O score do critério semântico, e se ele está ligado.
+ * N7 — o critério semântico ESTREITO: só para paráfrase ("Vendo vinhos" × "Procuro fornecedor de bebidas", "Coffee
+ * beans for export" × "Grãos de café"), nunca para palavra solta, concorrente ou serviço sem demanda declarada.
  *
- * 45 fica abaixo de SAVE_THRESHOLD de propósito (o porquê está em scoreMatch),
- * o que significa que nenhuma similaridade — nem 1.0, o máximo possível — vira
- * sugestão. A comparação abaixo torna isso explícito, e é o que impede o pior
- * efeito colateral: enquanto o critério estiver desligado, o texto do que cada
- * contato possui e procura NÃO sai daqui para o provedor de embeddings. Antes
- * saía a cada recálculo, para não gerar nada — inclusive para os pares que a
- * regra da direção acabara de barrar como concorrentes.
+ * Até o N7 ele valia 45, abaixo do corte de 50, desligado por construção: com o limiar em 0,7 ele casava tudo com
+ * tudo (31/08: os 45 pares de uma rede de 10 contatos, "Armazenagem refrigerada" com "Terrenos com outorga"). Agora
+ * ele só vale quando TODAS as guardas de `semanticoEstreitoPodeValer` passam e a similaridade chega ao
+ * LIMIAR_SEMANTICO_ESTREITO; a nota fica entre o corte (50) e a categoria (60), abaixo do e-mail (70).
  *
- * Religar é subir SEMANTIC_SCORE acima de SAVE_THRESHOLD; a chamada volta
- * sozinha, sem ninguém precisar lembrar desta linha.
+ * E continua DESLIGADO por padrão: só liga com MATCH_SEMANTICO_ESTREITO=1 no ambiente. Dois motivos:
+ *   1. o limiar ainda não foi calibrado com os vetores do gabarito (scripts/rede-de-teste/gerar-embeddings-da-rede.mjs
+ *      gera a fixture; server/rede-com-armadilhas.test.ts mede e imprime a calibração quando ela existe);
+ *   2. o termo do Smart Match (docs/termos/termo-smart-match.md) afirma que, com o critério desligado, nenhum dado
+ *      da agenda sai da plataforma. Ligar em produção exige publicar a versão nova do termo ANTES (texto jurídico,
+ *      com a Cris), e republicar revoga os aceites.
+ * Desligado, o texto do que cada contato possui e procura NÃO sai daqui para o provedor de embeddings.
  */
-const SEMANTIC_SCORE = 45;
-const SEMANTIC_ENABLED = SEMANTIC_SCORE >= SAVE_THRESHOLD;
+export const LIMIAR_SEMANTICO_ESTREITO = 0.9;
+const NOTA_SEMANTICA_ESTREITA = 55;
+
+/** O critério semântico estreito está ligado neste processo? Lido a cada chamada, como as outras chaves de IA. */
+export function criterioSemanticoLigado() {
+  return process.env.MATCH_SEMANTICO_ESTREITO === "1";
+}
+
+/**
+ * As guardas do critério semântico estreito, que não dependem da similaridade. Só depois de todas passarem o texto
+ * pode ir ao provedor de embeddings:
+ *   - direções OPOSTAS: a oferta é oferta e a procura é procura, também pelas palavras ("Procuro exportar vinho" no
+ *     campo de procura é oferta e não passa). Concorrentes já zeraram antes, em scoreMatch;
+ *   - nada de SERVIÇO: o portão da demanda expressa continua mandando, e quem decide se a necessidade nomeia o
+ *     serviço são as regras determinísticas de cima (shared/tipo-da-oferta.ts), nunca a parecença;
+ *   - nada de palavra em comum: se as duas pontas dividem uma palavra de conteúdo e as regras de cima não casaram
+ *     o par, a parecença viria dessa palavra ("Banco de sementes" × "Banco de investimento"). Paráfrase de verdade
+ *     diz a mesma coisa com OUTRAS palavras. O custo é a paráfrase que repete uma palavra (P19 da rede: "Terrenos
+ *     com outorga de água" × "Área rural com água liberada para irrigação"), que fica de fora;
+ *   - as duas pontas têm conteúdo (um termo só de marcador ou de verbo não é comparável).
+ */
+export function semanticoEstreitoPodeValer(asset: MatchReason, need: MatchReason): boolean {
+  if (saoConcorrentes(asset.label, need.label)) return false;
+  if (direcaoEfetiva(asset.label, "oferta") !== "oferta" || direcaoEfetiva(need.label, "demanda") !== "demanda") return false;
+  if (classificarOferta(asset.label, asset.category) === "servico") return false;
+  const deA = palavrasDeConteudo(asset.label);
+  const deB = new Set(palavrasDeConteudo(need.label));
+  if (!deA.length || !deB.size) return false;
+  return !deA.some(palavra => deB.has(palavra));
+}
 
 export type MatchReason = { slug: string; label: string; category?: string | null };
 export type MatchType = "mutual" | "exact" | "category" | "semantic";
@@ -59,6 +89,10 @@ export function slugifyMatchTag(value: string) {
   return slugDoTermo(value);
 }
 
+/**
+ * `semanticScore` é a similaridade de cosseno dos dois rótulos (0 quando não foi medida). Ela só conta com o critério
+ * semântico estreito ligado (`criterioSemanticoLigado`) e depois de todas as regras determinísticas.
+ */
 export function scoreMatch(asset: MatchReason, need: MatchReason, semanticScore = 0) {
   // Etapa 11: o cruzamento não pode ser feito por palavra parecida. "Exportar
   // vinho" e "importar vinho" são quase o mesmo texto e são o negócio; duas
@@ -74,6 +108,15 @@ export function scoreMatch(asset: MatchReason, need: MatchReason, semanticScore 
   // que, no campo de procura, nomeiam o serviço de que a pessoa precisa).
   if (saoConcorrentes(asset.label, need.label)) {
     return { score: 0, type: "semantic" as const, bloqueio: "concorrentes" as const };
+  }
+
+  // N7 (validação da #154): a prestadora que escreve a própria OFERTA no campo
+  // de necessidade ("Ofereço contabilidade para MEI", "Advogado disponível para
+  // empresas") não declarou precisar do serviço; diante de quem presta o mesmo
+  // serviço ela é a concorrente. Antes do slug e do mesmo objeto, que a liam
+  // como "contabilidade" e davam 100, com e-mail.
+  if (classificarOferta(asset.label, asset.category) === "servico" && necessidadeEhOferta(need.label)) {
+    return { score: 0, type: "semantic" as const, bloqueio: "servico-sem-demanda-expressa" as const };
   }
 
   if (asset.slug && asset.slug === need.slug) return { score: 100, type: "exact" as const };
@@ -162,20 +205,16 @@ export function scoreMatch(asset: MatchReason, need: MatchReason, semanticScore 
   const categoriaAsset = slugifyMatchTag(asset.category ?? "");
   const categoriaNeed = slugifyMatchTag(need.category ?? "");
   if ((!ofertaEhServico || regraNaoLe) && categoriaAsset && categoriaNeed && categoriaAsset === categoriaNeed) return { score: 60, type: "category" as const };
-  // 45 fica DE PROPÓSITO abaixo de SAVE_THRESHOLD (50), o que mantém o critério
-  // semântico desligado. Não é esquecimento: com SEMANTIC_THRESHOLD em 0.7, ele
-  // casa tudo com tudo. Medido em 31/08/2026 numa rede de 10 contatos — ao subir
-  // para 50, os 45 pares possíveis viraram match, incluindo "Armazenagem
-  // refrigerada" com "Terrenos com outorga". Reativar exige calibrar o limiar
-  // com dados reais antes, não mexer nesta linha. A regra da etapa 11 reforça
-  // este desligamento: parecença de texto é justamente o que confunde "exportar"
-  // com "importar", e é por parecença que o critério semântico decide.
-  //
-  // Para SERVIÇO, a similaridade (quando religada) é a "compatibilidade
-  // semântica" que o pedido prevê DEPOIS do portão: aqui toda necessidade é
-  // expressa por construção (é uma linha de contact_needs), então o que se
-  // mede é se ela corresponde ao serviço — não se alguém "poderia precisar".
-  if (semanticScore > SEMANTIC_THRESHOLD) return { score: SEMANTIC_SCORE, type: "semantic" as const };
+  // N7: o critério semântico ESTREITO, por último, e só para paráfrase. Com o
+  // limiar em 0,7 e sem guardas ele casava tudo com tudo (31/08/2026: os 45
+  // pares de uma rede de 10 contatos, incluindo "Armazenagem refrigerada" com
+  // "Terrenos com outorga"); a regra da etapa 11 mostra por quê — parecença de
+  // texto é o que confunde "exportar" com "importar". Agora ele exige o
+  // critério ligado, o limiar alto e as guardas de semanticoEstreitoPodeValer
+  // (direções opostas, nada de serviço, nada de palavra em comum).
+  if (criterioSemanticoLigado() && semanticScore >= LIMIAR_SEMANTICO_ESTREITO && semanticoEstreitoPodeValer(asset, need)) {
+    return { score: NOTA_SEMANTICA_ESTREITA, type: "semantic" as const };
+  }
   // O bloqueio nomeado deixa a decisão visível a quem depura: a oferta é um
   // serviço e nenhuma necessidade o nomeia (a categoria em comum, se havia,
   // não contou).
@@ -203,22 +242,20 @@ async function embedCached(texto: string, contexto: SemanticContext) {
 }
 
 /**
- * Similaridade semântica é o terceiro critério, usado só quando tag e categoria
- * não casam. Se o provedor de embeddings estiver fora do ar ou sem cota, o
- * recálculo continua sem ele: os matches por tag exata e por categoria não
- * dependem de IA e não podem ser perdidos junto. Uma falha desliga o critério
- * para o resto da rodada, em vez de repetir a chamada a cada par.
+ * Similaridade semântica é o último critério, usado só quando nenhuma regra
+ * casou e as guardas do critério estreito passaram. Compara só os RÓTULOS, como
+ * a calibração do gabarito (a descrição livre alarga a parecença e não entra).
+ * Se o provedor de embeddings estiver fora do ar ou sem cota, o recálculo
+ * continua sem ele: os matches por tag exata e por categoria não dependem de IA
+ * e não podem ser perdidos junto. Uma falha desliga o critério para o resto da
+ * rodada, em vez de repetir a chamada a cada par.
  */
-async function semanticScore(
-  asset: { tagLabel: string; description: string | null },
-  need: { tagLabel: string; description: string | null },
-  contexto: SemanticContext,
-) {
+async function semanticScore(rotuloDoAtivo: string, rotuloDaNecessidade: string, contexto: SemanticContext) {
   if (!contexto.disponivel) return 0;
   try {
     const [assetEmbedding, needEmbedding] = await Promise.all([
-      embedCached(`${asset.tagLabel}. ${asset.description ?? ""}`, contexto),
-      embedCached(`${need.tagLabel}. ${need.description ?? ""}`, contexto),
+      embedCached(rotuloDoAtivo, contexto),
+      embedCached(rotuloDaNecessidade, contexto),
     ]);
     return cosineSimilarity(assetEmbedding, needEmbedding);
   } catch (erro) {
@@ -298,10 +335,11 @@ export async function recalculatePrivateMatches(ownerId: string, ownerEmail?: st
       const baseNeed: MatchReason = { slug: need.tagSlug || slugifyMatchTag(need.tagLabel), label: need.tagLabel, category: need.category };
       let result = scoreMatch(baseAsset, baseNeed);
       // Só chama o provedor de embeddings se a resposta puder mudar alguma
-      // coisa. Com o critério desligado não pode, e mandar o texto para fora
-      // seria transferência de dado sem finalidade.
-      if (!result.score && SEMANTIC_ENABLED) {
-        result = scoreMatch(baseAsset, baseNeed, await semanticScore(asset, need, semantico));
+      // coisa: com o critério desligado, ou num par que as guardas já recusam
+      // (concorrente, serviço, palavra em comum), não pode, e mandar o texto
+      // para fora seria transferência de dado sem finalidade.
+      if (!result.score && criterioSemanticoLigado() && semanticoEstreitoPodeValer(baseAsset, baseNeed)) {
+        result = scoreMatch(baseAsset, baseNeed, await semanticScore(asset.tagLabel, need.tagLabel, semantico));
       }
       if (result.score < SAVE_THRESHOLD) continue;
 

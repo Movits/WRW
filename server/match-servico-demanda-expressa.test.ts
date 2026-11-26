@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
 
@@ -207,9 +207,12 @@ describe("Serviço × necessidade que o NOMEIA — casa em 100", () => {
     expect(r).toEqual({ score: 100, type: "exact" });
   });
 
-  it("a similaridade (quando religada) é a compatibilidade semântica DEPOIS do portão", () => {
-    // "Gestão de caixa" não declara assunto do vocabulário curado: só a similaridade decidiria.
-    expect(scoreMatch(item("Consultoria tributária"), item("Gestão de caixa"), 0.71)).toEqual({ score: 45, type: "semantic" });
+  it("a similaridade nunca decide pelo SERVIÇO: o portão continua com as regras (N7)", () => {
+    // "Gestão de caixa" não declara assunto do vocabulário curado. Até o N7 a similaridade dava 45 (abaixo do corte);
+    // com o critério estreito ligado e similaridade máxima, o serviço segue barrado pela guarda de serviço.
+    vi.stubEnv("MATCH_SEMANTICO_ESTREITO", "1");
+    expect(scoreMatch(item("Consultoria tributária"), item("Gestão de caixa"), 1).score).toBe(0);
+    vi.unstubAllEnvs();
     // "Revisão de tributos" pede uma ação sobre o assunto do serviço: 60 pelo vocabulário, sem similaridade nenhuma.
     expect(scoreMatch(item("Consultoria tributária"), item("Revisão de tributos"))).toEqual({ score: 60, type: "semantic" });
   });

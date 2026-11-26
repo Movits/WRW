@@ -2148,6 +2148,33 @@ export function textoPedeOServico(texto: string): boolean {
 }
 
 /**
+ * Marcas de OFERTA: quem escreve isto no campo de necessidade está oferecendo, não pedindo. "Ofereço contabilidade
+ * para MEI", "Contadora oferece serviços para MEI", "Advogado disponível para empresas", "We offer legal advice",
+ * "Ofrecemos asesoría". Conjugadas e no particípio; o infinitivo ("oferecer") fica de fora, porque aparece no pedido
+ * ("Preciso de alguém para oferecer..."), e "oferta" também, que é substantivo ("Oferta de crédito").
+ */
+const MARCAS_DE_OFERTA = new Set([
+  "ofereco", "oferece", "oferecemos", "oferecem", "oferecendo", "oferecido", "oferecida", "oferecidos", "oferecidas",
+  "disponivel", "disponiveis", "disponibilizo", "disponibiliza", "disponibilizamos", "disponibilizam",
+  "presto", "prestamos", "atendo", "atendemos",
+  "offer", "offers", "offering", "available", "provide", "provides", "providing",
+  "ofrezco", "ofrece", "ofrecemos", "ofrecen", "ofreciendo", "disponible", "disponibles",
+]);
+
+/**
+ * A necessidade, na verdade, OFERECE (N7, achado da validação da #154): a prestadora escreveu no campo de
+ * necessidade o que ela presta — "Ofereço contabilidade para MEI", "Contadora oferece serviços para MEI", "Advogado
+ * disponível para empresas". Isso não é necessidade declarada: diante de "Contabilidade" ou "Advocacia" é a
+ * concorrente, e o par valia 100, com e-mail. Vale só quando há marca de oferta e NENHUMA marca de pedido no texto:
+ * "Procuro contador disponível aos sábados" continua pedindo o serviço.
+ */
+export function necessidadeEhOferta(necessidade: string): boolean {
+  const palavras = palavrasDe(necessidade);
+  if (!palavras.some(palavra => MARCAS_DE_OFERTA.has(palavra))) return false;
+  return !palavras.some((_, k) => marcaDePedidoEm(palavras, k));
+}
+
+/**
  * O serviço é QUEM PEDE, e não o que se pede: a marca de pedido vem DEPOIS do núcleo e pede outra coisa —
  * "Contador PROCURA clientes", "Consultoria BUSCA startups", "Escritório de advocacia BUSCA clientes", "Lawyer
  * SEEKING business clients", "Somos uma consultoria de moda e BUSCAMOS clientes". É a prestadora falando de si, e
@@ -2304,8 +2331,9 @@ function comoAtende(oferta: string, categoriaDaOferta: string | null | undefined
   // (e6ddfa4 da #127): "律师事务所" oferecido é a advocacia sem especialidade, "税务咨询" a consultoria tributária.
   const oferecidos = servicosDoRotulo(oferta);
   const palavrasDaNecessidade = palavrasDe(necessidade);
-  // A prestadora que procura clientes não pede o serviço que ela mesma presta: ver `servicoEhQuemPede`.
-  if (servicoEhQuemPede(palavrasDaNecessidade)) return null;
+  // A prestadora que procura clientes não pede o serviço que ela mesma presta: ver `servicoEhQuemPede`. Nem a que
+  // escreve a própria oferta no campo de necessidade (`necessidadeEhOferta`, N7).
+  if (servicoEhQuemPede(palavrasDaNecessidade) || necessidadeEhOferta(necessidade)) return null;
   const complementoDesconhecido = abreComplementoDesconhecido(palavrasDaNecessidade, pedidos);
   // Os DOIS lados nomeiam a família e nada além dela: "Contabilidade" oferecida diante de "Contador" procurado,
   // "Advocacia" diante de "Advogado", "Empresa de consultoria" diante de "Procura consultoria". Não há o que
@@ -3202,6 +3230,7 @@ function familiaNomeadaEm(palavras: readonly string[], k: number): string | null
  */
 export function necessidadeDeclaraOAssuntoDoServico(oferta: string, categoriaDaOferta: string | null | undefined, necessidade: string): boolean {
   if (classificarOferta(oferta, categoriaDaOferta) !== "servico") return false;
+  if (necessidadeEhOferta(necessidade)) return false;
   // O que a oferta presta: cada serviço coordenado com a sua família e os assuntos que ele mesmo nomeia.
   const oferecidos = partesDoServico(oferta).flatMap(parte => {
     const familia = entenderServico(parte)?.familia;

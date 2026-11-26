@@ -2,8 +2,11 @@
 // `.env` seta vazio, então `||=` (não `??=`) garante um valor mesmo no CI.
 process.env.VAULT_ENCRYPTION_KEY ||= "chave-de-teste-sem-valor";
 
-import { describe, expect, it } from "vitest";
-import { scoreMatch, slugifyMatchTag } from "./match-service";
+import fs from "node:fs";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { LIMIAR_SEMANTICO_ESTREITO, scoreMatch, semanticoEstreitoPodeValer, slugifyMatchTag } from "./match-service";
+import { cosineSimilarity } from "./memory-service";
 import { calculateCompatibilityScore } from "./matching";
 import type { UserProfile } from "../drizzle/schema";
 import rede from "../scripts/rede-de-teste/rede-com-armadilhas.json";
@@ -35,28 +38,26 @@ type Motor = "privado" | "perfis";
 /**
  * Violações de regra que JÁ existem e têm dono fora deste teste. Cada uma diz por quê. O teste também falha se uma
  * delas deixar de acontecer, para a lista não envelhecer: corrigiu, tire daqui.
+ *
+ * Vazia desde o N7: o C06 ("Exportamos frutas") saiu com o verbo conjugado em shared/direcao-do-termo.ts, e o C01,
+ * C02, C03 e C05 do motor de perfis saíram com o N6 (a regra dos concorrentes em `satisfaz`).
  */
-const LACUNAS_CONHECIDAS: Record<Motor, Record<string, string>> = {
-  privado: {
-    // Achado da própria rede (N8, 25/11): "exportamos" não está na lista de verbos de shared/direcao-do-termo.ts,
-    // então a oferta fica neutra, saoConcorrentes não barra e a categoria em comum ("Frutas") dá 60. Corrigir é
-    // mexer no analisador de termo (verbo conjugado), com teste negativo e positivo: fica para o N7.
-    C06: "verbo conjugado ('Exportamos frutas') não é lido como direção; a categoria em comum casa as concorrentes",
-  },
-  perfis: {
-    // server/CLAUDE.md, "Os três motores de match": o motor de perfis NÃO aplica a regra dos concorrentes
-    // (satisfaz devolve true no have === need e no mesmo objeto). Uniformizar é decisão de produto, não ajuste local.
-    C01: "motor de perfis não aplica a regra dos concorrentes (decisão de produto em aberto)",
-    C02: "motor de perfis não aplica a regra dos concorrentes (decisão de produto em aberto)",
-    C03: "motor de perfis não aplica a regra dos concorrentes (decisão de produto em aberto)",
-    C05: "motor de perfis não aplica a regra dos concorrentes (decisão de produto em aberto)",
-  },
-};
+const LACUNAS_CONHECIDAS: Record<Motor, Record<string, string>> = { privado: {}, perfis: {} };
 
-function casaNoPrivado(par: Par): boolean {
-  const asset = { slug: slugifyMatchTag(par.oferta.rotulo), label: par.oferta.rotulo, category: par.oferta.categoria };
-  const need = { slug: slugifyMatchTag(par.procura.rotulo), label: par.procura.rotulo, category: par.procura.categoria };
-  return scoreMatch(asset, need).score >= CORTE_PRIVADO;
+const itens = (par: Par) => ({
+  asset: { slug: slugifyMatchTag(par.oferta.rotulo), label: par.oferta.rotulo, category: par.oferta.categoria },
+  need: { slug: slugifyMatchTag(par.procura.rotulo), label: par.procura.rotulo, category: par.procura.categoria },
+});
+
+/**
+ * `similaridade` simula o recálculo com o critério semântico estreito ligado: o motor só mede (e só manda o texto ao
+ * provedor) quando nenhuma regra casou e as guardas passam. Sem `similaridade`, o motor como está em produção.
+ */
+function casaNoPrivado(par: Par, similaridade?: (par: Par) => number): boolean {
+  const { asset, need } = itens(par);
+  const r = scoreMatch(asset, need);
+  if (r.score || !similaridade || !semanticoEstreitoPodeValer(asset, need)) return r.score >= CORTE_PRIVADO;
+  return scoreMatch(asset, need, similaridade(par)).score >= CORTE_PRIVADO;
 }
 
 /**
@@ -80,8 +81,8 @@ type Medida = {
   violacoes: Par[];
 };
 
-function medir(motor: Motor): Medida {
-  const casa = motor === "privado" ? casaNoPrivado : casaNoDePerfis;
+function medir(motor: Motor, similaridade?: (par: Par) => number): Medida {
+  const casa = motor === "privado" ? (par: Par) => casaNoPrivado(par, similaridade) : casaNoDePerfis;
   const m: Medida = { motor, acertosCasa: [], faltas: [], falsosCasa: [], acertosNaoCasa: [], violacoes: [] };
   for (const par of PARES) {
     const casou = casa(par);
@@ -95,6 +96,26 @@ function medir(motor: Motor): Medida {
 }
 
 const pct = (a: number, b: number) => (b === 0 ? "—" : `${Math.round((100 * a) / b)}%`);
+
+const precisao = (m: Medida) => m.acertosCasa.length / Math.max(1, m.acertosCasa.length + m.falsosCasa.length);
+
+/**
+ * A fixture dos vetores do gabarito (N7): gerada UMA vez por scripts/rede-de-teste/gerar-embeddings-da-rede.mjs, com a
+ * chave do Gemini no ambiente de quem roda, e gravada no repositório para o teste rodar sem rede. Cada vetor é
+ * normalizado e quantizado em int8 (base64) com a escala dele; o cosseno sai com erro da ordem de 0,001.
+ */
+const CAMINHO_DA_FIXTURE = path.resolve(__dirname, "../scripts/rede-de-teste/embeddings-da-rede.json");
+type Fixture = { modelo: string; tarefa: string; vetores: Record<string, { escala: number; int8: string }> };
+
+function carregarFixture(): Map<string, number[]> | null {
+  if (!fs.existsSync(CAMINHO_DA_FIXTURE)) return null;
+  const fixture = JSON.parse(fs.readFileSync(CAMINHO_DA_FIXTURE, "utf8")) as Fixture;
+  const vetores = new Map<string, number[]>();
+  for (const [texto, { escala, int8 }] of Object.entries(fixture.vetores)) {
+    vetores.set(texto, Array.from(new Int8Array(Buffer.from(int8, "base64"))).map(v => v * escala));
+  }
+  return vetores;
+}
 
 function relatorio(m: Medida): string {
   const casados = m.acertosCasa.length + m.falsosCasa.length;
@@ -130,6 +151,17 @@ describe("N8 — rede de teste com armadilhas", () => {
     }
   });
 
+  it("N7: a necessidade que na verdade OFERECE o serviço não casa com ele, e o pedido com 'disponível' segue casando", () => {
+    const porId = new Map(PARES.map(par => [par.id, par]));
+    for (const id of ["S06", "S07", "S08"]) {
+      const par = porId.get(id)!;
+      expect(casaNoPrivado(par), `${id} privado`).toBe(false);
+      expect(casaNoDePerfis(par), `${id} perfis`).toBe(false);
+    }
+    expect(casaNoPrivado(porId.get("P21")!)).toBe(true);
+    expect(casaNoDePerfis(porId.get("P21")!)).toBe(true);
+  });
+
   for (const motor of ["privado", "perfis"] as const) {
     it(`motor ${motor}: nenhuma armadilha proibida casa (fora as lacunas conhecidas)`, () => {
       const m = medir(motor);
@@ -141,4 +173,63 @@ describe("N8 — rede de teste com armadilhas", () => {
       expect(resolvidas, "lacuna conhecida não acontece mais: tire de LACUNAS_CONHECIDAS").toEqual([]);
     });
   }
+});
+
+describe("N7 — o critério semântico estreito, medido no gabarito", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("desligado por padrão: nem a similaridade máxima muda a medida", () => {
+    vi.stubEnv("MATCH_SEMANTICO_ESTREITO", "");
+    const sem = medir("privado");
+    const comUm = medir("privado", () => 1);
+    expect(comUm.acertosCasa.map(p => p.id)).toEqual(sem.acertosCasa.map(p => p.id));
+    expect(comUm.falsosCasa.map(p => p.id)).toEqual(sem.falsosCasa.map(p => p.id));
+  });
+
+  it("as guardas recusam TODA armadilha proibida, seja qual for o vetor", () => {
+    // O pior caso: o provedor devolve similaridade 1 para qualquer par. Nenhuma armadilha proibida (concorrente,
+    // palavra solta, serviço sem demanda) pode casar: quem as barra são as guardas, não o limiar.
+    vi.stubEnv("MATCH_SEMANTICO_ESTREITO", "1");
+    for (const par of PARES.filter(p => PROIBIDAS.has(p.armadilha))) {
+      const { asset, need } = itens(par);
+      expect(semanticoEstreitoPodeValer(asset, need), `${par.id} ${par.oferta.rotulo} × ${par.procura.rotulo}`).toBe(false);
+    }
+    expect(medir("privado", () => 1).violacoes.map(p => p.id)).toEqual([]);
+  });
+
+  it("as guardas deixam passar as paráfrases sem palavra em comum e recusam a que repete uma palavra", () => {
+    const elegiveis = PARES.filter(par => {
+      const { asset, need } = itens(par);
+      return !casaNoPrivado(par) && semanticoEstreitoPodeValer(asset, need);
+    }).map(par => par.id);
+    // P08, P09, P14 e P15 são as paráfrases que só o sentido casa; N01 e N02 (sem relação) ficam com o limiar.
+    // P19 repete "água" dos dois lados: a guarda da palavra em comum a recusa (o custo aceito).
+    expect(elegiveis).toEqual(["P08", "P09", "P14", "P15", "N01", "N02"]);
+  });
+
+  const vetores = carregarFixture();
+  it.skipIf(!vetores)("com os vetores do gabarito: a precisão não cai e nenhuma armadilha proibida casa", () => {
+    vi.stubEnv("MATCH_SEMANTICO_ESTREITO", "1");
+    const similaridade = (par: Par) => {
+      const a = vetores!.get(par.oferta.rotulo);
+      const b = vetores!.get(par.procura.rotulo);
+      return a && b ? cosineSimilarity(a, b) : 0;
+    };
+    // A calibração: a similaridade de cada par que as guardas deixam chegar ao limiar.
+    const elegiveis = PARES.filter(par => {
+      const { asset, need } = itens(par);
+      return !casaNoPrivado(par) && semanticoEstreitoPodeValer(asset, need);
+    });
+    const maiorNaoCasa = Math.max(0, ...elegiveis.filter(p => p.esperado === "nao-casa").map(similaridade));
+    console.log([
+      `Calibração (limiar atual ${LIMIAR_SEMANTICO_ESTREITO}; o limiar seguro passa de ${maiorNaoCasa.toFixed(3)}):`,
+      ...elegiveis.map(p => `  ${p.id} [${p.esperado}] ${similaridade(p).toFixed(3)} "${p.oferta.rotulo}" × "${p.procura.rotulo}"`),
+    ].join("\n"));
+    const antes = medir("privado");
+    const depois = medir("privado", similaridade);
+    console.log(`Com o semântico estreito ligado — ${relatorio(depois)}`);
+    expect(depois.violacoes.map(p => p.id), "armadilha proibida casou").toEqual([]);
+    expect(precisao(depois)).toBeGreaterThanOrEqual(precisao(antes));
+    expect(maiorNaoCasa, "o limiar tem de ficar acima do par sem relação mais parecido").toBeLessThan(LIMIAR_SEMANTICO_ESTREITO);
+  });
 });

@@ -1,5 +1,5 @@
 {
-  "sobre": "Rede FICTÍCIA para medir os motores de match (N8). Nenhum nome, empresa ou dado é real. Cada par é uma oferta (o que um contato possui) diante de uma procura (o que outro contato procura), com o gabarito: 'casa' ou 'nao-casa'. As armadilhas proibidas pela regra do projeto (concorrente, palavra-solta, servico-sem-demanda) nunca podem casar; as paráfrases que hoje não casam são o que o N7 vai medir. Como ler: docs/medir-o-match.md.",
+  "sobre": "Rede FICTÍCIA para medir os motores de match (N8). Nenhum nome, empresa ou dado é real. Cada par é uma oferta (o que um contato possui) diante de uma procura (o que outro contato procura), com o gabarito: 'casa' ou 'nao-casa'. As armadilhas proibidas pela regra do projeto (concorrente, palavra-solta, servico-sem-demanda) nunca podem casar; as paráfrases que não casam são a régua do critério semântico estreito (N7). Como ler: docs/medir-o-match.md.",
   "contatos": {
     "c01": { "empresa": "Vinícola Imaginária", "cargo": "Diretora comercial", "cidade": "Bento Gonçalves" },
     "c02": { "empresa": "Importadora Faz de Conta", "cargo": "Compradora", "cidade": "Lisboa" },
@@ -66,7 +66,11 @@
     "c63": { "empresa": "Biscoitos Exemplo", "cargo": "Diretora de compras", "cidade": "Marília" },
     "c64": { "empresa": "Hortifruti Imaginário", "cargo": "Sócia", "cidade": "Juazeiro" },
     "c65": { "empresa": "Frutas de Mentira Export", "cargo": "Exportadora", "cidade": "Mossoró" },
-    "c66": { "empresa": "Pomar Teste Export", "cargo": "Exportadora", "cidade": "Petrolina" }
+    "c66": { "empresa": "Pomar Teste Export", "cargo": "Exportadora", "cidade": "Petrolina" },
+    "c67": { "empresa": "Contas de Mentira", "cargo": "Contadora", "cidade": "Bauru" },
+    "c68": { "empresa": "Escrita Fiscal Inventada", "cargo": "Contadora", "cidade": "Pelotas" },
+    "c69": { "empresa": "Advocacia Faz de Conta", "cargo": "Advogado", "cidade": "Joinville" },
+    "c70": { "empresa": "Oficina Exemplo", "cargo": "Dona", "cidade": "Feira de Santana" }
   },
   "pares": [
     { "id": "P01", "armadilha": "exato", "esperado": "casa", "oferta": { "contato": "c03", "rotulo": "Café especial em grãos", "categoria": "Alimentos" }, "procura": { "contato": "c04", "rotulo": "Café especial em grãos", "categoria": "Alimentos" }, "porque": "a mesma coisa escrita igual" },
@@ -89,6 +93,7 @@
     { "id": "P18", "armadilha": "servico-familia", "esperado": "casa", "oferta": { "contato": "c32", "rotulo": "Logística", "categoria": "Serviços" }, "procura": { "contato": "c29", "rotulo": "Logística para exportar meu café", "categoria": "Serviços" }, "porque": "a necessidade nomeia a família, com a finalidade" },
     { "id": "P19", "armadilha": "parafrase", "esperado": "casa", "oferta": { "contato": "c33", "rotulo": "Terrenos com outorga de água", "categoria": "Imóveis" }, "procura": { "contato": "c34", "rotulo": "Área rural com água liberada para irrigação", "categoria": "Terras" }, "porque": "outorga de água é a água liberada para irrigar" },
     { "id": "P20", "armadilha": "sinonimo", "esperado": "casa", "oferta": { "contato": "c35", "rotulo": "Galpão para locação", "categoria": "Imóveis" }, "procura": { "contato": "c36", "rotulo": "Alugar armazém", "categoria": "Imóveis" }, "porque": "galpão para locação é o armazém que se quer alugar" },
+    { "id": "P21", "armadilha": "servico-familia", "esperado": "casa", "oferta": { "contato": "c30", "rotulo": "Contabilidade", "categoria": "Serviços" }, "procura": { "contato": "c70", "rotulo": "Procuro contador disponível aos sábados", "categoria": "Serviços" }, "porque": "pede contador; o 'disponível' ali é condição do pedido, não oferta" },
 
     { "id": "C01", "armadilha": "concorrente", "esperado": "nao-casa", "oferta": { "contato": "c37", "rotulo": "Exportar café", "categoria": "Comércio exterior" }, "procura": { "contato": "c29", "rotulo": "Exportar café", "categoria": "Comércio exterior" }, "porque": "as duas querem exportar café: concorrentes" },
     { "id": "C02", "armadilha": "concorrente", "esperado": "nao-casa", "oferta": { "contato": "c38", "rotulo": "Venda de soja", "categoria": "Commodities" }, "procura": { "contato": "c39", "rotulo": "Vender soja", "categoria": "Commodities" }, "porque": "as duas querem vender soja" },
@@ -109,6 +114,9 @@
     { "id": "S03", "armadilha": "servico-sem-demanda", "esperado": "nao-casa", "oferta": { "contato": "c59", "rotulo": "Tradução técnica", "categoria": "Serviços" }, "procura": { "contato": "c60", "rotulo": "Investimento para expansão", "categoria": "Serviços" }, "porque": "a categoria em comum não é demanda" },
     { "id": "S04", "armadilha": "servico-sem-demanda", "esperado": "nao-casa", "oferta": { "contato": "c11", "rotulo": "Consultoria em internacionalização", "categoria": "Serviços" }, "procura": { "contato": "c61", "rotulo": "Entrada de investidor internacional", "categoria": "Serviços" }, "porque": "pede a contraparte (investidor), não ajuda para se internacionalizar" },
     { "id": "S05", "armadilha": "servico-sem-demanda", "esperado": "nao-casa", "oferta": { "contato": "c62", "rotulo": "Assessoria de imprensa", "categoria": "Serviços" }, "procura": { "contato": "c63", "rotulo": "Fábrica de embalagens", "categoria": "Serviços" }, "porque": "quem procura fábrica não declarou precisar de assessoria de imprensa" },
+    { "id": "S06", "armadilha": "servico-sem-demanda", "esperado": "nao-casa", "oferta": { "contato": "c30", "rotulo": "Contabilidade", "categoria": "Serviços" }, "procura": { "contato": "c67", "rotulo": "Ofereço contabilidade para MEI", "categoria": "Serviços" }, "porque": "a prestadora escreveu a própria oferta no campo de necessidade: é a concorrente (validação da #154)" },
+    { "id": "S07", "armadilha": "servico-sem-demanda", "esperado": "nao-casa", "oferta": { "contato": "c30", "rotulo": "Contabilidade", "categoria": "Serviços" }, "procura": { "contato": "c68", "rotulo": "Contadora oferece serviços para MEI", "categoria": "Serviços" }, "porque": "oferta escrita como necessidade, na terceira pessoa (validação da #154)" },
+    { "id": "S08", "armadilha": "servico-sem-demanda", "esperado": "nao-casa", "oferta": { "contato": "c53", "rotulo": "Advocacia", "categoria": "Serviços" }, "procura": { "contato": "c69", "rotulo": "Advogado disponível para empresas", "categoria": "Serviços" }, "porque": "'disponível' anuncia a oferta, não pede advogado (validação da #154)" },
 
     { "id": "N01", "armadilha": "sem-relacao", "esperado": "nao-casa", "oferta": { "contato": "c15", "rotulo": "Armazém refrigerado", "categoria": "Logística" }, "procura": { "contato": "c64", "rotulo": "Terrenos com outorga", "categoria": "Imóveis" }, "porque": "nada a ver (o par que o semântico ligado casava em 31/08)" },
     { "id": "N02", "armadilha": "sem-relacao", "esperado": "nao-casa", "oferta": { "contato": "c13", "rotulo": "Azeite extravirgem", "categoria": "Alimentos" }, "procura": { "contato": "c18", "rotulo": "Investidor-anjo", "categoria": "Investimento" }, "porque": "nada a ver" }
