@@ -455,7 +455,10 @@ async function gravarResumo(
         eq(meetingSummaryItems.origin, "ai"), isNull(meetingSummaryItems.editedAt),
       ));
     }
-    const numeracao = numeracaoDoResumoRefeito(queFicam, resumo.itens);
+    // O ignorado da IA que sai e que a IA repete volta pendente, com a marca
+    // de que a dona o tinha ignorado (decisão 3 da PR #217; defeito do T29).
+    const ignoradosQueSaem = itensAtuais.filter(item => !itemQueFica(item) && item.status === "ignored");
+    const numeracao = numeracaoDoResumoRefeito(queFicam, resumo.itens, ignoradosQueSaem);
     for (const { id, position } of numeracao.queFicam) {
       if (queFicam.find(item => item.id === id)?.position === position) continue;
       await tx.update(meetingSummaryItems).set({ position })
@@ -467,6 +470,10 @@ async function gravarResumo(
         section: item.section, position: item.position, subject: item.subject, text: item.text, assignee: item.assignee, due: item.due,
         excerpt: item.excerpt, startSeconds: item.startSeconds, confidence: item.confidence.toFixed(3),
         status: "pending" as const, done: false, createdAt: agora, updatedAt: agora,
+        // O pendente com o estado de antes do Ignorar preenchido é o que a dona
+        // ignorou e a IA trouxe de volta (drizzle/schema.ts): a tela o avisa.
+        // A marca só vale enquanto o item está pendente.
+        statusBeforeIgnore: item.voltouDoIgnorado ? "pending" as const : null,
       })));
     }
     const r = await tx.update(meetingSummaries).set({
