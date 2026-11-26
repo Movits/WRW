@@ -100,6 +100,7 @@ const ID_DO_AVISO_DO_LIMITE = "gravacao-chegou-ao-limite";
  * todos, que falam da anterior.
  */
 const ID_DO_AVISO_SEM_COPIA = "gravacao-sem-copia-no-aparelho";
+const ID_DO_AVISO_PARTE_PERDIDA = "gravacao-parte-sem-copia-perdida";
 const ID_DO_AVISO_ENCERRADA_AO_SAIR = "gravacao-encerrada-ao-sair";
 /** O do arquivo em partes que subiu inteiro e cujo fim ficou para a retomada (H9a): o envio seguinte o fecha. */
 const ID_DO_AVISO_FIM_PENDENTE = "importacao-com-fim-pendente";
@@ -353,9 +354,13 @@ export default function Meetings() {
     // O servidor manda só o código; a frase sai no idioma da tela. O aviso fica
     // até ser fechado, porque quem grava pode não estar olhando.
     aoRecusarParte: codigo => toast.error(mensagemDaRecusaDaParte(codigo, t), { id: ID_DO_AVISO_DA_PARTE_RECUSADA, duration: Infinity, closeButton: true }),
-    // Sem a cópia no aparelho, uma queda de rede perde o trecho que estava
-    // subindo (G13b). O hook chama uma vez por gravação.
+    // Sem a cópia no aparelho, o trecho que não subiu depende desta tela
+    // aberta (G13b; #202). O hook chama uma vez por gravação.
     aoFicarSemCopia: () => toast.warning(t("meetings.deviceCopyUnavailable"), { id: ID_DO_AVISO_SEM_COPIA, duration: Infinity, closeButton: true }),
+    // O trecho sem cópia que não vai mais subir (a sessão acabou, ou a tela saiu
+    // sem conseguir guardá-lo): fica de fora da gravação, e a dona precisa
+    // saber, mesmo já em outra tela (o aviso é global). Revisão da #260.
+    aoPerderParte: () => toast.error(t("meetings.partLostNoCopy"), { id: ID_DO_AVISO_PARTE_PERDIDA, duration: Infinity, closeButton: true }),
     // O descarte guardado que a retomada terminou de excluir (G13b): o aviso de
     // que ele não tinha terminado deixa de valer.
     aoConcluirDescarte: () => toast.dismiss(ID_DO_AVISO_DO_DESCARTE_PENDENTE),

@@ -1627,7 +1627,8 @@
     "partRejectedTooLarge": "Un fragmento de la grabación superó el tamaño o la duración que acepta el servidor y quedó fuera de la transcripción.",
     "partRejectedUnreadable": "El servidor no pudo leer un fragmento de la grabación, que quedó fuera de la transcripción.",
     "partRejected": "El servidor rechazó un fragmento de la grabación, que quedó fuera de la transcripción.",
-    "deviceCopyUnavailable": "No se pudo guardar una copia de la grabación en este dispositivo. El envío continúa y, si se cae internet, vuelve a intentarlo solo. Deja esta página abierta hasta que termine el envío para que no se pierda ningún fragmento.",
+    "deviceCopyUnavailable": "No se pudo guardar una copia de la grabación en este dispositivo. El envío continúa y, si se cae internet, vuelve a intentarlo solo. Quédate en esta pantalla hasta que termine el envío: salir de ella o de la cuenta antes pierde el fragmento que todavía no se envió.",
+    "partLostNoCopy": "Un fragmento de la grabación no se envió y no se pudo guardar en este dispositivo, así que quedó fuera de la grabación. El resto sigue con normalidad.",
     "recordingEndedOnLeave": "La grabación se finalizó al salir de la pantalla. Lo grabado pasa a la transcripción.",
     "micLost": {
       "title": "El micrófono se desconectó",

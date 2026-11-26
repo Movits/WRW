@@ -1627,7 +1627,8 @@
     "partRejectedTooLarge": "Um trecho da gravação passou do tamanho ou do tempo que o servidor aceita e ficou de fora da transcrição.",
     "partRejectedUnreadable": "O servidor não conseguiu ler um trecho da gravação, que ficou de fora da transcrição.",
     "partRejected": "O servidor recusou um trecho da gravação, que ficou de fora da transcrição.",
-    "deviceCopyUnavailable": "Não foi possível guardar uma cópia da gravação neste aparelho. O envio continua e, se a internet cair, tenta de novo sozinho. Deixe esta página aberta até o envio terminar, para nenhum trecho se perder.",
+    "deviceCopyUnavailable": "Não foi possível guardar uma cópia da gravação neste aparelho. O envio continua e, se a internet cair, tenta de novo sozinho. Fique nesta tela até o envio terminar: sair dela ou da conta antes disso perde o trecho que ainda não subiu.",
+    "partLostNoCopy": "Um trecho da gravação não foi enviado e não pôde ser guardado neste aparelho: ele ficou de fora da gravação. O resto segue normalmente.",
     "recordingEndedOnLeave": "A gravação foi encerrada ao sair da tela. O que foi gravado segue para a transcrição.",
     "micLost": {
       "title": "O microfone desconectou",

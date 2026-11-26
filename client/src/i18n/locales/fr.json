@@ -1627,7 +1627,8 @@
     "partRejectedTooLarge": "Un passage de l'enregistrement a dépassé la taille ou la durée acceptée par le serveur et a été exclu de la transcription.",
     "partRejectedUnreadable": "Le serveur n'a pas pu lire un passage de l'enregistrement, qui a été exclu de la transcription.",
     "partRejected": "Le serveur a refusé un passage de l'enregistrement, qui a été exclu de la transcription.",
-    "deviceCopyUnavailable": "Impossible d'enregistrer une copie de l'enregistrement sur cet appareil. L'envoi continue et, si la connexion internet coupe, il réessaie tout seul. Laissez cette page ouverte jusqu'à la fin de l'envoi pour qu'aucun passage ne soit perdu.",
+    "deviceCopyUnavailable": "Impossible d'enregistrer une copie de l'enregistrement sur cet appareil. L'envoi continue et, si la connexion internet coupe, il réessaie tout seul. Restez sur cet écran jusqu'à la fin de l'envoi : le quitter ou vous déconnecter avant fait perdre le passage qui n'a pas encore été envoyé.",
+    "partLostNoCopy": "Un passage de l'enregistrement n'a pas été envoyé et n'a pas pu être conservé sur cet appareil : il est resté hors de l'enregistrement. Le reste continue normalement.",
     "recordingEndedOnLeave": "L'enregistrement a été terminé quand vous avez quitté l'écran. Ce qui a été enregistré part en transcription.",
     "micLost": {
       "title": "Le microphone s'est déconnecté",

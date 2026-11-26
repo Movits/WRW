@@ -128,6 +128,12 @@ export function useGravacaoEmPartes(opcoes: {
   aoRecusarParte?: (codigo: string | undefined) => void;
   /** A cópia de uma parte no aparelho falhou: uma vez por gravação. */
   aoFicarSemCopia?: () => void;
+  /**
+   * Uma parte sem cópia no aparelho que não subiu e não vai mais subir: a
+   * sessão acabou (401/403, o Sair) ou a tela saiu sem conseguir guardar a
+   * cópia. O trecho fica de fora da gravação, e a dona precisa saber.
+   */
+  aoPerderParte?: (meetingId: string, seq: number) => void;
   /** A exclusão no servidor de um descarte guardado terminou numa retomada (desta tela ou de toda a sessão). */
   aoConcluirDescarte?: (meetingId: string) => void;
 }) {
@@ -154,6 +160,7 @@ export function useGravacaoEmPartes(opcoes: {
   // gravação: o descarte as acorda, para a insistência parar já (e a sessão
   // desocupar) em vez de na próxima volta.
   const esperasSemCopia = useRef(new Map<string, Set<() => void>>());
+  const montada = useRef(true);
   const [pendentes, setPendentes] = useState(0);
   const [noAparelho, setNoAparelho] = useState(0);
   useOcupacao("audio-nao-enviado", noAparelho > 0);
@@ -257,19 +264,32 @@ export function useGravacaoEmPartes(opcoes: {
 
   /**
    * A parte da gravação que não tem cópia no aparelho e cujo envio falhou
-   * (rede, deploy, sessão vencida, outra aba com a trava). Ela só existe na
-   * memória desta aba: a retomada, que lê o aparelho, nunca a acharia, e o
-   * trecho sumia da gravação (o defeito achado na validação da #202). Aqui ela
-   * é tentada de novo, com espera crescente, até o servidor a confirmar ou
-   * recusar de vez. A cada volta a cópia é tentada de novo: a que der certo
-   * devolve a parte ao caminho de sempre (a retomada a manda depois).
+   * (rede, deploy, outra aba com a trava). Ela só existe na memória desta aba:
+   * a retomada, que lê o aparelho, nunca a acharia, e o trecho sumia da
+   * gravação (o defeito achado na validação da #202). Aqui ela é tentada de
+   * novo, com espera crescente, até o servidor a confirmar ou recusar de vez.
+   * A cada volta a cópia é tentada de novo: a que der certo devolve a parte ao
+   * caminho de sempre (a retomada da G13c a manda depois).
    *
    * Corre por fora da fila: as partes seguintes e o fim da gravação não
    * esperam por ela (o servidor aceita, depois do fim, as partes que faltavam
-   * até o total). Enquanto ela não sobe, a sessão fica ocupada: fechar a aba e
-   * o Sair perguntam antes. A gravação descartada para de tentar.
+   * até o total). Enquanto ela não sobe, a sessão fica ocupada: fechar a aba
+   * pergunta. A insistência para (revisão da #260):
+   * - no descarte da gravação: a dona mandou, nada a avisar;
+   * - no desmonte da tela: os relógios saem, e a parte tem uma última chance
+   *   de ir ao aparelho, para a retomada de toda tela logada seguir por ela;
+   * - na sessão encerrada (401/403, o Sair): nada mais sobe por esta aba, e a
+   *   cópia não é tentada, porque depois do Sair nenhuma voz fica no aparelho.
+   * Sem cópia no fim, a parte se perdeu, e a tela avisa (aoPerderParte). O
+   * aviso da cópia indisponível já pede que a dona fique na tela até o envio
+   * terminar.
    */
-  const insistirSemCopia = useCallback((id: string, parte: ParteDoArquivo, quemNoInicio: string | null) => {
+  const insistirSemCopia = useCallback((id: string, parte: ParteDoArquivo, quemNoInicio: string | null, desfechoDoEnvio: DesfechoDaParte) => {
+    // Sem a cópia, a parte se perdeu: avisa, menos na gravação descartada.
+    const perder = () => {
+      if (!descartadas.current.has(id)) atuais.current.aoPerderParte?.(id, parte.seq);
+    };
+    if (desfechoDoEnvio.tipo === "sem-sessao") return perder();
     const liberar = ocupar("enviando");
     const esperar = (ms: number) => new Promise<void>(resolve => {
       const esperas = esperasSemCopia.current.get(id) ?? new Set<() => void>();
@@ -284,21 +304,34 @@ export function useGravacaoEmPartes(opcoes: {
       esperas.add(acordar);
     });
     void (async () => {
-      let quem = quemNoInicio;
+      let quem = quemNoInicio ?? donas.current.get(id) ?? null;
       for (let tentativa = 0; ; tentativa += 1) {
-        await esperar(ESPERAS_DA_PARTE_SEM_COPIA_MS[Math.min(tentativa, ESPERAS_DA_PARTE_SEM_COPIA_MS.length - 1)]);
+        // A tela já saiu (ou saiu durante a espera): uma última chance de cópia, sem relógio.
+        if (montada.current) await esperar(ESPERAS_DA_PARTE_SEM_COPIA_MS[Math.min(tentativa, ESPERAS_DA_PARTE_SEM_COPIA_MS.length - 1)]);
         if (descartadas.current.has(id)) return;
         quem = quem ?? await dona();
         if (await copiar(id, parte, quem)) {
           // Agora no aparelho: a retomada a manda, e ela conta como áudio por enviar.
-          setNoAparelho(n => n + 1);
+          if (montada.current) setNoAparelho(n => n + 1);
           return;
         }
+        if (!montada.current) return perder();
         const resultado = await enviar(id, parte).catch((): DesfechoDaParte => ({ tipo: "passageira" }));
         if (resultado.tipo === "recebida" || resultado.tipo === "recusada") return;
+        if (resultado.tipo === "sem-sessao") return perder();
       }
     })().finally(liberar);
   }, [dona, copiar, enviar]);
+
+  // A tela montada: o desmonte acorda as esperas das partes sem cópia, para a
+  // insistência parar já, sem relógio pendurado (revisão da #260).
+  useEffect(() => {
+    montada.current = true;
+    return () => {
+      montada.current = false;
+      esperasSemCopia.current.forEach(esperas => esperas.forEach(acordar => acordar()));
+    };
+  }, []);
 
   // O fim de `id`, com `total` partes: o servidor o confirma, e a tela vai ao
   // detalhe (aoEncerrar). Cancelada antes, ou enquanto o fim estava no ar (o
@@ -346,7 +379,7 @@ export function useGravacaoEmPartes(opcoes: {
           // A que não chegou fica no aparelho, e a retomada a manda depois. Sem
           // a cópia, ela só existe na memória: esta aba insiste até subir.
           if (copiada) setNoAparelho(n => n + 1);
-          else insistirSemCopia(id, parte, quem);
+          else insistirSemCopia(id, parte, quem, desfecho);
         }
       }
       // A última declara o fim: sem áudio nela, o total conta só as partes que têm.

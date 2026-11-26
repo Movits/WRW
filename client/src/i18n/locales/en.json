@@ -1627,7 +1627,8 @@
     "partRejectedTooLarge": "A section of the recording exceeded the size or length the server accepts and was left out of the transcription.",
     "partRejectedUnreadable": "The server couldn't read a section of the recording, so it was left out of the transcription.",
     "partRejected": "The server rejected a section of the recording, so it was left out of the transcription.",
-    "deviceCopyUnavailable": "A copy of the recording couldn't be saved on this device. The upload continues and, if the internet drops, it retries on its own. Keep this page open until the upload finishes so no section is lost.",
+    "deviceCopyUnavailable": "A copy of the recording couldn't be saved on this device. The upload continues and, if the internet drops, it retries on its own. Stay on this screen until the upload finishes: leaving it or signing out before then loses the section that hasn't been uploaded yet.",
+    "partLostNoCopy": "A section of the recording wasn't uploaded and couldn't be saved on this device, so it was left out of the recording. The rest continues normally.",
     "recordingEndedOnLeave": "The recording was ended when you left the screen. What was recorded goes on to transcription.",
     "micLost": {
       "title": "The microphone disconnected",

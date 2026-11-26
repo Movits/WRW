@@ -1627,7 +1627,8 @@
     "partRejectedTooLarge": "Ein Abschnitt der Aufnahme hat die Größe oder Länge überschritten, die der Server annimmt, und fehlt in der Transkription.",
     "partRejectedUnreadable": "Der Server konnte einen Abschnitt der Aufnahme nicht lesen; er fehlt in der Transkription.",
     "partRejected": "Der Server hat einen Abschnitt der Aufnahme abgelehnt; er fehlt in der Transkription.",
-    "deviceCopyUnavailable": "Auf diesem Gerät konnte keine Kopie der Aufnahme gespeichert werden. Der Upload läuft weiter und versucht es bei einem Verbindungsabbruch selbst erneut. Lassen Sie diese Seite geöffnet, bis der Upload abgeschlossen ist, damit kein Abschnitt verloren geht.",
+    "deviceCopyUnavailable": "Auf diesem Gerät konnte keine Kopie der Aufnahme gespeichert werden. Der Upload läuft weiter und versucht es bei einem Verbindungsabbruch selbst erneut. Bleiben Sie auf diesem Bildschirm, bis der Upload abgeschlossen ist: Wer ihn vorher verlässt oder sich abmeldet, verliert den Abschnitt, der noch nicht hochgeladen wurde.",
+    "partLostNoCopy": "Ein Abschnitt der Aufnahme wurde nicht hochgeladen und konnte nicht auf diesem Gerät gespeichert werden; er fehlt in der Aufnahme. Der Rest läuft normal weiter.",
     "recordingEndedOnLeave": "Die Aufnahme wurde beim Verlassen des Bildschirms beendet. Das Aufgenommene geht in die Transkription.",
     "micLost": {
       "title": "Das Mikrofon wurde getrennt",
