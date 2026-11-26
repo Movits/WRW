@@ -182,6 +182,44 @@ describe("página pública de Privacidade", () => {
     expect(texto).toContain("art. 18 da LGPD");
   });
 
+  it("não promete que só a dona acessa a reunião: participantes e membras de equipe também leem", () => {
+    // Achado da validação da #261: a R1b (participantes) e a R2 (equipes) leem
+    // a reunião pronta, e o texto dizia "só você acessa".
+    render(<PrivacyPage />);
+
+    const texto = document.body.textContent ?? "";
+    expect(texto).toMatch(/participantes que\s+voc[êe] convida/);
+    expect(texto).toMatch(/membras da equipe/);
+    expect(texto).not.toMatch(/A reuni[ãa]o [ée] sua: s[óo] voc[êe] acessa/);
+  });
+
+  it("na exclusão da conta, diz o que fica e as exceções dos arquivos no armazenamento", () => {
+    render(<PrivacyPage />);
+
+    const texto = document.body.textContent ?? "";
+    expect(texto).toMatch(/consentimentos e das revoga[çc][õo]es do perfil de voz/);
+    expect(texto).toMatch(/quatro tipos de registro de auditoria/);
+    expect(texto).toMatch(/foto de perfil e os arquivos dos documentos de\s+oportunidade/);
+    expect(texto).toMatch(/aceites dos termos/);
+  });
+
+  it("não condiciona o acesso Ouro a um termo que pode não estar vigente", () => {
+    render(<PrivacyPage />);
+
+    const texto = document.body.textContent ?? "";
+    expect(texto).not.toMatch(/com o seu consentimento ao termo do Smart Match/);
+    expect(texto).toMatch(/Quando o\s+termo de acesso Ouro estiver publicado/);
+  });
+
+  it("cobre a cópia do áudio no aparelho e os escopos openid e email da conexão da Agenda", () => {
+    render(<PrivacyPage />);
+
+    const texto = document.body.textContent ?? "";
+    expect(texto).toMatch(/C[óo]pia do [áa]udio no seu aparelho/);
+    expect(texto).toMatch(/A conex[ãa]o tamb[ée]m pede o identificador e o e-mail/);
+    expect(texto).toMatch(/sala de negocia[çc][ãa]o/);
+  });
+
   it("usa o nome visível Marquesa Global Match, e não os antigos", () => {
     render(<PrivacyPage />);
 

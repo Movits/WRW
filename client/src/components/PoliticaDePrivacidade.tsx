@@ -124,21 +124,41 @@ export function PoliticaDePrivacidade() {
             Os dados que você insere sobre pessoas que conhece: nome, empresa, cargo, telefone,
             e-mail, redes sociais, foto, cartão de visita e o que cada uma possui e procura. Para
             quê: organizar a sua rede e encontrar oportunidades entre os contatos. Todo contato
-            nasce privado e só você o vê. Se você escolher o nível Ouro, os contatos marcados ficam
-            visíveis às contas Ouro, com o seu consentimento ao termo do Smart Match e com o
-            registro de cada leitura. No nível público vão só as oportunidades, sem nome, telefone,
+            nasce privado e só você o vê. Se você marcar um contato como "Autorizadas (Ouro)", as
+            contas Ouro (que incluem a administração e a presidência da plataforma) podem ler esse
+            contato, inclusive os dados pessoais dele, e cada leitura fica registrada. Quando o
+            termo de acesso Ouro estiver publicado na plataforma, essa leitura passa a depender
+            também da sua autorização a ele. No nível público vão só as oportunidades, sem nome, telefone,
             e-mail ou qualquer dado pessoal do contato. Você é responsável por ter fundamento para
             inserir dados de terceiros (Termo Geral, cláusula 7.5).
           </Item>
           <Item titulo="Reuniões gravadas.">
-            O áudio que você grava ou importa fica na sua conta por 30 dias e é apagado
-            automaticamente; a transcrição, o resumo e o que foi extraído deles ficam até você
+            O áudio que você grava ou importa fica na sua conta por 30 dias, contados da chegada
+            da última parte da gravação, e é apagado automaticamente; a transcrição, o resumo e o que foi extraído deles ficam até você
             excluir a reunião. Também pode virar reunião um documento (PDF ou fotos de um texto:
             o arquivo fica 30 dias, o texto lido fica até a exclusão) ou um vídeo público do
             YouTube (guardamos o link, a transcrição e o resumo, nunca o vídeo). As fotos e os
             desenhos que você anexa ao resumo ficam 30 dias. Para quê: transcrever, resumir e
-            ligar o que foi dito à sua rede. A reunião é sua: só você acessa, a menos que ligue o
-            link de compartilhamento ou envie o resumo por e-mail a quem escolher.
+            ligar o que foi dito à sua rede. A reunião é sua e nasce visível só para você. Ela
+            passa a ser lida também por quem você escolhe: quem abre o link de compartilhamento,
+            se você o ligar; quem recebe o resumo por e-mail que você envia; as participantes que
+            você convida para a reunião; e as membras da equipe da pasta onde a reunião está.
+            Participantes e membras leem a reunião pronta (transcrição, resumo e áudio) e não
+            podem mudá-la; tirar a reunião da pasta, remover a pessoa ou mandar a reunião para a
+            lixeira corta esse acesso.
+          </Item>
+          <Item titulo="Cópia do áudio no seu aparelho.">
+            Enquanto uma gravação está sendo enviada, cada parte do áudio fica guardada no
+            navegador do seu aparelho, para não se perder se a internet cair, e sai de lá quando o
+            servidor confirma que a recebeu. Sair da conta ou excluí-la apaga essas cópias. O
+            arquivo de áudio que você baixa fica no seu aparelho e não é apagado aos 30 dias.
+          </Item>
+          <Item titulo="Mensagens, sala de negociação e oportunidades.">
+            As mensagens que você troca com outras membras, as oportunidades e os documentos que
+            você cadastra nelas, os grupos estratégicos e, na sala de negociação, as mensagens, os
+            documentos e o aceite do acordo de confidencialidade. Para quê: aproximar as partes e
+            registrar a negociação. Na sala de negociação, as outras partes da sala veem o que você
+            envia nela.
           </Item>
           <Item titulo="Perfil de voz (opcional).">
             Uma amostra curta da sua voz, usada só para identificar você nas transcrições e nos
@@ -157,8 +177,12 @@ export function PoliticaDePrivacidade() {
           <Item titulo="Google Agenda (opcional).">
             Se você conecta a Google Agenda, a plataforma cria, altera e exclui, na sua agenda
             principal, os eventos das reuniões e dos lembretes que você marca aqui, com os
-            convidados que você escolhe. Ela não lê os outros eventos da sua agenda. A
-            autorização fica guardada cifrada e é revogada quando você desconecta ou exclui a conta.
+            convidados que você escolhe. A conexão também pede o identificador e o e-mail da conta
+            Google (escopos <code>openid</code> e <code>email</code>), para você saber qual conta
+            ligou. A permissão que o Google mostra na tela de autorização
+            (<code>calendar.events</code>) é mais larga do que o uso: a plataforma não lê os outros
+            eventos da sua agenda. A autorização fica guardada cifrada e é revogada quando você
+            desconecta ou exclui a conta.
           </Item>
           <Item titulo="Face ID e digital.">
             O reconhecimento do rosto ou da digital é feito pelo seu aparelho. A plataforma recebe
@@ -193,8 +217,8 @@ export function PoliticaDePrivacidade() {
 
       <Secao id="ia" titulo="4. Inteligência artificial">
         <p>
-          A IA da plataforma é o Google Gemini, usado pela API no plano pago, em que o Google não
-          usa os dados enviados para treinar os modelos dele. Ele transcreve o áudio, lê
+          A IA da plataforma é o Google Gemini, usado pela API no plano pago, que, pelos termos
+          da Google, não usa os dados enviados para treinar os modelos dela. Ele transcreve o áudio, lê
           documentos, vídeos do YouTube e documentos de identidade, escreve resumos, responde às
           suas perguntas sobre uma reunião, traduz e ajuda a completar os dados dos contatos. O
           Gemini pode processar os dados fora do Brasil.
@@ -214,6 +238,10 @@ export function PoliticaDePrivacidade() {
           por motivo justificado, registrado antes do acesso, e a organizadora é informada da data
           de cada consulta.
         </Citacao>
+        <p>
+          Além do link de compartilhamento, também leem a reunião pronta as participantes que
+          você convida e as membras da equipe da pasta (seção 3).
+        </p>
         <Citacao>
           Para gerar o áudio, o texto do resumo vai ao Gemini, da Google, que o lê com uma voz
           sintética. O áudio fica guardado na sua conta até a reunião ser excluída, e o mesmo resumo
@@ -259,19 +287,20 @@ export function PoliticaDePrivacidade() {
 
       <Secao id="administracao" titulo="7. Acesso da administração às gravações">
         <p>
-          As suas reuniões são suas. A administração da plataforma (administradoras e presidência,
+          A administração da plataforma (administradoras e presidência,
           nunca uma conta Ouro sem cargo) só consulta uma reunião gravada por motivo justificado:
           apuração de denúncia, segurança, suporte pedido pela própria usuária, obrigação legal ou
           ordem judicial. O motivo é registrado antes de qualquer leitura, e você vê, no detalhe da
           reunião, a data de cada consulta. A administração nunca vê a sua rede particular de
-          contatos por esse caminho, nem a amostra do seu perfil de voz.
+          contatos por esse caminho, nem a amostra do seu perfil de voz. A reunião gravada antes
+          de o aviso de gravação anunciar essa consulta fica fechada à administração.
         </p>
       </Secao>
 
       <Secao id="bases-legais" titulo="8. Bases legais">
         <p>
           Tratamos dados para executar o contrato com você (art. 7º, V, da LGPD; Termo Geral, cláusula 7.7), com o seu
-          consentimento quando ele é pedido (gravação de reuniões, Smart Match, perfil de voz e
+          consentimento quando ele é pedido (como na gravação de reuniões, no perfil de voz e na
           Google Agenda; para o perfil de voz, art. 11, I), para cumprir obrigações legais (art.
           7º, II) e, na segurança da conta e na prevenção de fraudes, pelo legítimo interesse (art.
           7º, IX). O consentimento pode ser retirado a qualquer momento, sem afetar o que foi feito
@@ -281,14 +310,15 @@ export function PoliticaDePrivacidade() {
 
       <Secao id="retencao" titulo="9. Por quanto tempo guardamos">
         <Lista>
-          <li>Áudio das reuniões, documentos de reunião e fotos e desenhos do resumo: 30 dias desde o envio.</li>
+          <li>Áudio das reuniões: 30 dias desde a chegada da última parte da gravação.</li>
+          <li>Documentos de reunião e fotos e desenhos do resumo: 30 dias desde o envio.</li>
           <li>Transcrição, resumo, áudio do resumo e o que foi extraído da reunião: até você excluir a reunião.</li>
           <li>Reunião na lixeira: 30 dias; depois é apagada de vez.</li>
           <li>Perfil de voz: até você desligá-lo ou excluir a conta.</li>
           <li>Perfil, contatos e demais dados da conta: até você os excluir ou excluir a conta.</li>
           <li>Sessão de acesso: até 90 dias desde o último uso, ou até você sair.</li>
-          <li>Registros de consentimento e de auditoria: o tempo necessário para provar o que foi
-            autorizado e quem acessou os seus dados, inclusive depois da exclusão da conta (seção 12).</li>
+          <li>Registros de consentimento e de auditoria: enquanto a conta existir. Depois da
+            exclusão ficam só os registros listados na seção 12.</li>
         </Lista>
       </Secao>
 
@@ -329,12 +359,25 @@ export function PoliticaDePrivacidade() {
       <Secao id="exclusao" titulo="12. Exclusão da conta">
         <p>
           Você exclui a conta pela página do seu perfil. A exclusão apaga a conta e os dados
-          ligados a ela, inclusive as reuniões, os áudios e o perfil de voz, e revoga a conexão
-          com a Google Agenda. Ficam só os registros que provam o que aconteceu: a auditoria de
-          quem acessou os seus dados, o registro dos consentimentos e das revogações (sem a voz) e
-          as referências à sua conta em registros de outras pessoas, sem nome nem e-mail. Os
-          arquivos que você baixou ou os resumos que enviou a outras pessoas ficam com quem os
-          recebeu.
+          ligados a ela: perfil, contatos, reuniões com os áudios e as transcrições, perfil de
+          voz, mensagens, oportunidades, salas de negociação, verificação de identidade, os
+          aceites dos termos e o restante do registro de auditoria e de segurança. Ela também
+          revoga a conexão com a Google Agenda. Ficam só:
+        </p>
+        <Lista>
+          <li>o registro dos consentimentos e das revogações do perfil de voz (data, hora,
+            versão e texto, sem a voz);</li>
+          <li>quatro tipos de registro de auditoria: a leitura dos contatos Ouro, a tentativa de
+            usar uma sessão já encerrada e a lista e a consulta de reuniões pela administração;</li>
+          <li>as referências à sua conta em registros de outras pessoas (por exemplo, quem
+            aprovou a oportunidade de outra membra), só com um número interno, sem nome nem e-mail.</li>
+        </Lista>
+        <p>
+          Duas exceções técnicas: o arquivo da foto de perfil e os arquivos dos documentos de
+          oportunidade saem do banco de dados, mas o arquivo em si fica no armazenamento, sem
+          ligação com a conta; e, se o armazenamento recusar apagar um áudio na hora, o apagamento
+          é tentado de novo automaticamente até sair. Os arquivos que você baixou e os resumos
+          que enviou a outras pessoas ficam com quem os recebeu.
         </p>
       </Secao>
 
@@ -346,8 +389,10 @@ export function PoliticaDePrivacidade() {
           <li>cookies de poucos minutos, cifrados, durante o login com Google e a conexão da Google Agenda.</li>
         </Lista>
         <p>
-          O navegador também guarda preferências da tela (como o idioma), que ficam só no seu
-          aparelho.
+          O navegador também guarda, só no seu aparelho: preferências da tela (como o idioma), o
+          histórico das suas buscas de reuniões, o rascunho do cadastro, a cópia das partes de
+          uma gravação até o envio (seção 3) e o registro das gravações a encerrar. Sair da conta
+          apaga a cópia das gravações.
         </p>
       </Secao>
 
