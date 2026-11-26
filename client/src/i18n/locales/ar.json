@@ -3227,6 +3227,7 @@
       "inviteEmail": "البريد الإلكتروني",
       "googleCalendar": "تقويم Google",
       "downloadIcs": "ملف ICS",
+      "icsInApp": "داخل التطبيق لا يتم تنزيل ملف .ics. لإضافة الحدث إلى تقويم الهاتف، افتح هذه الصفحة في المتصفح واضغط على .ics هناك.",
       "edit": "تعديل",
       "delete": "حذف",
       "deleteConfirm": "إزالة «{{title}}» من الجدول؟ يبقى التسجيل، إن وُجد، في الاجتماعات.",
@@ -4626,5 +4627,12 @@
     "errTooManyTasks": "وصل الفريق إلى 500 مهمة. احذفي القديمة لإنشاء مهام جديدة.",
     "errDueInvalid": "الموعد النهائي ليس تاريخًا صالحًا.",
     "errAgendaNotFound": "هذا الاجتماع المجدول لم يعد موجودًا. حدّثي الصفحة."
+  },
+  "pushNoCelular": {
+    "reuniaoPronta": "اجتماعك جاهز",
+    "reuniaoProntaSemResumo": "اجتماعك جاهز، بدون الملخص",
+    "lembreteDaAcao": "تذكير: موعد خطوة تالية اليوم",
+    "lembreteDaReuniao": "تذكير: اجتماع الساعة {{hora}}",
+    "corpo": "اضغط للفتح في Marquesa Global Match."
   }
 }

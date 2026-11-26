@@ -28,6 +28,8 @@ import { ROTA_DO_PERFIL } from "@shared/google-agenda";
 import type { MotivoSemGoogle, ResultadoNaGoogle } from "@shared/google-agenda-eventos";
 import { ROTA_DAS_REUNIOES, rotaDaReuniao, rotaGravarDaAgenda } from "@shared/rotas";
 import { conviteDaReuniao } from "@/lib/convite-da-agenda";
+import { baixarIcsOuAvisar } from "@/components/AcaoNaAgenda";
+import { SoNoNavegador } from "@/components/SoNoNavegador";
 
 /**
  * A agenda de reuniões (H16a do plano do gravador): a dona marca a reunião,
@@ -208,11 +210,12 @@ export function entradaDoFormulario(formulario: Formulario, t: TranslateFn, fuso
 }
 
 /**
- * O .ics, feito aqui: nada vai ao servidor. O link temporário sai depois do
- * download. A reunião mudada sai com o mesmo UID e o SEQUENCE maior: o
- * calendário que já a tem troca pela versão nova.
+ * O .ics, feito aqui: nada vai ao servidor. A reunião mudada sai com o mesmo
+ * UID e o SEQUENCE maior: o calendário que já a tem troca pela versão nova.
+ * Dentro do app das lojas não baixa: um aviso manda ao navegador
+ * (baixarIcsOuAvisar, em components/AcaoNaAgenda.tsx).
  */
-function baixarIcs(reuniao: ReuniaoDaAgenda) {
+function baixarIcs(reuniao: ReuniaoDaAgenda, t: (chave: string) => string) {
   const conteudo = montarIcs({
     uid: `${reuniao.id}@wrwglobal.org`,
     titulo: reuniao.titulo,
@@ -223,14 +226,7 @@ function baixarIcs(reuniao: ReuniaoDaAgenda) {
     revisao: revisaoDoIcs(reuniao.createdAt, reuniao.updatedAt),
     modificadoEmMs: reuniao.updatedAt,
   });
-  const endereco = URL.createObjectURL(new Blob([conteudo], { type: "text/calendar;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = endereco;
-  link.download = nomeDoArquivoIcs(reuniao.titulo);
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(endereco), 10_000);
+  baixarIcsOuAvisar(conteudo, nomeDoArquivoIcs(reuniao.titulo), t);
 }
 
 export default function Agenda() {
@@ -379,7 +375,7 @@ export default function Agenda() {
         <div>
           <p className="text-amber-300 text-sm font-semibold tracking-wide">{t("agenda.eyebrow")}</p>
           <h1 className="text-3xl md:text-4xl font-bold mt-1">{t("agenda.title")}</h1>
-          <p className="text-white/55 mt-2 max-w-2xl">{t("agenda.subtitle")}</p>
+          <SoNoNavegador><p className="text-white/55 mt-2 max-w-2xl">{t("agenda.subtitle")}</p></SoNoNavegador>
         </div>
         {!formulario && <button type="button" onClick={() => abrir(formularioNovo(), null)}
           className="inline-flex justify-center items-center gap-2 rounded-xl bg-[#c98f70] text-[#1a120c] font-bold px-5 py-3 hover:bg-[#efcba8]">
@@ -620,7 +616,7 @@ function CartaoDaAgendada({ reuniao, agora, idioma, googleLigada, googleDesligad
         <CalendarPlus size={15}/> {t("agenda.card.googleCalendar")}
       </a>}
       {googleLigada && <NaGoogleAgenda estado={reuniao.google} futura={agora < fim} mandando={mandandoParaGoogle} aoMandar={aoMandarParaGoogle}/>}
-      <button type="button" onClick={() => baixarIcs(reuniao)} className={CLASSE_DO_BOTAO}>
+      <button type="button" onClick={() => baixarIcs(reuniao, t)} className={CLASSE_DO_BOTAO}>
         <Download size={15}/> {t("agenda.card.downloadIcs")}
       </button>
     </div>

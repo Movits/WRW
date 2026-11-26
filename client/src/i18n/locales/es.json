@@ -3227,6 +3227,7 @@
       "inviteEmail": "Correo",
       "googleCalendar": "Google Calendar",
       "downloadIcs": "Archivo .ics",
+      "icsInApp": "Dentro de la app, el archivo .ics no se descarga. Para añadir el evento a la agenda del móvil, abre esta página en el navegador y toca .ics allí.",
       "edit": "Editar",
       "delete": "Eliminar",
       "deleteConfirm": "¿Quitar «{{title}}» de la agenda? La grabación, si la hay, sigue en Reuniones.",
@@ -4626,5 +4627,12 @@
     "errTooManyTasks": "El equipo llegó a 500 tareas. Borra las antiguas para crear nuevas.",
     "errDueInvalid": "El plazo no es una fecha válida.",
     "errAgendaNotFound": "Esta reunión programada ya no existe. Actualiza la página."
+  },
+  "pushNoCelular": {
+    "reuniaoPronta": "Tu reunión está lista",
+    "reuniaoProntaSemResumo": "Tu reunión está lista, sin el resumen",
+    "lembreteDaAcao": "Recordatorio: una próxima acción vence hoy",
+    "lembreteDaReuniao": "Recordatorio: reunión a las {{hora}}",
+    "corpo": "Toca para abrir en Marquesa Global Match."
   }
 }

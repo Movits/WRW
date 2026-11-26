@@ -94,6 +94,12 @@ export const PLANO_DE_LIMPEZA = [
   // participante. O exame não convida ninguém; a conta QA que convidar sai com o resto.
   { tabela: "meeting_participants", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_participants", coluna: "userId", chave: "id", acao: "apagar" },
+  // A sala de vídeo (V1): as salas da dona QA, as presenças nelas e a conta QA
+  // como participante na sala de outra. O exame não abre sala; a conta QA que
+  // abrir sai com o resto. O consumo do mês não tem coluna de pessoa e fica.
+  { tabela: "meeting_room_presences", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "meeting_room_presences", coluna: "userId", chave: "id", acao: "apagar" },
+  { tabela: "meeting_rooms", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meetings", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // Os espaços de equipe (R2): o exame não cria equipe, mas a conta QA que
   // criar, ou que entrar numa, sai com o resto. Antes das pastas.
@@ -177,6 +183,9 @@ export const PLANO_DE_LIMPEZA = [
   // chave sintética sai junto com o resto.
   { tabela: "chaves_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "desafios_de_chave_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
+  // Os aparelhos do push no celular. O exame não usa o app, então o DELETE não
+  // encontra nada.
+  { tabela: "dispositivos_de_push", coluna: "userId", chave: "id", acao: "apagar" },
   // A conta Google ligada para entrar (A8). O exame não entra com o Google.
   { tabela: "contas_google", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "trusted_devices", coluna: "userId", chave: "id", acao: "apagar" },

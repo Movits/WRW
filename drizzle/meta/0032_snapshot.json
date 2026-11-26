@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "417d2d3f-68c7-445b-806f-7e847e3d1fa7",
+  "id": "8fba2f7b-f899-4850-bde2-bfd9fb487d8e",
   "prevId": "be9379e3-d2b3-4ce5-a337-ed7211d76fe4",
   "tables": {
     "agenda_reunioes": {
@@ -738,106 +738,6 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
-    "chaves_de_cruzamento": {
-      "name": "chaves_de_cruzamento",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "lado": {
-          "name": "lado",
-          "type": "varchar(8)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "item_id": {
-          "name": "item_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "contact_id": {
-          "name": "contact_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "chave": {
-          "name": "chave",
-          "type": "varchar(16)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "versao": {
-          "name": "versao",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        }
-      },
-      "indexes": {
-        "cdc_lado_item_chave_unique": {
-          "name": "cdc_lado_item_chave_unique",
-          "columns": [
-            "lado",
-            "item_id",
-            "chave"
-          ],
-          "isUnique": true
-        },
-        "cdc_lado_chave_contato_idx": {
-          "name": "cdc_lado_chave_contato_idx",
-          "columns": [
-            "lado",
-            "chave",
-            "contact_id"
-          ],
-          "isUnique": false
-        },
-        "cdc_contato_idx": {
-          "name": "cdc_contato_idx",
-          "columns": [
-            "contact_id"
-          ],
-          "isUnique": false
-        },
-        "cdc_owner_idx": {
-          "name": "cdc_owner_idx",
-          "columns": [
-            "owner_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "chaves_de_cruzamento_id": {
-          "name": "chaves_de_cruzamento_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
     "conexoes_participantes": {
       "name": "conexoes_participantes",
       "columns": {
@@ -1338,6 +1238,95 @@
           "name": "consents_id",
           "columns": [
             "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "consumo_das_salas": {
+      "name": "consumo_das_salas",
+      "columns": {
+        "sala_id": {
+          "name": "sala_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "nome_no_fornecedor": {
+          "name": "nome_no_fornecedor",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mes": {
+          "name": "mes",
+          "type": "varchar(7)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "criada_em": {
+          "name": "criada_em",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expira_em": {
+          "name": "expira_em",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "encerrada_em": {
+          "name": "encerrada_em",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "segundos_pessoa": {
+          "name": "segundos_pessoa",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "medida": {
+          "name": "medida",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "consumo_das_salas_nome_unique": {
+          "name": "consumo_das_salas_nome_unique",
+          "columns": [
+            "nome_no_fornecedor"
+          ],
+          "isUnique": true
+        },
+        "consumo_das_salas_mes_idx": {
+          "name": "consumo_das_salas_mes_idx",
+          "columns": [
+            "mes"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "consumo_das_salas_sala_id": {
+          "name": "consumo_das_salas_sala_id",
+          "columns": [
+            "sala_id"
           ]
         }
       },
@@ -3543,169 +3532,6 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
-    "fila_de_cruzamento": {
-      "name": "fila_de_cruzamento",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tipo": {
-          "name": "tipo",
-          "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "estado": {
-          "name": "estado",
-          "type": "varchar(12)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'pendente'"
-        },
-        "cursor": {
-          "name": "cursor",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "de_novo": {
-          "name": "de_novo",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "vivo": {
-          "name": "vivo",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false,
-          "default": true
-        },
-        "processados": {
-          "name": "processados",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "conexoes": {
-          "name": "conexoes",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "tentativas": {
-          "name": "tentativas",
-          "type": "int",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "erro": {
-          "name": "erro",
-          "type": "varchar(300)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lock_token": {
-          "name": "lock_token",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "locked_until": {
-          "name": "locked_until",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "criada_em": {
-          "name": "criada_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "atualizada_em": {
-          "name": "atualizada_em",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "fdc_estado_idx": {
-          "name": "fdc_estado_idx",
-          "columns": [
-            "estado",
-            "criada_em"
-          ],
-          "isUnique": false
-        },
-        "fdc_dona_idx": {
-          "name": "fdc_dona_idx",
-          "columns": [
-            "owner_id",
-            "tipo",
-            "estado"
-          ],
-          "isUnique": false
-        },
-        "fdc_dona_tipo_vivo_unique": {
-          "name": "fdc_dona_tipo_vivo_unique",
-          "columns": [
-            "owner_id",
-            "tipo",
-            "vivo"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "fila_de_cruzamento_id": {
-          "name": "fila_de_cruzamento_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
     "gold_access_grants": {
       "name": "gold_access_grants",
       "columns": {
@@ -5641,6 +5467,270 @@
       "compositePrimaryKeys": {
         "meeting_recordings_id": {
           "name": "meeting_recordings_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "meeting_room_presences": {
+      "name": "meeting_room_presences",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "room_id": {
+          "name": "room_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "userId": {
+          "name": "userId",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "enum('owner','participant','guest')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "guest_name": {
+          "name": "guest_name",
+          "type": "varchar(60)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "notice_version": {
+          "name": "notice_version",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "notice_accepted_at": {
+          "name": "notice_accepted_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "token_issued_at": {
+          "name": "token_issued_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token_expires_at": {
+          "name": "token_expires_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "joined_at": {
+          "name": "joined_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "left_at": {
+          "name": "left_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "seconds_in_room": {
+          "name": "seconds_in_room",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "open_session_id": {
+          "name": "open_session_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "open_session_since": {
+          "name": "open_session_since",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_session_id": {
+          "name": "last_session_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "meeting_room_presences_room_user_unique": {
+          "name": "meeting_room_presences_room_user_unique",
+          "columns": [
+            "room_id",
+            "userId"
+          ],
+          "isUnique": true
+        },
+        "meeting_room_presences_user_idx": {
+          "name": "meeting_room_presences_user_idx",
+          "columns": [
+            "userId"
+          ],
+          "isUnique": false
+        },
+        "meeting_room_presences_owner_room_idx": {
+          "name": "meeting_room_presences_owner_room_idx",
+          "columns": [
+            "owner_id",
+            "room_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "meeting_room_presences_id": {
+          "name": "meeting_room_presences_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "meeting_rooms": {
+      "name": "meeting_rooms",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "meeting_id": {
+          "name": "meeting_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_room_name": {
+          "name": "provider_room_name",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "guest_link_hash": {
+          "name": "guest_link_hash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "meeting_rooms_provider_room_unique": {
+          "name": "meeting_rooms_provider_room_unique",
+          "columns": [
+            "provider_room_name"
+          ],
+          "isUnique": true
+        },
+        "meeting_rooms_guest_link_unique": {
+          "name": "meeting_rooms_guest_link_unique",
+          "columns": [
+            "guest_link_hash"
+          ],
+          "isUnique": true
+        },
+        "meeting_rooms_owner_meeting_idx": {
+          "name": "meeting_rooms_owner_meeting_idx",
+          "columns": [
+            "owner_id",
+            "meeting_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "meeting_rooms_id": {
+          "name": "meeting_rooms_id",
           "columns": [
             "id"
           ]

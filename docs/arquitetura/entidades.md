@@ -206,7 +206,7 @@ usuárias. Uma entidade grande pode ter dezenas de milhares: o teto por entidade
 - **Painel:** 50 por página, busca pelo código, pelo documento inteiro (HMAC, índice) ou por
   parte do nome (LIKE parametrizado sobre os contatos da entidade).
 
-**O índice de cruzamento** (`chaves_de_cruzamento`, migração `0032`, e
+**O índice de cruzamento** (`chaves_de_cruzamento`, migração `0034`, e
 `shared/chaves-de-cruzamento.ts`). Cada item de "o que tem" e de "o que precisa" ganha as
 suas chaves, guardadas como hash (16 hex do SHA-256, sem sal; o texto do item não fica na
 tabela, mas o hash de termo curto se reverte por dicionário, então a tabela é dado pessoal da
@@ -269,7 +269,7 @@ orçamento (com a vez devolvida ao servidor a cada fatia), para nenhum par ficar
 (`TETO_POR_CONTRAPARTE_POR_RODADA`, de 15/09, escolhido por uma sessão do Claude), e na fila os
 dois valiam pelo trabalho inteiro, contados na linha (`por_contraparte`). Com as entidades, o
 teto por contraparte escondia quase todos os associados, que são contatos de UMA conta. Os dois
-saíram, com a coluna (a migração 0032 ainda não tinha ido à `main` e foi gerada de novo sem
+saíram, com a coluna (a migração do índice, hoje 0034, ainda não tinha ido à `main` e foi gerada de novo sem
 ela): todo par que combina é registrado, uma vez só (a chave do par em
 `conexoes_registradas`, sem direção), e a tela mostra todas, da nota maior à menor, em páginas
 de 10 paginadas no servidor (`networkInteligente.conexoes` com `pagina`,

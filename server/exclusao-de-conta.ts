@@ -72,7 +72,7 @@ import { PREFIXO_DO_PERFIL_DE_VOZ } from "@shared/perfil-de-voz";
 import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
   agendaReunioes, aiMatchSuggestions, entidadeMembros, pedidosPelaEntidade, entidades, importacaoDocumentosVistos, importacoesDeEntidade, auditLogs, chavesDeAcesso, contasGoogle, connections, consents, contactAssets, contactContexts,
-  desafiosDeChaveDeAcesso,
+  desafiosDeChaveDeAcesso, dispositivosDePush,
   contactNeeds, chavesDeCruzamento, filaDeCruzamento, contextMedia, contextParticipants, contexts, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
   enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAttachments, meetingAudioSlices, meetingContactSuggestions, meetingDocuments,
@@ -91,6 +91,7 @@ import {
   resumoEmAudio, buscasDoComplemento,
   meetingParticipants, meetingFolderMembers, meetingFolderTasks,
   voiceProfiles,
+  meetingRooms, meetingRoomPresences,
 } from "../drizzle/schema";
 
 /**
@@ -266,6 +267,12 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // As participantes das reuniões da dona (R1b): as participações e os convites
   // pendentes (só o hash do token). Antes das reuniões, que elas apontam.
   { tabela: meetingParticipants, coluna: meetingParticipants.ownerId, origem: "openId" },
+  // A sala de vídeo das reuniões da dona (V1) e quem recebeu ficha nela: as
+  // participantes e os visitantes (só o nome que digitaram), com o aceite do
+  // aviso. A presença do visitante pertence à reunião da dona e sai com ela.
+  // Antes das reuniões; o consumo do mês (consumo_das_salas) não tem pessoa e fica.
+  { tabela: meetingRoomPresences, coluna: meetingRoomPresences.ownerId, origem: "openId" },
+  { tabela: meetingRooms, coluna: meetingRooms.ownerId, origem: "openId" },
   // A agenda de reuniões (H16a): o título, a hora, o local e os participantes
   // (nome e e-mail de terceiros) que a dona marcou.
   { tabela: agendaReunioes, coluna: agendaReunioes.ownerId, origem: "openId" },
@@ -319,6 +326,9 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // todas, e a voz que a dona tinha ligado a ela volta ao nome livre ou a
   // "Falante n" (a leitura ignora a participação que não existe mais).
   { tabela: meetingParticipants, coluna: meetingParticipants.userId, origem: "id" },
+  // A conta como participante nas salas de vídeo de outras donas (V1): a
+  // entrada, a saída e o aceite do aviso dela saem.
+  { tabela: meetingRoomPresences, coluna: meetingRoomPresences.userId, origem: "id" },
   // A conta como membra das equipes de outras donas (R2): ela sai de todas.
   { tabela: meetingFolderMembers, coluna: meetingFolderMembers.userId, origem: "id" },
   { tabela: assinaturasDeMinutos, coluna: assinaturasDeMinutos.userId, origem: "id" },
@@ -339,6 +349,8 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // sem conta e vence em 5 minutos; sai pelo prazo.
   { tabela: chavesDeAcesso, coluna: chavesDeAcesso.userId, origem: "id" },
   { tabela: desafiosDeChaveDeAcesso, coluna: desafiosDeChaveDeAcesso.userId, origem: "id" },
+  // Os aparelhos do push no celular: o token do Expo e o idioma da tela.
+  { tabela: dispositivosDePush, coluna: dispositivosDePush.userId, origem: "id" },
   // A conta Google ligada para entrar (A8): o sub e o e-mail dela. Nenhum token
   // fica guardado, então não há o que revogar na Google.
   { tabela: contasGoogle, coluna: contasGoogle.userId, origem: "id" },

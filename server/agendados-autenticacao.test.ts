@@ -41,6 +41,7 @@ const jarra = vi.hoisted(() => {
       const ultimo = args.at(-1) as { leitor?: string; name?: string } | undefined;
       if (ultimo?.leitor) ordem.push(`${ultimo.leitor}${typeof args[0] === "string" ? ` ${args[0]}` : ""}`);
       else if (ultimo?.name === "tratarCorpoGrandeDasPartes") ordem.push("tratador das partes");
+      else if (ultimo?.name === "tratarCorpoGrandeDoWebhookDaSala") ordem.push("tratador do webhook da sala");
       return app;
     },
     get: () => app,
@@ -105,6 +106,9 @@ vi.mock("./lembretes", () => lacoDosLembretes);
 // server/indice-e-fila-de-cruzamento.integracao.test.ts).
 const filaDoCruzamento = vi.hoisted(() => ({ iniciarFilaDeCruzamento: vi.fn(), pararFilaDeCruzamento: vi.fn(async () => ({ trabalhos: 0 })) }));
 vi.mock("./fila-de-cruzamento", () => filaDoCruzamento);
+// O laço do push no celular liga junto; aqui é dublê.
+const lacoDoPush = vi.hoisted(() => ({ iniciarPush: vi.fn(), pararPush: vi.fn() }));
+vi.mock("./push-no-celular", () => lacoDoPush);
 // A rota das partes (G5) sobe junto; o recebimento é dublê (nada toca banco nem bucket).
 vi.mock("./fatias-de-reuniao", () => ({
   receberParte: vi.fn(), RecusaDaParte: class extends Error {}, FalhaPassageiraDaParte: class extends Error {}, TAMANHO_MAXIMO_DA_PARTE: 16 * 1024 * 1024,
@@ -167,6 +171,7 @@ describe("a fila da reunião em partes no index.ts real (G7)", () => {
     expect(varredura.iniciarVarreduraDeGravacoes).toHaveBeenCalledTimes(1);
     expect(lacoDosLembretes.iniciarLembretes).toHaveBeenCalledTimes(1);
     expect(filaDoCruzamento.iniciarFilaDeCruzamento).toHaveBeenCalledTimes(1);
+    expect(lacoDoPush.iniciarPush).toHaveBeenCalledTimes(1);
     const sair = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
     const ordem: string[] = [];
     fila.pararFila.mockImplementationOnce(async () => { ordem.push("pararFila"); return { partes: 2, reunioes: 1 }; });
@@ -189,6 +194,8 @@ describe("a fila da reunião em partes no index.ts real (G7)", () => {
     await esperar();
     expect(varredura.pararVarreduraDeGravacoes).toHaveBeenCalledTimes(1);
     expect(filaDoCruzamento.pararFilaDeCruzamento).toHaveBeenCalledTimes(1);
+    // O push só para de procurar avisos: não há reserva a devolver.
+    expect(lacoDoPush.pararPush).toHaveBeenCalledTimes(1);
     expect(ordem).toEqual(["pararFila", "pararFilaDoResumo", "pararLembretes"]);
     soltarVarredura();
     await esperar();
@@ -229,6 +236,16 @@ describe("ordem no index.ts real", () => {
     const leitores = jarra.ordem.map((item, i) => [item, i] as const).filter(([item]) => item.startsWith("json") || item.startsWith("urlencoded"));
     for (const [, i] of leitores) expect(i).toBeGreaterThan(rota);
     expect(jarra.ordem.indexOf("tratador das partes")).toBeGreaterThan(rota);
+  });
+
+  it("a rota dos avisos do Daily (sala de vídeo, V1) vem antes de todo leitor de corpo: a assinatura é sobre o corpo cru", () => {
+    const rota = jarra.ordem.indexOf("post /api/sala-de-video/avisos");
+    expect(rota).toBeGreaterThanOrEqual(0);
+    const leitores = jarra.ordem.map((item, i) => [item, i] as const).filter(([item]) => item.startsWith("json") || item.startsWith("urlencoded"));
+    expect(leitores.length).toBeGreaterThan(5);
+    for (const [, i] of leitores) expect(i).toBeGreaterThan(rota);
+    // O 413 em JSON da rota vem logo depois dela.
+    expect(jarra.ordem.indexOf("tratador do webhook da sala")).toBe(rota + 1);
   });
 });
 

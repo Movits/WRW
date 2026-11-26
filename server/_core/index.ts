@@ -24,6 +24,7 @@ import { corpoGrandeParaUploads } from "./corpo-grande-para-uploads";
 import { registrarRotaDasPartes, tratarCorpoGrandeDasPartes } from "./rota-das-partes";
 import { registrarRotaDoAudioBaixado } from "./rota-do-audio-baixado";
 import { registrarRotaDoDocumento } from "./rota-do-documento";
+import { registrarRotaDoWebhookDaSala, tratarCorpoGrandeDoWebhookDaSala } from "./rota-do-webhook-da-sala";
 import { registrarArquivosDoLeitorDePdf } from "./arquivos-do-leitor-de-pdf";
 import { criarDiagnosticoDoIp, criarLimiteDaApi, criarLimiteGeral } from "./limite-de-requisicoes";
 import { linhaDosModelosDeIa } from "./modelos-de-ia";
@@ -222,6 +223,11 @@ async function startServer() {
   registrarArquivosDoLeitorDePdf(app);
   registrarRotaDasPartes(app);
   app.use(tratarCorpoGrandeDasPartes);
+  // Os avisos do Daily sobre as salas de vídeo (V1): a assinatura é conferida
+  // sobre o corpo cru, então a rota lê o próprio corpo e vem antes de todo
+  // express.json, como as partes (server/_core/rota-do-webhook-da-sala.ts).
+  registrarRotaDoWebhookDaSala(app);
+  app.use(tratarCorpoGrandeDoWebhookDaSala);
 
   // Uploads dentro de um LOTE do tRPC ("/api/trpc/a,b"): os recortes por
   // caminho abaixo não casam com a lista; este middleware reconhece cada
@@ -445,12 +451,16 @@ async function startServer() {
     const { iniciarVarreduraDeGravacoes, pararVarreduraDeGravacoes } = await import("../varredura-de-gravacoes");
     const { iniciarLembretes, pararLembretes } = await import("../lembretes");
     const { iniciarFilaDeCruzamento, pararFilaDeCruzamento } = await import("../fila-de-cruzamento");
+    const { iniciarPush, pararPush } = await import("../push-no-celular");
     const { descreverErroDeBanco } = await import("../banco-indisponivel");
     iniciarFila();
     iniciarFilaDoResumo();
     iniciarVarreduraDeGravacoes();
     iniciarLembretes();
     iniciarFilaDeCruzamento();
+    // O push no celular dos avisos do sino (server/push-no-celular.ts). Sem
+    // aparelho registrado, não envia nada.
+    iniciarPush();
     // Desligamento: o Render manda SIGTERM no deploy; no dev, o Ctrl+C é
     // SIGINT. Os três laços param de reservar e devolvem as reservas desta
     // instância ANTES de o processo sair, para o próximo retomar na hora (e não
@@ -462,6 +472,7 @@ async function startServer() {
       if (saindo) return;
       saindo = true;
       console.log(`[Fila] ${sinal}: devolvendo as reservas antes de sair.`);
+      pararPush();
       Promise.allSettled([
         pararFila()
           .then(r => console.log(`[Fila] devolvidas: ${r.partes} parte(s), ${r.reunioes} reunião(ões).`))

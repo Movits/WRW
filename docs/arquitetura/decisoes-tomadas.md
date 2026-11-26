@@ -900,7 +900,7 @@ gravado não se renomeia" no CLAUDE.md da raiz).
 - **O que mudou:** saíram também o teto de 100 registros por busca
   (`TETO_DE_REGISTROS_POR_RODADA`, que escondia o resto do mesmo jeito) e o de 1000 perfis de
   membras lidos (`TETO_DE_MEMBROS`); na fila, a contagem por contraparte e a coluna
-  `fila_de_cruzamento.por_contraparte` (a migração 0032 ainda não tinha ido à `main` e foi
+  `fila_de_cruzamento.por_contraparte` (a migração do índice, hoje 0034, ainda não tinha ido à `main` e foi
   gerada de novo sem ela). Cada par aparece uma vez pela chave do par em
   `conexoes_registradas` (única e sem direção). A busca na hora que esgota o orçamento de
   comparações vai para a fila, e o primeiro contato de cada lote da fila é cruzado inteiro,
@@ -919,7 +919,7 @@ gravado não se renomeia" no CLAUDE.md da raiz).
 - **Onde:** `server/network-rede-global.ts`, `server/fila-de-cruzamento.ts`,
   `server/network-registro.ts` (`paginaDeConexoesDaSolicitante`,
   `contarConexoesDaSolicitante`), `server/routers/networkInteligente.ts`, migração
-  `0032_indice-de-cruzamento`, `client/src/components/ConexoesRegistradas.tsx`
+  `0034_indice-de-cruzamento`, `client/src/components/ConexoesRegistradas.tsx`
   (`PaginasDasConexoes`).
 
 ---

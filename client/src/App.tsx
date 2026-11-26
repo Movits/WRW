@@ -5,6 +5,7 @@ import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { RetomadaDasPartes } from "./components/RetomadaDasPartes";
+import { RegistroDoPush } from "./components/RegistroDoPush";
 import { RetomadaDosDescartes } from "./components/RetomadaDosDescartes";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { PageTransition } from "./components/PageTransition";
@@ -110,6 +111,8 @@ export function TelaAutenticada({
     <ProtectedRoute {...guarda}>
       <RetomadaDosDescartes />
       <RetomadaDasPartes />
+      {/* O token do push no celular, quando a página está no app das lojas. */}
+      <RegistroDoPush />
       {!cabecalhoProprio && <AppHeader />}
       {children}
     </ProtectedRoute>

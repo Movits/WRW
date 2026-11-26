@@ -3227,6 +3227,7 @@
       "inviteEmail": "E-mail",
       "googleCalendar": "Google Agenda",
       "downloadIcs": "Fichier .ics",
+      "icsInApp": "Dans l’app, le fichier .ics ne se télécharge pas. Pour ajouter l’événement à l’agenda du téléphone, ouvrez cette page dans le navigateur et touchez .ics là-bas.",
       "edit": "Modifier",
       "delete": "Supprimer",
       "deleteConfirm": "Retirer « {{title}} » de l’agenda ? L’enregistrement, s’il existe, reste dans Réunions.",
@@ -4626,5 +4627,12 @@
     "errTooManyTasks": "L'équipe a atteint 500 tâches. Supprimez les anciennes pour en créer de nouvelles.",
     "errDueInvalid": "L'échéance n'est pas une date valide.",
     "errAgendaNotFound": "Cette réunion prévue n'existe plus. Actualisez la page."
+  },
+  "pushNoCelular": {
+    "reuniaoPronta": "Votre réunion est prête",
+    "reuniaoProntaSemResumo": "Votre réunion est prête, sans le résumé",
+    "lembreteDaAcao": "Rappel : une prochaine action arrive à échéance aujourd’hui",
+    "lembreteDaReuniao": "Rappel : réunion à {{hora}}",
+    "corpo": "Touchez pour ouvrir dans Marquesa Global Match."
   }
 }
