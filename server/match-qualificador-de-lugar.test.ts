@@ -180,9 +180,9 @@ describe("motor de perfis: o mesmo qualificador conta como necessidade atendida"
   });
 
   it("tirar o lugar não junta concorrentes: o motor de perfis não ganha encaixe novo entre duas pontas do mesmo lado", () => {
-    // O motor de perfis não aplica a regra dos concorrentes (server/CLAUDE.md, decisão de produto em aberto), e o
-    // qualificador não pode aumentar o que ele já deixa passar: estes pares davam 20 antes do qualificador e seguem em
-    // 20, enquanto o motor privado os zera como concorrentes.
+    // O qualificador não pode juntar concorrentes: estes pares davam 20 antes do qualificador e seguem em 20, e o
+    // motor privado os zera como concorrentes. Desde o N6 o motor de perfis também pergunta `saoConcorrentes` antes
+    // (server/motor-de-perfis-concorrentes.test.ts); `nomeiamAMesmaCoisa` segue recusando-os sozinha.
     for (const [tenho, preciso] of [
       ["Exportar café", "Exportar café do Brasil"],
       ["Exportar café do Brasil", "Exportar café para a Europa"],
