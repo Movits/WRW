@@ -27,15 +27,16 @@
  * conexões, tecnologia e imóveis nada muda: o portão só atua no tipo
  * "servico".
  */
-import { nomeiamAMesmaCoisa, slugDoTermo, tokensDoTermo } from "@shared/direcao-do-termo";
+import { nomeiamAMesmaCoisa, normalizar, slugDoTermo, tokensDoTermo } from "@shared/direcao-do-termo";
 import { CHAVE_OUTRA_NECESSIDADE, CHAVE_QUERO_MENTORAR, opcaoDaBusca } from "@shared/o-que-busca";
 import {
   CATEGORIAS_CUJA_DESCRICAO_E_OFERTA, chavesQueValemComoNecessidade, demandaValida, lerDemandas, necessidadesDasDemandas, qualificadoresDaDemanda,
   rotuloDoQuePreciso,
 } from "@shared/o-que-preciso";
 import {
-  citacaoPedeServicoOferecido, classificarOferta, ehServico, ehServicoDeAssessoria, familiaDoServico, necessidadeNomeiaOServico,
-  necessidadePedeImovel, PALAVRAS_DE_SERVICO, PALAVRAS_VAZIAS_DA_CITACAO, PAPEIS_DE_COMERCIO, servicoDoTermo, TIPOS_DA_OFERTA, trechoNomeiaServicoAtendido, type TipoDaOferta,
+  citacaoPedeServicoOferecido, classificarOferta, ehServico, ehServicoDeAssessoria, especialidadeDoServico, familiaDoServico, mesmaFamiliaEEspecialidade,
+  necessidadeGenericaNomeiaOServico, necessidadeNomeiaOServico, textoPedeOServico,
+  necessidadeDeclaraOAssuntoDoServico, necessidadePedeImovel, PALAVRAS_DE_SERVICO, regraNaoLeOPar, PALAVRAS_VAZIAS_DA_CITACAO, PAPEIS_DE_COMERCIO, servicoDoTermo, TIPOS_DA_OFERTA, trechoNomeiaServicoAtendido, type TipoDaOferta,
 } from "@shared/tipo-da-oferta";
 
 /** Os nove tipos mais "nenhuma": o match que se apoia no que a pessoa PRECISA, não no que tem. */
@@ -199,6 +200,85 @@ function frasesDaFonte(fonte: string): string[][] {
 /** O pedaço citado casa com o da fonte: igual, ou contido nele quando é escrita sem espaço ("東京" em "東京の支店"). */
 const casaComAFonte = (pedaco: string, daFonte: string) => (ESCRITA_SEM_ESPACO.test(pedaco) ? daFonte.includes(pedaco) : daFonte === pedaco);
 
+/** Negação ANTES do termo em chinês: "不需要", "不再需要", "不太需要", "没有". */
+const NEGACOES_ANTES_SEM_ESPACO = new Set(Array.from("不沒没"));
+/** Quantos caracteres antes do termo a negação ainda o alcança ("不再", "不太", "暂时不"). */
+const ALCANCE_DA_NEGACAO_ANTES = 3;
+/** Negação DEPOIS do termo, que é como o japonês nega: "必要ありません", "必要ではない". */
+const NEGACOES_DEPOIS_SEM_ESPACO = ["ありません", "ございません", "ません", "ない", "不要", "無用", "无需"];
+/**
+ * A negação depois só vale COLADA no termo (com uma partícula no meio, como em
+ * "必要ではありません"). Mais longe que isso ela é de outra oração: em
+ * "必要だが急ぎではない" o ない nega a pressa, não a necessidade.
+ */
+const INICIO_DA_NEGACAO_DEPOIS = 3;
+const ALCANCE_DA_NEGACAO_DEPOIS = 12;
+/**
+ * Fim de frase PARA ESTA CONFERÊNCIA: o fim de frase de sempre mais a barra
+ * com que `textoEscritoPelaPessoa` junta título, tags e descrição — dois
+ * pedaços de CAMPOS diferentes não são uma citação.
+ *
+ * A vírgula ideográfica (、) fica FORA: em chinês e japonês ela separa itens de
+ * uma lista dentro da mesma frase ("会计、税务咨询服务"), e cortar ali recusava a
+ * citação que é substring contígua da fonte — o trecho literal que o prompt
+ * manda copiar. Quem segura a montagem dentro da frase é a DISTÂNCIA.
+ */
+const FIM_DE_ORACAO_NO_TEXTO = new RegExp("[.!?;\\u2026\\n\\u3002\\uFF01\\uFF1F\\uFF1B|\\uFF5C]+");
+/**
+ * Quantos caracteres cabem entre um pedaço citado e o próximo. É o equivalente
+ * em texto do `INTERCALADAS_NA_CITACAO` do ramo latino (2 pedaços de conteúdo):
+ * em escrita sem espaço uma palavra tem 2 a 4 caracteres.
+ */
+const DISTANCIA_ENTRE_PEDACOS = 12;
+
+/** O termo está negado na oração: negação encostada antes (zh) ou logo depois (ja)? */
+function estaNegado(frase: string, inicio: number, tamanho: number): boolean {
+  const antes = frase.slice(Math.max(0, inicio - ALCANCE_DA_NEGACAO_ANTES), inicio);
+  if (Array.from(antes).some(caractere => NEGACOES_ANTES_SEM_ESPACO.has(caractere))) return true;
+  const depois = frase.slice(inicio + tamanho, inicio + tamanho + ALCANCE_DA_NEGACAO_DEPOIS);
+  return NEGACOES_DEPOIS_SEM_ESPACO.some(negacao => {
+    const onde = depois.indexOf(negacao);
+    return onde >= 0 && onde <= INICIO_DA_NEGACAO_DEPOIS;
+  });
+}
+
+/**
+ * A ordem conferida por POSIÇÃO NO TEXTO da oração, que é o que faz sentido em
+ * escrita sem espaço: ali a oração inteira é um token só, e dois pedaços
+ * citados da mesma oração nunca se encontram na janela de tokens de
+ * `emOrdemNumaFrase` — ela só olha tokens posteriores ao que casou.
+ *
+ * O pedaço NEGADO não conta como citado: era essa a montagem do relato
+ * ("需要 税务咨询" tirado de "我们不需要税务咨询", que diz o contrário, e
+ * "弁護士 必要" de "弁護士は必要ありません"). Ordem sozinha não vê negação, e foi
+ * por isso que a primeira correção recusou junto a citação honesta.
+ *
+ * A busca é no texto NORMALIZADO, porque os pedaços vêm de `tokensDoTermo`, que
+ * baixa a caixa e tira o diacrítico: procurar no texto cru fazia a citação
+ * exata "SAP 税务咨询" não se achar na própria fonte.
+ */
+function emOrdemNoTextoDaFrase(pedacos: readonly string[], fonte: string): boolean {
+  if (pedacos.length === 0) return false;
+  // A negação só desqualifica o pedaço numa citação MONTADA (dois pedaços ou
+  // mais). Citar UM trecho que está literalmente na fonte continua valendo,
+  // como já valia antes desta regra — ali quem confere se o trecho pede o
+  // serviço do perfil é `citacaoAmarradaAoPerfil`.
+  const conferirNegacao = pedacos.length > 1;
+  return normalizar(fonte).split(FIM_DE_ORACAO_NO_TEXTO).some(frase => {
+    let posicao = 0;
+    for (const pedaco of pedacos) {
+      let achou = frase.indexOf(pedaco, posicao);
+      while (achou >= 0 && conferirNegacao && estaNegado(frase, achou, pedaco.length)) achou = frase.indexOf(pedaco, achou + 1);
+      if (achou < 0) return false;
+      // Longe demais do pedaço anterior é montagem, não citação — o mesmo que a
+      // janela de tokens faz no ramo latino.
+      if (posicao > 0 && achou - posicao > DISTANCIA_ENTRE_PEDACOS) return false;
+      posicao = achou + pedaco.length;
+    }
+    return true;
+  });
+}
+
 /** Os pedaços aparecem nesta ordem numa frase só, com até INTERCALADAS_NA_CITACAO pedaços de conteúdo entre cada par? */
 function emOrdemNumaFrase(pedacos: readonly string[], frases: readonly (readonly string[])[]): boolean {
   if (pedacos.length === 0) return false;
@@ -225,7 +305,14 @@ export function citacaoConfere(citacao: unknown, fonte: string): boolean {
       const caracteres = semEspaco.reduce((total, pedaco) => total + Array.from(pedaco).length, 0);
       if (caracteres < MINIMO_DE_CARACTERES_SEM_ESPACO) return false;
       const latinasDaFonte = new Set(pedacosDaFonte);
-      return palavras.every(pedaco => latinasDaFonte.has(pedaco));
+      if (!palavras.every(pedaco => latinasDaFonte.has(pedaco))) return false;
+      // A ordem vale aqui também: este ramo devolvia antes da conferência e
+      // aceitava montagem em chinês e japonês ("需要 税务咨询" sobre uma fonte que
+      // diz o contrário), enquanto o equivalente latino era barrado — validação
+      // de 16/09 na #135. A conferência é pelo TEXTO da frase, não pela janela
+      // de tokens: nesta escrita a oração é um token só, e a janela recusava
+      // toda citação de dois pedaços, honesta inclusive.
+      return emOrdemNoTextoDaFrase(conteudo, fonte);
     }
   }
   if (palavras.length < 2) return false;
@@ -320,9 +407,11 @@ export function necessidadesEscritasDoPerfil(perfil: PerfilNoPortao): string[] {
  * serviço que o próprio perfil oferece não é necessidade — é a oferta contada de novo. A consultora tributária
  * que escreve em "Expansão / Internacionalização" "Consultoria tributária para indústrias do Nordeste" não
  * precisa de consultoria tributária: ela a presta; lida como "preciso", a frase conectava duas prestadoras do
- * mesmo serviço sem nenhuma declarar precisar dele. O critério é o mesmo que faria o par casar
- * (`necessidadeNomeiaOServico`, o que o motor de perfis aceita: família ou especialidade): se o que ela oferece
- * atenderia o que ela escreveu, o texto descreve a oferta. As ofertas são TUDO o que o perfil declara: "O que
+ * mesmo serviço sem nenhuma declarar precisar dele. O critério é `ofertaAtenderiaOTexto`: o texto nomeia o
+ * serviço COM a especialidade, ou declara o assunto dele. Um palpite de FAMÍLIA não basta — quem declara a área
+ * "Advocacia" e escreve que precisa de "Advogado para causas do trabalho" não está repetindo a oferta: pela
+ * regra da casa, oferecer a família não prova a especialidade (vale 60, um bom palpite), e palpite não pode
+ * apagar necessidade declarada. As ofertas são TUDO o que o perfil declara: "O que
  * tenho" E a área de atuação E a especialidade (`tudoOQueOPerfilOferece`), não o "um ou outro" de
  * `ofertasDoPerfil`: a tela grava ids fixos em "O que tenho" (nenhum é serviço), então com "canais_comerciais"
  * ali o serviço mora na área, e o fallback deixava a guarda cega. A chave da categoria segue valendo como necessidade;
@@ -333,7 +422,49 @@ export function necessidadesEscritasDoPerfil(perfil: PerfilNoPortao): string[] {
  * `activityArea` e `primarySpecialty` no perfil (a rede global não trazia, e a guarda ficava inerte lá).
  */
 function descricaoNomeiaOQueOPerfilOferece(perfil: PerfilNoPortao, descricao: string): boolean {
-  return tudoOQueOPerfilOferece(perfil).some(oferta => necessidadeNomeiaOServico(oferta, null, descricao));
+  return tudoOQueOPerfilOferece(perfil).some(oferta => ofertaAtenderiaOTexto(oferta, descricao));
+}
+
+/**
+ * O texto é a própria oferta contada de novo. Duas maneiras, as duas de `satisfaz` (server/matching.ts):
+ * o texto nomeia o serviço com a MESMA especialidade, ou declara o ASSUNTO dele sem nomear. A guarda usava só
+ * a primeira, e bastava trocar a redação para escapar dela: "Advocacia tributária para indústrias" era barrado,
+ * mas "Planejamento tributário para investidores estrangeiros" passava e voltava a valer 50 no motor de perfis
+ * (validação de 16/09 na #135).
+ *
+ * NÃO é paridade com `satisfaz`, e não pode ser: `satisfaz` responde "este par casa?" e esta guarda responde
+ * "este texto É a oferta?". Casar não prova ser. O palpite de família (`necessidadeGenericaNomeiaOServico`, 60)
+ * conta, salvo num caso: a oferta é a FAMÍLIA PURA e o texto PEDE o serviço (`textoPedeOServico`) —
+ * "Preciso de advogado para causas do trabalho", "Preciso de advogado marítimo" (que vale a nota da família desde a
+ * decisão de 16/09). Sem o pedido, o texto da prestadora da família é a oferta contada de novo e continua apagado:
+ * "Consultoria para indústrias do Nordeste", "Advocacia para empresas do agronegócio", "Contabilidade para o
+ * agronegócio" e "Logística para exportação de café", escritos em "Outra necessidade" por quem tem a área, voltavam
+ * a valer 41 diante de outra prestadora da mesma família no delta da validação (revisão cética de 16/09); na main
+ * eram apagados. "Advogado para causas do trabalho" sem o pedido fica apagado, como na main. Com a oferta
+ * especializada o palpite conta sempre: "Consultoria tributária" diante do texto "Consultoria" é a própria oferta
+ * contada de novo, e é o caso que originou a guarda. A OPÇÃO fixa "Consultoria" da tela continua valendo como
+ * necessidade por decisão de produto (`chavesQueValemComoNecessidade`): ali a pessoa escolheu de uma lista, não
+ * descreveu a própria oferta.
+ * O `regraNaoLeOPar` acompanha `satisfaz`: par que a regra não lê num idioma novo não conta de nenhum lado.
+ */
+function ofertaAtenderiaOTexto(oferta: string, texto: string): boolean {
+  if (mesmaFamiliaEEspecialidade(oferta, null, texto)) return true;
+  // O palpite de família conta: quem presta "Consultoria tributária" e escreve
+  // "Consultoria" no texto livre está contando a própria oferta de novo — é o
+  // caso que originou a guarda. A exceção é a oferta genérica diante do texto
+  // que PEDE o serviço ("Preciso de advogado para causas do trabalho"): ali o
+  // palpite apagaria necessidade declarada. Sem o pedido, a prestadora da
+  // família escrevendo "Consultoria para indústrias do Nordeste" é a oferta.
+  // A pureza tem de ser lida como o MOTOR lê, e ele parte o rótulo coordenado:
+  // "Advocacia e contabilidade" são duas famílias puras, não uma família com a
+  // outra de especialidade. `especialidadeDoServico` é o acessor que faz isso.
+  const ofertaEhFamiliaPura = servicoDoTermo(oferta) !== null && especialidadeDoServico(oferta).length === 0;
+  if (necessidadeGenericaNomeiaOServico(oferta, null, texto) && !(ofertaEhFamiliaPura && textoPedeOServico(texto))) return true;
+  // O último ramo de `satisfaz` (server/matching.ts): a palavra genérica "Consultoria"
+  // diante de quem presta assessoria. É o que fazia o par casar sem a guarda ver,
+  // e a oferta contada de novo voltava a valer como necessidade declarada.
+  if (slugDoTermo(texto) === "consultoria" && ehServicoDeAssessoria(oferta)) return true;
+  return necessidadeDeclaraOAssuntoDoServico(oferta, null, texto) && !regraNaoLeOPar(oferta, null, texto);
 }
 
 /** "O que tenho", área de atuação e especialidade, juntos: o que a guarda de concorrência confronta com o texto. */
@@ -447,6 +578,23 @@ export function perfilDeclarouPrecisarDoServico(perfil: PerfilNoPortao, servico:
 }
 
 /**
+ * Rótulos que, na área de atuação (ou sozinhos em "O que tenho"), nomeiam a área de um serviço — o
+ * classificador os lê como "outros" porque em texto livre são ambíguos ("lado direito", "Direito de família").
+ * Ali o campo é dedicado: quem escreve "Direito" na área está dizendo de que serviço vive, e tratar isso como
+ * outra base soltava a exigência de citação de quem só presta serviço (item 3 da validação de 16/09 na #135).
+ *
+ * Decisão do Roberto de 16/09 (D3), consequência aceita: quem escreveu só "Direito" ou "Jurídico" na área, sem
+ * necessidade declarada e sem item que não seja serviço, para de receber pela IA sugestão de imóvel, capital,
+ * conexão e tecnologia — o portão exige a citação, e a regra 6 do prompt a proíbe fora de serviço. Uma
+ * necessidade declarada reabre. "Agronegócio" continua sendo outra base.
+ */
+const AREAS_QUE_NOMEIAM_SERVICO = new Set(["direito", "juridico", "juridica", "advocacia", "contabilidade", "consultoria", "assessoria", "auditoria"]);
+const nomeiaServicoNaArea = (oferta: string) => {
+  const palavras = tokensDoTermo(oferta);
+  return palavras.length > 0 && palavras.every(palavra => AREAS_QUE_NOMEIAM_SERVICO.has(palavra));
+};
+
+/**
  * Este match exige a citação da necessidade expressa? Sim quando o modelo
  * disse que se apoia em serviço — e também, pelo piso determinístico, quando
  * o perfil só tem serviço a oferecer e nada declarado em "preciso"/"busca"/
@@ -459,9 +607,25 @@ export function exigeCitacao(item: ItemComPortao, perfil?: PerfilNoPortao): bool
   if (!perfil) return false;
   const ofertas = ofertasDoPerfil(perfil);
   if (ofertas.length === 0) return false;
-  const servicos = ofertas.filter(oferta => ehServico(oferta));
+  const servicos = ofertas.filter(oferta => ehServico(oferta) || nomeiaServicoNaArea(oferta));
   if (tipo === null && servicos.length > 0) return true;
-  return servicos.length === ofertas.length && !temNecessidadeDeclarada(perfil);
+  // Outra base possível é QUALQUER oferta que não seja serviço — inclusive a que
+  // o classificador não sabe ler ("outros"). O piso existe para quem não tem
+  // mais nada a oferecer; com outra base, exigir citação não deixa o portão mais
+  // rigoroso, deixa-o IMPASSÁVEL: a regra 6 do prompt PROÍBE citação fora do
+  // tipo "servico", então a citação vem vazia e o par nunca passa.
+  //
+  // Foi medido: apertar isto para "só o que a pessoa DECLAROU em O que tenho"
+  // conta como outra base derrubou 24 combinações reais de área × especialidade
+  // — "Agronegócio" (lido como "outros") com "Marketing & Vendas" (lido como
+  // serviço) parava de passar em oportunidade de imóvel, capital, conexão e
+  // tecnologia, que passavam antes da PR.
+  //
+  // O item 3 da validação de 16/09 fecha pela ÁREA, não por este piso: "Direito"
+  // e "Jurídico" na área contam como serviço (`nomeiaServicoNaArea`, decisão do
+  // Roberto de 16/09), e "Agronegócio" continua sendo outra base.
+  const ofereceOutraBase = ofertas.some(oferta => !ehServico(oferta) && !nomeiaServicoNaArea(oferta));
+  return servicos.length > 0 && !ofereceOutraBase && !temNecessidadeDeclarada(perfil);
 }
 
 

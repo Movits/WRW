@@ -379,6 +379,23 @@ na consulta:
 - a dona vê a data de cada consulta (`meetings.consultasDaAdministracao`), sem o motivo
   nem quem consultou.
 
+## O perfil de voz da dona (H3d)
+
+A amostra da voz da dona (cerca de 30 s) é dado biométrico (LGPD art. 11) e segue regras de
+consulta, não de tela (`server/perfil-de-voz.ts`):
+
+- só existe com o consentimento próprio, separado do aceite dos Termos (texto da Cris em
+  `docs/termos/perfil-de-voz-rascunho.md`), e cada consentimento e cada revogação ficam em
+  `voice_profile_consents` com a data, a hora, a versão e o texto, sem a voz;
+- toda consulta leva o openId da dona no WHERE, e nenhum procedimento recebe o id de outra
+  conta; a chave no bucket (`perfis-de-voz/<openId>/`) é negada pelo proxy `/manus-storage`
+  a todo mundo, e o link aberto, as participantes, as membras e a consulta da administração
+  (R1a) não têm caminho até ela;
+- a amostra vai ao Gemini junto com cada parte das reuniões da dona, só para rotular a voz
+  dela; o resultado é a ligação da voz à conta (H3c), que a dona corrige;
+- desligar e excluir a conta apagam a amostra do bucket com todas as versões e a linha, de
+  vez; o registro dos consentimentos fica.
+
 ## Checklist antes de qualquer publicação
 
 - [ ] A aplicação conecta com `mmm_app`, nunca com a dona das tabelas

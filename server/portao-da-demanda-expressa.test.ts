@@ -187,8 +187,50 @@ describe("passaNoPortao — só serviço precisa de citação", () => {
 
   it("com 'O que tenho' vazio, o piso lê a área de atuação e a especialidade (que o prompt também recebe)", () => {
     expect(exigeCitacao({ tipoDaOferta: "nenhuma" }, { whatIHave: [], activityArea: "Advocacia tributária", whatINeed: [] })).toBe(true);
+    // Qualquer oferta que não seja serviço solta a exigência, inclusive a que o classificador não sabe ler
+    // ("vendas", "Agronegócio" — "outros"). Apertar o piso para fechar o caso do item 3 foi MEDIDO e derrubou 24
+    // combinações reais de área × especialidade: quem tem "Agronegócio" na área e "Marketing & Vendas" na
+    // especialidade parava de passar em oportunidade de imóvel, capital, conexão e tecnologia — tipos em que a
+    // regra 6 do prompt PROÍBE citação, então o portão não fica rigoroso, fica impassável. O item 3 fecha pela
+    // ÁREA (teste seguinte), não pelo piso.
     expect(exigeCitacao({ tipoDaOferta: "nenhuma" }, { whatIHave: [], activityArea: "Advocacia tributária", primarySpecialty: "vendas" })).toBe(false);
+    expect(exigeCitacao({ tipoDaOferta: "imoveis" }, { whatIHave: [], activityArea: "Agronegócio", primarySpecialty: "Marketing & Vendas" })).toBe(false);
+    // Tipo reconhecido de verdade na área continua soltando a exigência: ela tem outra coisa a oferecer.
+    expect(exigeCitacao({ tipoDaOferta: "nenhuma" }, { whatIHave: [], activityArea: "Indústria farmacêutica", primarySpecialty: "legal" })).toBe(false);
     expect(exigeCitacao({ tipoDaOferta: "nenhuma" }, { whatIHave: ["fazenda"], activityArea: "Advocacia tributária" })).toBe(false);
+  });
+
+  it("'Direito' e 'Jurídico' na área contam como serviço: consequência aceita pelo Roberto em 16/09 (item 3, D3)", () => {
+    // Na main "Direito" era lido como "outros" e soltava a exigência de quem só presta serviço. Agora a área que
+    // nomeia um serviço conta como serviço: sem necessidade declarada e sem outra base, o piso exige a citação —
+    // e a IA, que não pode citar fora de serviço, para de sugerir imóvel, capital, conexão e tecnologia.
+    for (const activityArea of ["Direito", "Jurídico"]) {
+      for (const tipoDaOferta of ["imoveis", "investimento", "conexao", "tecnologia", "nenhuma"]) {
+        expect(exigeCitacao({ tipoDaOferta }, { whatIHave: [], activityArea, primarySpecialty: "legal" }), `${activityArea} / ${tipoDaOferta}`).toBe(true);
+      }
+      // Uma necessidade declarada reabre.
+      expect(exigeCitacao({ tipoDaOferta: "imoveis" }, {
+        whatIHave: [], activityArea, primarySpecialty: "legal",
+        whatINeed: ["outra_necessidade"], seekingTypes: ["outra_necessidade"], seekingOtherNeed: "Preciso de um contador",
+      }), activityArea).toBe(false);
+    }
+    // "Agronegócio" não nomeia serviço: continua sendo outra base.
+    expect(exigeCitacao({ tipoDaOferta: "imoveis" }, { whatIHave: [], activityArea: "Agronegócio", primarySpecialty: "legal" })).toBe(false);
+  });
+
+  it("quem DECLAROU um ativo ao lado do serviço tem outra base: o piso não exige citação", () => {
+    // "Linha de produção" é ativo declarado em O que tenho; o piso existe para
+    // quem não tem outra base possível. Exigir a citação aqui suprimiria o
+    // match — e seria uma citação que a regra 6 do prompt PROÍBE fora do tipo
+    // "servico", que é quando o modelo diz que o match se apoia em serviço.
+    const comAtivoDeclarado = { whatIHave: ["logistica", "Linha de produção"] };
+    for (const tipoDaOferta of ["ativo", "produto", "conexao", "nenhuma"]) {
+      expect(exigeCitacao({ tipoDaOferta }, comAtivoDeclarado), tipoDaOferta).toBe(false);
+    }
+    // O match que o próprio modelo diz apoiado em serviço continua exigindo.
+    expect(exigeCitacao({ tipoDaOferta: "servico" }, comAtivoDeclarado)).toBe(true);
+    // E quem só tem serviço continua com o piso de pé.
+    expect(exigeCitacao({ tipoDaOferta: "ativo" }, { whatIHave: ["logistica"] })).toBe(true);
   });
 
   it("nos dois sentidos: oportunidade que OFERECE um serviço só passa para quem declarou precisar de algo", () => {
@@ -500,6 +542,72 @@ describe("Portão da IA — citação montada fora de ordem (item 2 da lista do 
       expect(citacaoConfere("distribuição indústria", fonte), JSON.stringify(separador)).toBe(false);
       expect(citacaoConfere("estratégia de distribuição", fonte), JSON.stringify(separador)).toBe(true); // dentro de uma frase só
     }
+  });
+
+  it("em chinês e japonês a ordem vale igual: o ramo literal não devolve antes da conferência (validação de 16/09)", () => {
+    // O ramo de escrita sem espaço conferia só presença e devolvia antes de `emOrdemNumaFrase`: a citação montada
+    // passava, enquanto o equivalente latino era barrado.
+    const fonteChinesa = "我们不需要税务咨询。我们需要非洲的分销商";
+    expect(citacaoConfere("需要 税务咨询", fonteChinesa)).toBe(false);
+    expect(citacaoConfere("税务咨询 需要", fonteChinesa)).toBe(false);
+    expect(citacaoConfere("分销商 税务咨询", fonteChinesa)).toBe(false);
+    // O trecho que está mesmo na fonte, na ordem, continua valendo.
+    expect(citacaoConfere("税务咨询", fonteChinesa)).toBe(true);
+    expect(citacaoConfere("需要非洲的分销商", fonteChinesa)).toBe(true);
+    const fonteJaponesa = "弁護士は必要ありません。物流の会社を探しています";
+    expect(citacaoConfere("探しています 弁護士", fonteJaponesa)).toBe(false);
+    expect(citacaoConfere("物流の会社を探しています", fonteJaponesa)).toBe(true);
+  });
+
+  it("citação honesta de DOIS pedaços da mesma oração em chinês e japonês continua passando", () => {
+    // A conferência de ordem por janela de TOKENS não serve a esta escrita: a
+    // oração inteira é um token só, e a janela só olha tokens posteriores — com
+    // ela, TODA citação de dois pedaços em zh/ja era recusada, inclusive a
+    // honesta, enquanto a latina equivalente passava. A ordem aqui é por
+    // posição no texto da frase.
+    expect(citacaoConfere("弁護士 探しています", "弁護士を探しています")).toBe(true);
+    expect(citacaoConfere("税務 コンサルティング", "税務コンサルティングを探しています")).toBe(true);
+    expect(citacaoConfere("非洲的分销商 物流服务", "我们需要非洲的分销商和物流服务")).toBe(true);
+    // E o que é montagem continua barrado, inclusive dentro de uma oração só.
+    expect(citacaoConfere("探しています 弁護士", "弁護士を探しています")).toBe(false);
+    expect(citacaoConfere("物流服务 非洲的分销商", "我们需要非洲的分销商和物流服务")).toBe(false);
+  });
+
+  it("pedaço arrancado de uma negação não conta como citado (不需要 não é 需要)", () => {
+    // É o que a ordem sozinha não vê: os dois pedaços estão na mesma oração e na
+    // ordem certa, mas a oração diz o CONTRÁRIO do que a citação sugere.
+    expect(citacaoConfere("需要 税务咨询", "我们不需要税务咨询")).toBe(false);
+    expect(citacaoConfere("需要 税务咨询", "我们没需要税务咨询")).toBe(false);
+    // A negação não precisa encostar no termo: 不再, 不太, 暂时不.
+    expect(citacaoConfere("需要 税务咨询", "我们不再需要税务咨询")).toBe(false);
+    expect(citacaoConfere("需要 税务咨询", "我们不太需要税务咨询")).toBe(false);
+    // Sem a negação, a mesma citação é honesta.
+    expect(citacaoConfere("需要 税务咨询", "我们需要税务咨询")).toBe(true);
+  });
+
+  it("o japonês nega DEPOIS do termo, e isso também desqualifica a citação", () => {
+    // 必要ありません / 必要ない: quem lê só o caractere anterior não vê negação
+    // nenhuma, e o perfil que oferece 弁護士 passava o portão de uma fonte que
+    // diz não precisar de advogado.
+    expect(citacaoConfere("弁護士 必要", "弁護士は必要ありません。物流の会社を探しています")).toBe(false);
+    expect(citacaoConfere("弁護士 必要", "弁護士は必要ない")).toBe(false);
+    // E a citação honesta da mesma fonte continua passando.
+    expect(citacaoConfere("物流の会社を探しています", "弁護士は必要ありません。物流の会社を探しています")).toBe(true);
+  });
+
+  it("a citação que junta CAMPOS ou orações separadas é montagem, como em português", () => {
+    // `textoEscritoPelaPessoa` junta título, tags e descrição com " | "; a vírgula
+    // ideográfica separa orações. Sem contá-las como fim de oração, dois pedaços
+    // de lugares opostos do texto viravam uma citação só.
+    expect(citacaoConfere("税务咨询 分销商", "我们不需要税务咨询 | 我们需要非洲的分销商")).toBe(false);
+    expect(citacaoConfere("税务咨询 分销商", "我们不需要税务咨询、我们在扩张、我们需要非洲的分销商")).toBe(false);
+  });
+
+  it("citação exata com letra latina maiúscula se acha na fonte (a busca é normalizada)", () => {
+    // Os pedaços vêm de `tokensDoTermo`, que baixa a caixa e tira o diacrítico.
+    // Procurar no texto CRU fazia a citação exata não se achar na própria fonte.
+    expect(citacaoConfere("SAP 税务咨询", "Parceiro SAP | 我们需要SAP 税务咨询")).toBe(true);
+    expect(citacaoConfere("sap 税务咨询", "Parceiro SAP | 我们需要SAP 税务咨询")).toBe(true);
   });
 });
 

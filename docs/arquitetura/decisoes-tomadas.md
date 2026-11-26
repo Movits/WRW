@@ -705,6 +705,22 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `sala-de-video.md`, com o que ainda falta decidir: compartilhar a tela, a conta no
   Daily, a senha do link de visitante e o que acontece no teto do orçamento.
 
+## 24 e 25/11/2026 — o perfil de voz da dona (H3d)
+
+- **Quem:** o Roberto aprovou em 24/11 o item HN-24 da auditoria; a Cris (advogada) deu em
+  25/11 o texto da caixa, o texto de apoio e os pontos técnicos.
+- **O quê:** a dona grava cerca de 30 s da própria voz, e as reuniões gravadas depois a
+  reconhecem: a amostra vai com cada parte ao Gemini, a voz dela sai no rótulo F1, ligado à
+  conta dela (H3c). Consentimento próprio, desmarcado e separado dos Termos; registro de cada
+  consentimento e revogação com a versão do texto, sem a voz, que sobrevive à exclusão;
+  exclusão definitiva (bucket com todas as versões e a linha), também na exclusão da conta.
+- **Escolhas desta PR, a confirmar:** o registro dos consentimentos fica depois da exclusão
+  da conta (como prova, sem a voz); a amostra do perfil gravado no meio de uma reunião não
+  entra nas partes seguintes dela; o rótulo fixo é F1; desligar o perfil não muda as
+  reuniões já transcritas.
+- **Onde:** `server/perfil-de-voz.ts`, `server/fila-de-transcricao.ts`, migração
+  `0031_perfil-de-voz`, `client/src/components/PerfilDeVoz.tsx`.
+
 ---
 
 ## Lições sem data registrada
