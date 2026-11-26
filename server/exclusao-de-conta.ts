@@ -91,6 +91,7 @@ import {
   resumoEmAudio, buscasDoComplemento,
   meetingParticipants, meetingFolderMembers, meetingFolderTasks,
   voiceProfiles,
+  meetingRooms, meetingRoomPresences,
 } from "../drizzle/schema";
 
 /**
@@ -262,6 +263,12 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // As participantes das reuniões da dona (R1b): as participações e os convites
   // pendentes (só o hash do token). Antes das reuniões, que elas apontam.
   { tabela: meetingParticipants, coluna: meetingParticipants.ownerId, origem: "openId" },
+  // A sala de vídeo das reuniões da dona (V1) e quem recebeu ficha nela: as
+  // participantes e os visitantes (só o nome que digitaram), com o aceite do
+  // aviso. A presença do visitante pertence à reunião da dona e sai com ela.
+  // Antes das reuniões; o consumo do mês (consumo_das_salas) não tem pessoa e fica.
+  { tabela: meetingRoomPresences, coluna: meetingRoomPresences.ownerId, origem: "openId" },
+  { tabela: meetingRooms, coluna: meetingRooms.ownerId, origem: "openId" },
   // A agenda de reuniões (H16a): o título, a hora, o local e os participantes
   // (nome e e-mail de terceiros) que a dona marcou.
   { tabela: agendaReunioes, coluna: agendaReunioes.ownerId, origem: "openId" },
@@ -315,6 +322,9 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // todas, e a voz que a dona tinha ligado a ela volta ao nome livre ou a
   // "Falante n" (a leitura ignora a participação que não existe mais).
   { tabela: meetingParticipants, coluna: meetingParticipants.userId, origem: "id" },
+  // A conta como participante nas salas de vídeo de outras donas (V1): a
+  // entrada, a saída e o aceite do aviso dela saem.
+  { tabela: meetingRoomPresences, coluna: meetingRoomPresences.userId, origem: "id" },
   // A conta como membra das equipes de outras donas (R2): ela sai de todas.
   { tabela: meetingFolderMembers, coluna: meetingFolderMembers.userId, origem: "id" },
   { tabela: assinaturasDeMinutos, coluna: assinaturasDeMinutos.userId, origem: "id" },
