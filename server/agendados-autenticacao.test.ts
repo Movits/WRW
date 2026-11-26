@@ -41,6 +41,7 @@ const jarra = vi.hoisted(() => {
       const ultimo = args.at(-1) as { leitor?: string; name?: string } | undefined;
       if (ultimo?.leitor) ordem.push(`${ultimo.leitor}${typeof args[0] === "string" ? ` ${args[0]}` : ""}`);
       else if (ultimo?.name === "tratarCorpoGrandeDasPartes") ordem.push("tratador das partes");
+      else if (ultimo?.name === "tratarCorpoGrandeDoWebhookDaSala") ordem.push("tratador do webhook da sala");
       return app;
     },
     get: () => app,
@@ -223,6 +224,16 @@ describe("ordem no index.ts real", () => {
     const leitores = jarra.ordem.map((item, i) => [item, i] as const).filter(([item]) => item.startsWith("json") || item.startsWith("urlencoded"));
     for (const [, i] of leitores) expect(i).toBeGreaterThan(rota);
     expect(jarra.ordem.indexOf("tratador das partes")).toBeGreaterThan(rota);
+  });
+
+  it("a rota dos avisos do Daily (sala de vídeo, V1) vem antes de todo leitor de corpo: a assinatura é sobre o corpo cru", () => {
+    const rota = jarra.ordem.indexOf("post /api/sala-de-video/avisos");
+    expect(rota).toBeGreaterThanOrEqual(0);
+    const leitores = jarra.ordem.map((item, i) => [item, i] as const).filter(([item]) => item.startsWith("json") || item.startsWith("urlencoded"));
+    expect(leitores.length).toBeGreaterThan(5);
+    for (const [, i] of leitores) expect(i).toBeGreaterThan(rota);
+    // O 413 em JSON da rota vem logo depois dela.
+    expect(jarra.ordem.indexOf("tratador do webhook da sala")).toBe(rota + 1);
   });
 });
 

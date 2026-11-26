@@ -50,7 +50,10 @@ chave exata do objeto (`storagePut(..., { chaveExata: true })`). O documento da 
 jeito, por `POST /api/reunioes/{meetingId}/documento` (`_core/rota-do-documento.ts`, até
 15 MB, 10 por hora por dona, autenticada antes de ler o corpo), e o `GET` do mesmo endereço
 devolve o PDF guardado só à dona; os arquivos do leitor de PDF da tela saem por
-`/pdfjs/<versão>/` (`_core/arquivos-do-leitor-de-pdf.ts`).
+`/pdfjs/<versão>/` (`_core/arquivos-do-leitor-de-pdf.ts`). Os avisos do Daily (sala de
+vídeo, V1) chegam por `POST /api/sala-de-video/avisos` (`_core/rota-do-webhook-da-sala.ts`,
+até 64 KB, sem sessão: a assinatura HMAC é conferida sobre o corpo cru), também antes do
+`express.json`, com a ordem guardada pelo mesmo teste.
 
 ## tRPC, procedures e papéis
 
@@ -553,6 +556,28 @@ todo procedimento que muda a reunião tem a dona no WHERE. As vozes guardam `"ow
 da PARTICIPAÇÃO (nunca o `users.id`), e o nome da conta é resolvido na leitura
 (`vozesParaQuemLe`); reprocessar e juntar reuniões zeram as três colunas das vozes
 (`VOZES_ZERADAS`). A exclusão da reunião e da conta (das duas pontas) levam as participações.
+
+## A sala de vídeo da reunião (V1)
+
+`server/sala-de-video.ts` (router `salaDeVideo`), `server/daily.ts` (o único módulo que
+fala com o Daily), `shared/sala-de-video.ts` e as tabelas `meeting_rooms`,
+`meeting_room_presences` e `consumo_das_salas`. Estudo e decisão do Roberto de 24/11:
+`docs/arquitetura/sala-de-video.md`. Sem `DAILY_API_KEY` e `DAILY_DOMINIO`, a função some
+(`SALA_INDISPONIVEL`; o estado diz `disponivel: false`). Abre sala só a dona da reunião e só
+Prata ou acima (`papelAbreSala`), uma sala aberta por reunião, privada no Daily, em São
+Paulo, com 2 horas e 8 pessoas. A ficha (o token do Daily, 10 min para entrar) vai à dona, às
+participantes ATIVAS da R1b (com o aceite do aviso de gravação) e aos visitantes sem conta
+pelo link da sala (192 bits, só o sha256 no banco), só com o nome (sem e-mail nem telefone,
+D3); o teto de 8 é conferido ao emitir a ficha, com a linha da sala travada. O que vai ao
+Daily: o nome aleatório da sala, o nome da pessoa e o id da PRESENÇA, nunca o `users.id`. O
+orçamento lê `consumo_das_salas`, que não tem pessoa e por isso fica quando a reunião ou a
+conta saem: a sala aberta conta pelo teto (960 minutos-pessoa), a fechada pelo que o webhook
+avisou (com `DAILY_WEBHOOK_SEGREDO`), e sem o segredo, pelo teto. A abertura passa por uma
+fila em memória (instância única), a sala que passaria do teto do mês é recusada e aos 80%
+a presidência recebe um aviso no sino (marca `MEETING_ROOMS_BUDGET_WARNED` sem conta). A
+exclusão e a junção da reunião levam as salas e as presenças (`apagarSalasDaReuniao`); a
+sala ainda aberta passa a contar pelo teto. A suíte nunca chama o Daily: o fetch padrão
+recusa no Vitest, e o serviço troca o cliente por `usarClienteDaSalaNosTestes`.
 
 ## O perfil de voz da dona (H3d)
 

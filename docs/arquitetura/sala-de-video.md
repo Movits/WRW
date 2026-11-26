@@ -5,9 +5,10 @@ decisão. Vem do cartão do Notion "Sala de vídeo própria dentro do WRW: estud
 implementar (reuniões online no próprio app)", com o Nicolas, passado pelo Roberto no grupo
 em 16/11. O cartão ainda diz WRW. O nome na tela passou a MarquesaMatch em 23/11 e, pela
 confirmação da Cris em 24/11, passa a **Marquesa Global Match** (a troca no código está na
-PR #246); o WRW segue no domínio (`wrwglobal.org`) e na infraestrutura. **Nada daqui está
-implementado.** A primeira PR de código começa depois da R1b, que está na PR #247
-(Pacote 6).
+PR #246); o WRW segue no domínio (`wrwglobal.org`) e na infraestrutura. **A V1 (o
+servidor) está na PR da branch `feat/sala-de-video-v1`, com a API do Daily dublada nos
+testes**; a tela (V2) e o resto ainda não existem. O que a V1 fez diferente do estudo está
+em "A V1 no código", no fim.
 
 Os preços e as regiões foram vistos nas páginas oficiais dos fornecedores em 24/11/2026,
 em dólar, sem impostos nem câmbio, e mudam sem aviso: confira de novo antes de contratar.
@@ -581,6 +582,32 @@ As oito perguntas da versão de 24/11 foram respondidas (ver "A decisão"). Fica
    aberto já pode ter?
 4. **O teto do orçamento:** recusar sala nova ao chegar no teto, como proposto, ou só
    avisar a administração?
+
+## A V1 no código
+
+A V1 (`server/sala-de-video.ts`, `server/daily.ts`, `shared/sala-de-video.ts`, migração
+`sala-de-video`) segue o estudo, com as três propostas vetáveis acima: o link de visitante
+sem senha, a sala nova recusada no teto do orçamento e sem compartilhar a tela. Onde
+precisou escolher:
+
+- **O consumo do mês numa tabela à parte** (`consumo_das_salas`, uma linha por sala, sem
+  coluna de pessoa). O estudo somava as presenças, mas elas saem com a reunião e com a
+  conta: excluir a reunião devolveria ao teto os minutos que o Daily já cobrou. A sala
+  ainda aberta da reunião excluída passa a contar pelo teto dela.
+- **Uma terceira variável, opcional: `DAILY_WEBHOOK_SEGREDO`**, o segredo com que o Daily
+  assina os avisos. Sem ela, a sala funciona, a rota dos avisos dá 404 e cada sala conta
+  pelo teto (8 pessoas por 120 minutos, umas 23 salas por mês).
+- **A sala é de uma reunião da dona, em qualquer estado** (nem excluída nem na lixeira).
+  As participantes da R1b só existem na reunião pronta, então a reunião ainda não gravada
+  tem a sala só para a dona e os visitantes. A V3 e a V5 (a agenda) podem mudar isso.
+- **O link de visitante é ligado pela dona**, e não ao abrir a sala; trocar o segredo
+  desliga o antigo. A tela da V3 decide como o monta (no `#` do endereço, o segredo não vai
+  ao log do servidor nem ao `Referer`).
+- **O teto de 8 no servidor** conta quem está na sala (pelos avisos do Daily) e quem
+  recebeu a ficha há menos de 10 minutos e não saiu. Sem o webhook, só a segunda regra
+  vale, e o `max_participants` da sala no Daily é a trava de quem já entrou.
+- **Tirar alguém da sala** fica para a V3, como na tabela; a V1 tem o encerrar (a sala sai
+  do Daily, o que tira todo mundo).
 
 ## Fontes (vistas em 24/11/2026)
 

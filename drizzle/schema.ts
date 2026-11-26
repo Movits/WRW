@@ -2652,3 +2652,94 @@ export const voiceProfileConsents = mysqlTable("voice_profile_consents", {
 }, (table) => ({
   ownerCreatedIdx: index("voice_profile_consents_owner_created_idx").on(table.ownerId, table.createdAt),
 }));
+
+// A sala de vídeo da reunião (V1 do estudo docs/arquitetura/sala-de-video.md;
+// decisão do Roberto de 24/11/2026; server/sala-de-video.ts): a dona, Prata ou
+// acima, abre a sala de uma reunião dela, e o servidor cria a sala privada no
+// fornecedor (o Daily, no servidor de São Paulo, com 2 horas e 8 pessoas).
+// provider_room_name é o nome aleatório da sala lá. O link de visitante fica só
+// pelo hash (sha256) do segredo de 192 bits; nulo: desligado (ou nunca ligado).
+// A sala vale até expires_at (2 horas) ou até ended_at (a dona encerrou; o aviso
+// de fim do fornecedor, que vem quando a última pessoa sai, não a fecha). Uma
+// sala aberta por reunião. Excluir a reunião, ou
+// juntá-la a outra, e excluir a conta da dona levam a sala e as presenças; o
+// consumo do mês (consumo_das_salas) fica. Nomes em inglês, como as irmãs
+// meeting_*.
+export const meetingRooms = mysqlTable("meeting_rooms", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  meetingId: varchar("meeting_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  providerRoomName: varchar("provider_room_name", { length: 64 }).notNull(),
+  guestLinkHash: varchar("guest_link_hash", { length: 64 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+  endedAt: bigint("ended_at", { mode: "number" }),
+}, (table) => ({
+  // O aviso do fornecedor (webhook) acha a sala pelo nome de lá.
+  providerRoomUnique: uniqueIndex("meeting_rooms_provider_room_unique").on(table.providerRoomName),
+  // O visitante acha a sala pelo hash do link; o MySQL aceita vários nulos.
+  guestLinkUnique: uniqueIndex("meeting_rooms_guest_link_unique").on(table.guestLinkHash),
+  // A sala aberta de uma reunião e a exclusão da reunião.
+  ownerMeetingIdx: index("meeting_rooms_owner_meeting_idx").on(table.ownerId, table.meetingId),
+}));
+
+// Quem recebeu a ficha de entrada de uma sala (meeting_rooms): a dona (owner), uma
+// participante ativa da reunião pela R1b (participant, com userId) ou um
+// visitante sem conta pelo link (guest, sem userId, só com o nome que digitou
+// em guest_name). owner_id é a dona da SALA, também na linha de quem não é ela:
+// a presença pertence à reunião da dona e sai com ela. Guarda o aceite do aviso
+// de gravação (a versão e a hora), a validade da ficha, a entrada (a primeira) e
+// a saída (a última) que o fornecedor avisou, e o tempo somado na sala. A sessão
+// aberta (open_session_*) e a última fechada (last_session_id) deixam o aviso
+// repetido do fornecedor sem efeito. A conta tem uma linha por sala (reaproveitada
+// a cada ficha); o visitante, uma por entrada. O id da linha vai ao fornecedor como
+// o identificador da pessoa na ficha: nunca o users.id, o e-mail ou o telefone.
+export const meetingRoomPresences = mysqlTable("meeting_room_presences", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  roomId: varchar("room_id", { length: 36 }).notNull(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  userId: int("userId"),
+  role: mysqlEnum("role", ["owner", "participant", "guest"]).notNull(),
+  guestName: varchar("guest_name", { length: 60 }),
+  noticeVersion: varchar("notice_version", { length: 16 }),
+  noticeAcceptedAt: bigint("notice_accepted_at", { mode: "number" }),
+  tokenIssuedAt: bigint("token_issued_at", { mode: "number" }).notNull(),
+  tokenExpiresAt: bigint("token_expires_at", { mode: "number" }).notNull(),
+  joinedAt: bigint("joined_at", { mode: "number" }),
+  leftAt: bigint("left_at", { mode: "number" }),
+  secondsInRoom: int("seconds_in_room").default(0).notNull(),
+  openSessionId: varchar("open_session_id", { length: 64 }),
+  openSessionSince: bigint("open_session_since", { mode: "number" }),
+  lastSessionId: varchar("last_session_id", { length: 64 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  // Uma linha por conta em cada sala (o MySQL aceita vários nulos: os visitantes).
+  roomUserUnique: uniqueIndex("meeting_room_presences_room_user_unique").on(table.roomId, table.userId),
+  // A exclusão da conta como participante.
+  userIdx: index("meeting_room_presences_user_idx").on(table.userId),
+  // A exclusão da reunião e da conta da dona.
+  ownerRoomIdx: index("meeting_room_presences_owner_room_idx").on(table.ownerId, table.roomId),
+}));
+
+// O consumo das salas de vídeo, para o teto do orçamento de US$ 50 por mês
+// (decisão do Roberto de 24/11/2026; server/sala-de-video.ts). Uma linha por
+// sala, SEM coluna de pessoa: fica quando a reunião ou a conta saem, para
+// excluir uma reunião não devolver ao teto os minutos que o fornecedor já
+// cobrou. segundos_pessoa soma o tempo de cada pessoa que o fornecedor avisou
+// (webhook), arredondado para cima ao minuto por sessão. "medida": havia o
+// segredo do webhook quando a sala nasceu; sem ele, a sala conta pelo teto
+// dela (8 pessoas por 120 minutos), aberta ou fechada.
+export const consumoDasSalas = mysqlTable("consumo_das_salas", {
+  salaId: varchar("sala_id", { length: 36 }).primaryKey(),
+  nomeNoFornecedor: varchar("nome_no_fornecedor", { length: 64 }).notNull(),
+  mes: varchar("mes", { length: 7 }).notNull(),
+  criadaEm: bigint("criada_em", { mode: "number" }).notNull(),
+  expiraEm: bigint("expira_em", { mode: "number" }).notNull(),
+  encerradaEm: bigint("encerrada_em", { mode: "number" }),
+  segundosPessoa: int("segundos_pessoa").default(0).notNull(),
+  medida: boolean("medida").notNull(),
+}, (table) => ({
+  nomeUnique: uniqueIndex("consumo_das_salas_nome_unique").on(table.nomeNoFornecedor),
+  mesIdx: index("consumo_das_salas_mes_idx").on(table.mes),
+}));

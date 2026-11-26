@@ -293,6 +293,14 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
   // Desde a G17, a parte pode abrir em outro fluxo: o microfone que voltou.
   const abrirParte = useRef<((seq: number, fluxo?: MediaStream) => Parte) | null>(null);
   const fluxoGravado = useRef<MediaStream | null>(null);
+  // O mesmo fluxo, para a tela: a bolha da voz (components/BolhaDaVoz.tsx) ouve
+  // o que está sendo gravado, e reabre o medidor quando o microfone volta (G17).
+  // Muda sempre junto com o fluxoGravado, por trocarFluxoGravado.
+  const [fluxoAoVivo, setFluxoAoVivo] = useState<MediaStream | null>(null);
+  function trocarFluxoGravado(novo: MediaStream | null) {
+    fluxoGravado.current = novo;
+    setFluxoAoVivo(novo);
+  }
   // Só o microfone que o hook abriu: o MediaStream de fora é de quem o entregou.
   const microfone = useRef<MediaStream | null>(null);
   const inicio = useRef(0);
@@ -437,7 +445,7 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
     soltarOuvintes.current = null;
     pararTrilhas(microfone.current);
     microfone.current = null;
-    fluxoGravado.current = null;
+    trocarFluxoGravado(null);
   }
 
   /** G17: zera a espera pelo microfone (no começo, no fim e no descarte da gravação). */
@@ -579,7 +587,7 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
       return;
     }
     microfone.current = novo;
-    fluxoGravado.current = novo;
+    trocarFluxoGravado(novo);
     // A espera entra no relógio antes de a parte nova valer: ela não é desta parte.
     fecharPausa();
     parte.current = nova;
@@ -761,7 +769,7 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
           if (!parte.current || parte.current.seq === seq) {
             parte.current = null;
             abrirParte.current = null;
-            fluxoGravado.current = null;
+            trocarFluxoGravado(null);
           }
           mudarEstado("parado");
           setSegundos(0);
@@ -837,7 +845,7 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
       microfoneDoHook.current = aberto !== null;
       parte.current = abrir(0, fluxo);
       abrirParte.current = abrir;
-      fluxoGravado.current = fluxo;
+      trocarFluxoGravado(fluxo);
       microfone.current = aberto;
       // G17: a trilha do microfone que cai avisa (só a do microfone que o hook abriu).
       if (aberto) vigiarATrilha(aberto);
@@ -959,5 +967,7 @@ export function useGravadorDeAudio(opcoes: OpcoesDoGravador) {
     tentarOMicrofone: () => { void pedirOMicrofone(true); },
     /** G17: o navegador recusou o microfone na espera; só o toque da dona pede de novo. */
     microfoneBloqueado,
+    /** O fluxo que está sendo gravado, para a tela só ouvir (a bolha da voz); null parado. */
+    fluxoAoVivo,
   };
 }

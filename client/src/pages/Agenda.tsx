@@ -29,6 +29,7 @@ import type { MotivoSemGoogle, ResultadoNaGoogle } from "@shared/google-agenda-e
 import { ROTA_DAS_REUNIOES, rotaDaReuniao, rotaGravarDaAgenda } from "@shared/rotas";
 import { conviteDaReuniao } from "@/lib/convite-da-agenda";
 import { baixarIcsOuAvisar } from "@/components/AcaoNaAgenda";
+import { SoNoNavegador } from "@/components/SoNoNavegador";
 
 /**
  * A agenda de reuniões (H16a do plano do gravador): a dona marca a reunião,
@@ -374,7 +375,7 @@ export default function Agenda() {
         <div>
           <p className="text-amber-300 text-sm font-semibold tracking-wide">{t("agenda.eyebrow")}</p>
           <h1 className="text-3xl md:text-4xl font-bold mt-1">{t("agenda.title")}</h1>
-          <p className="text-white/55 mt-2 max-w-2xl">{t("agenda.subtitle")}</p>
+          <SoNoNavegador><p className="text-white/55 mt-2 max-w-2xl">{t("agenda.subtitle")}</p></SoNoNavegador>
         </div>
         {!formulario && <button type="button" onClick={() => abrir(formularioNovo(), null)}
           className="inline-flex justify-center items-center gap-2 rounded-xl bg-[#c98f70] text-[#1a120c] font-bold px-5 py-3 hover:bg-[#efcba8]">

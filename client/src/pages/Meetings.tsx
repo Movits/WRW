@@ -40,6 +40,8 @@ import { AvisoDeHoraDeGravacao, ID_DO_AVISO_PAROU_SOZINHA } from "@/components/A
 import { AvisoSemMicrofone } from "@/components/AvisoSemMicrofone";
 import { TranscricaoDuranteAGravacao } from "@/components/TranscricaoDuranteAGravacao";
 import { LegendaAoVivo } from "@/components/LegendaAoVivo";
+import { BolhaDaVoz } from "@/components/BolhaDaVoz";
+import { prepararContextoNoToque } from "@/lib/medidor-da-voz";
 import { ID_DO_AVISO_DO_DESCARTE_PENDENTE } from "@/components/RetomadaDosDescartes";
 import { ID_DO_AVISO_DA_PARTE_RECUSADA } from "@/components/RetomadaDasPartes";
 import {
@@ -74,6 +76,7 @@ import { DetalhesDaReuniao } from "@/components/DetalhesDaReuniao";
 import { etiquetasDaDona } from "@shared/detalhes-da-reuniao";
 import { VideoDoYoutube } from "@/components/VideoDoYoutube";
 import { fraseDoErroDoYoutube, fraseDoPedidoDoYoutube } from "@/lib/erro-do-youtube";
+import { SoNoNavegador } from "@/components/SoNoNavegador";
 
 // O relógio do gravador e a duração da reunião no formato da transcrição: a
 // gravação em partes passa de uma hora, e 1 h é 1:00:00, não 60:00.
@@ -515,6 +518,9 @@ export default function Meetings() {
     if (avisoTitulo) return toast.error(avisoTitulo);
     if (!consent) return toast.error(t("meetings.consentRequiredRecording"));
     if (!gravacaoDeAudioSuportada()) return toast.error(t("meetings.recordingUnsupported"));
+    // A bolha da voz (components/BolhaDaVoz.tsx): o iPhone só deixa o áudio rodar
+    // a partir de um toque, e daqui em diante há awaits (a reunião, o microfone).
+    prepararContextoNoToque();
     setMicrophoneIssue(null);
     // A transcrição durante a gravação (G15a) é da gravação nova: a da anterior
     // não aparece nem por um instante.
@@ -719,6 +725,7 @@ export default function Meetings() {
       idioma={idiomaFalado} setIdioma={setIdiomaFalado}
       recording={recording} paused={pausado} telaPodeApagar={telaAcesa.recusada} onPause={pausaSuportada() ? gravador.pausar : undefined} onResume={gravador.continuar} elapsed={gravador.segundos} processing={gravadorOcupado}
       semMicrofone={semMicrofone} microfoneBloqueado={gravador.microfoneBloqueado} onRetryMicrophone={gravador.tentarOMicrofone}
+      fluxoAoVivo={gravador.fluxoAoVivo}
       starting={iniciando}
       importacao={importacao.andamento} onCancelImport={importacao.cancelar}
       microphoneIssue={microphoneIssue} audioInput={audioInput}
@@ -771,7 +778,8 @@ export default function Meetings() {
     <main className="min-h-screen text-white px-4 py-8 md:px-8 bg-transparent">
       <div className="max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
-          <div><p className="text-amber-300 text-sm font-semibold tracking-wide">{t("meetings.privateSecureBadge")}</p><h1 className="text-3xl md:text-4xl font-bold mt-1">{t("meetings.heroTitle")}</h1><p className="text-white/55 mt-2 max-w-2xl">{t("meetings.heroSubtitle")}</p></div>
+          {/* No app das lojas, só o título: o selo e o subtítulo explicam o produto, e isso fica no site. */}
+          <div><SoNoNavegador><p className="text-amber-300 text-sm font-semibold tracking-wide">{t("meetings.privateSecureBadge")}</p></SoNoNavegador><h1 className="text-3xl md:text-4xl font-bold mt-1">{t("meetings.heroTitle")}</h1><SoNoNavegador><p className="text-white/55 mt-2 max-w-2xl">{t("meetings.heroSubtitle")}</p></SoNoNavegador></div>
           {/* O vídeo do YouTube (H13) ao lado da reunião nova; no celular, um embaixo do outro. */}
           <div className="flex flex-col-reverse gap-3 sm:flex-row">
             <ResumoDoYoutube/>
@@ -799,7 +807,7 @@ function ehAparelhoDaApple() {
   return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 }
 
-function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: EscolhaDoIdioma; setIdioma: (value: EscolhaDoIdioma) => void; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; importacao: AndamentoDaImportacao; onCancelImport: () => void; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; onDiscardRecording: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; validarTitulo: () => string | null; onDocumentSent: (meetingId: string) => void; daAgenda?: React.ReactNode; pedidoDoResumo?: React.ReactNode; semMicrofone?: boolean; microfoneBloqueado?: boolean; onRetryMicrophone?: () => void; transcricaoAoVivo?: React.ReactNode; legendaAoVivo?: React.ReactNode }) {
+function MeetingRecorder(props: { title: string; setTitle: (value: string) => void; idioma: EscolhaDoIdioma; setIdioma: (value: EscolhaDoIdioma) => void; consent: boolean; setConsent: (value: boolean) => void; recording: boolean; paused: boolean; telaPodeApagar: boolean; onPause?: () => void; onResume: () => void; elapsed: number; processing: boolean; starting: boolean; importacao: AndamentoDaImportacao; onCancelImport: () => void; microphoneIssue: string | null; audioInput: React.RefObject<HTMLInputElement | null>; onDiscardRecording: () => void; onStart: () => void; onStop: () => void; onUpload: (file: File) => void; onBack: () => void; validarTitulo: () => string | null; onDocumentSent: (meetingId: string) => void; daAgenda?: React.ReactNode; pedidoDoResumo?: React.ReactNode; semMicrofone?: boolean; microfoneBloqueado?: boolean; onRetryMicrophone?: () => void; transcricaoAoVivo?: React.ReactNode; legendaAoVivo?: React.ReactNode; fluxoAoVivo?: MediaStream | null }) {
   const { t } = useTranslation();
   // O resumo de um documento (H12 e H12b): no lugar do microfone, o PDF ou as
   // fotos de um texto, com o aviso e a autorização do documento. O título e o
@@ -827,6 +835,12 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
   // dele (ImportacaoEmAndamento).
   const telaPodeApagar = ehAparelhoDaApple() || props.telaPodeApagar;
   const avisarTelaAberta = props.recording && telaPodeApagar;
+  const circuloDoMicrofone = <div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? `border-red-400 bg-red-500/15 ${props.paused || props.semMicrofone ? "" : "animate-pulse"}` : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing || importacao ? <Loader2 className="animate-spin text-amber-300" size={36}/> : props.semMicrofone ? <MicOff className="text-red-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div>;
+  // Gravando, a bolha que reage à voz; sem ela ouvir (sem Web Audio, o iPhone
+  // sem o toque), o círculo de sempre (components/BolhaDaVoz.tsx).
+  const bolhaOuCirculo = props.recording && !props.processing && !importacao && !props.semMicrofone && props.fluxoAoVivo
+    ? <BolhaDaVoz fluxo={props.fluxoAoVivo} pausada={props.paused} circulo={circuloDoMicrofone}/>
+    : circuloDoMicrofone;
   return <main className="min-h-screen flex items-center justify-center p-4 bg-transparent text-white">
     <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-[#211e1b]/90 p-6 md:p-8 shadow-2xl">
       <button disabled={locked} onClick={props.onBack} className="inline-flex items-center gap-2 text-sm text-white/55 hover:text-white disabled:opacity-40"><ArrowLeft size={16}/> {t("meetings.back")}</button>
@@ -852,7 +866,7 @@ function MeetingRecorder(props: { title: string; setTitle: (value: string) => vo
       {noDocumento ? <div className="mt-7"><DocumentoParaResumir titulo={props.title} idioma={props.idioma} validarTitulo={props.validarTitulo}
         aoMudarOcupado={setDocumentoOcupado} aoVoltar={() => setModo("gravacao")}
         aoEnviar={meetingId => { setModo("gravacao"); props.onDocumentSent(meetingId); }}/></div> : <>
-      <div className="my-9 text-center"><div className={`mx-auto mb-4 h-28 w-28 rounded-full flex items-center justify-center border ${props.recording ? `border-red-400 bg-red-500/15 ${props.paused || props.semMicrofone ? "" : "animate-pulse"}` : "border-amber-400/40 bg-amber-400/10"}`}>{props.processing || importacao ? <Loader2 className="animate-spin text-amber-300" size={36}/> : props.semMicrofone ? <MicOff className="text-red-300" size={36}/> : <Mic className={props.recording ? "text-red-300" : "text-amber-300"} size={36}/>}</div><p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p>{props.paused ? <p role="status" className="text-sm text-amber-200 mt-2">{t("meetings.pausedStatus")}</p> : props.semMicrofone ? <p role="status" className="text-sm text-red-200 mt-2">{t("meetings.micLost.status")}</p> : <p className="text-xs text-white/40 mt-2">{t("meetings.recordingLimitInParts", { horas: HORAS_DA_GRAVACAO_EM_PARTES })}</p>}</div>
+      <div className="my-9 text-center">{bolhaOuCirculo}<p className="font-mono text-3xl tracking-widest">{formatDuration(props.elapsed)}</p>{props.paused ? <p role="status" className="text-sm text-amber-200 mt-2">{t("meetings.pausedStatus")}</p> : props.semMicrofone ? <p role="status" className="text-sm text-red-200 mt-2">{t("meetings.micLost.status")}</p> : <p className="text-xs text-white/40 mt-2">{t("meetings.recordingLimitInParts", { horas: HORAS_DA_GRAVACAO_EM_PARTES })}</p>}</div>
       {avisarTelaAberta && <div role="note" className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><CircleAlert size={16} className="inline mr-2"/>{t("meetings.keepScreenOpenNotice")}</div>}
       {props.microphoneIssue && <div className="mb-4 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4 text-sm text-amber-100"><strong>{t("meetings.micPermissionLabel")}</strong> {props.microphoneIssue}</div>}
       <input ref={props.audioInput} type="file" accept={ACEITOS_EM_PARTES} className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) props.onUpload(file); event.currentTarget.value = ""; }}/>
@@ -1474,7 +1488,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
         <IdiomasDetectados escolha={meeting.language} idiomaDaTranscricao={transcript.language} segmentos={transcript.segments}/>
         <div className="mb-5 rounded-xl border border-amber-300/25 bg-amber-300/10 p-4">
           <p className="font-semibold text-amber-100">{ehDocumento ? t("meetings.document.translateHeading") : t("meetings.translateHeading")}</p>
-          <p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.translateSubtext") : t("meetings.translateSubtext")}</p>
+          <SoNoNavegador><p className="mt-1 text-sm text-amber-100/70">{ehDocumento ? t("meetings.document.translateSubtext") : t("meetings.translateSubtext")}</p></SoNoNavegador>
           <label className="mt-3 flex flex-col gap-2 text-sm text-white/75 sm:flex-row sm:items-center">{t("meetings.targetLanguageLabel")}
             <select ref={seletorDaTraducao} value={translationLanguage} onChange={event => setTranslationLanguage(event.target.value)} className="rounded-lg bg-[#211e1b] border border-white/15 px-3 py-2 text-white">
               <OpcaoDoIdiomaOriginal idioma={idiomaOriginal}/>
@@ -1556,7 +1570,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
         {/* Quem só foi citada na conversa (achado 7 da bancada de 16/11): à parte e
             compacta, nunca um cartão igual ao das participantes. */}
         {citadas.length > 0 && <section aria-labelledby="pessoas-citadas" className="space-y-3 pt-2">
-          <div><h2 id="pessoas-citadas" className="text-sm font-semibold text-white/75">{t("meetings.mentionedHeading")}</h2><p className="mt-1 text-xs text-white/45">{t("meetings.mentionedHelp")}</p></div>
+          <div><h2 id="pessoas-citadas" className="text-sm font-semibold text-white/75">{t("meetings.mentionedHeading")}</h2><SoNoNavegador><p className="mt-1 text-xs text-white/45">{t("meetings.mentionedHelp")}</p></SoNoNavegador></div>
           {citadas.map(cartaoDaSugestao)}
         </section>}
       </> : <div className="rounded-2xl border border-dashed border-white/15 py-14 text-center text-white/45">{t("meetings.noContactSuggestions")}</div>}</div>}

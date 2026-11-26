@@ -36,6 +36,7 @@ import {
   Menu as MenuIcon, ChevronDown, LogOut, Network,
 } from "lucide-react";
 import { MOSTRAR_NUMEROS_DA_REDE } from "@/lib/numeros-da-rede";
+import { SoNoNavegador } from "@/components/SoNoNavegador";
 
 // ─── Faixas de compatibilidade ───────────────────────────────────────────────
 // Item 12 do reteste v4 (Gabriel): os anéis dos cartões pintavam em TRÊS cores
@@ -724,7 +725,7 @@ function RecommendedOpportunities() {
         </div>
         <div>
           <h2 className="font-black text-white text-lg leading-tight">{t("dashboard.recommendedTitle")}</h2>
-          <p className="text-xs text-white/35 mt-0.5">{t("dashboard.recommendedSubtitle")}</p>
+          <SoNoNavegador><p className="text-xs text-white/35 mt-0.5">{t("dashboard.recommendedSubtitle")}</p></SoNoNavegador>
         </div>
       </div>
 
