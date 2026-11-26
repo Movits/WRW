@@ -497,6 +497,37 @@ da PARTICIPAÇÃO (nunca o `users.id`), e o nome da conta é resolvido na leitur
 (`vozesParaQuemLe`); reprocessar e juntar reuniões zeram as três colunas das vozes
 (`VOZES_ZERADAS`). A exclusão da reunião e da conta (das duas pontas) levam as participações.
 
+## O perfil de voz da dona (H3d)
+
+`server/perfil-de-voz.ts` (router `perfilDeVoz`), `shared/perfil-de-voz.ts`, tabelas
+`voice_profiles` (uma linha por dona) e `voice_profile_consents`, e a seção do Perfil
+(`client/src/components/PerfilDeVoz.tsx`). A dona grava 10 a 60 s da própria voz (a tela pede
+cerca de 30 s, lendo um texto; até 1 MB, o conteúdo conferido pelos primeiros bytes), guardados
+no bucket sob `perfis-de-voz/<openId>/`, prefixo que o proxy `/manus-storage` nega a todo
+mundo: só a dona ouve, por `perfilDeVoz.ouvir`, e o link aberto, as participantes e a
+consulta da administração (R1a) nunca leem a amostra. É dado biométrico (LGPD art. 11):
+
+- a primeira gravação exige o consentimento da caixa (texto da Cris, desmarcada, separada do
+  aceite dos Termos), com a versão do texto (`VERSOES_DO_TEXTO_DO_PERFIL_DE_VOZ`), o idioma e
+  o texto exibido; `voice_profile_consents` guarda cada consentimento e cada revogação (data,
+  hora, versão, idioma, texto e hash, IP e navegador, sem a voz), nunca recebe UPDATE e
+  sobrevive à exclusão do perfil e da conta;
+- desligar é DEFINITIVO: na transação com a linha travada, a linha sai, a revogação entra e a
+  amostra sai do bucket com TODAS as versões (`storageApagarTodasAsVersoes`); se o bucket
+  recusar, a transação desfaz e nada muda. Regravar apaga a antiga do mesmo jeito antes de a
+  troca valer, sem pedir a caixa de novo. A exclusão da conta registra a revogação (origem
+  `exclusao_da_conta`), apaga a amostra com todas as versões e a linha
+  (`server/exclusao-de-conta.ts`, regra 7); o exame de produção não grava perfil;
+- a fila (`server/fila-de-transcricao.ts`) manda a amostra ANTES do trecho em cada parte da
+  reunião da dona (`amostraDaVozDaDona`; cerca de US$ 0,0007 por parte), e o prompt pede o
+  rótulo fixo `F1` (`ROTULO_DA_VOZ_DA_DONA`) para a voz dela, com as outras a partir de F2 e
+  "na dúvida, outro rótulo". A parte guarda a marca `vozDaDona`; a seguinte só leva a amostra
+  se a anterior levou (o perfil gravado no meio de uma reunião não entra nela), e na junção
+  (H17) o F1 fica fixo e as outras vozes vão para depois das usadas. A montagem liga o F1 à
+  conta da dona em `speaker_accounts` (H3c), sem tirar a ligação que já havia
+  (`contasComAVozDaDona`): nada entra sozinho que a dona não corrija no "Quem é cada voz".
+  Desligar o perfil não mexe nas reuniões já transcritas.
+
 ## Os espaços de equipe (R2)
 
 `server/espacos-de-equipe.ts` (router `equipes`), tabelas `meeting_folder_members` e

@@ -173,6 +173,9 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
       // Quem escreveu e se a dona editou (H4f): a tela marca o que é dela.
       origin: meetingSummaryItems.origin,
       editedAt: meetingSummaryItems.editedAt,
+      // O estado de antes do Ignorar: no item pendente, marca o que a dona
+      // ignorou e a IA trouxe de volta no refazer (T29; drizzle/schema.ts).
+      statusBeforeIgnore: meetingSummaryItems.statusBeforeIgnore,
       ...COLUNAS_DO_COMPLEMENTO,
     }).from(meetingSummaryItems)
       .where(and(eq(meetingSummaryItems.summaryId, linha.id), eq(meetingSummaryItems.ownerId, ownerId)))
@@ -188,8 +191,13 @@ export async function resumoGuardadoDaDona(ownerId: string, meetingId: string) {
   const escolha: EscolhaDoModelo | null = !linha ? null
     : linha.aiTemplate === "pending" ? { tipo: "ia" }
     : proprio ? { tipo: "proprio", id: proprio.id } : { tipo: "pronto", modelo: modelo ?? MODELO_DE_RESUMO_PADRAO };
-  const itens = lidos.map(({ complementText, complementSourceUrl, complementSourceTitle, complementQueries, complementStatus, ...item }) =>
-    ({ ...item, complemento: complementoNaTela({ complementText, complementSourceUrl, complementSourceTitle, complementQueries, complementStatus }, false) }));
+  const itens = lidos.map(({ complementText, complementSourceUrl, complementSourceTitle, complementQueries, complementStatus, statusBeforeIgnore, ...item }) => ({
+    ...item,
+    // O item que a dona ignorou e a IA repetiu no "Refazer como…" (H4d): volta
+    // pendente, e a tela avisa que voltou (decisão 3 da PR #217).
+    voltouDoIgnorado: item.status === "pending" && statusBeforeIgnore !== null,
+    complemento: complementoNaTela({ complementText, complementSourceUrl, complementSourceTitle, complementQueries, complementStatus }, false),
+  }));
   return {
     estado, emoji: linha?.emoji ?? null, idioma: linha?.language ?? null, modelo,
     modeloProprio: proprio ? { id: proprio.id, nome: proprio.nome, icone: iconeDoModelo(proprio.icone) ?? "📝" } : null,

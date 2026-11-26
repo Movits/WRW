@@ -1,4 +1,6 @@
 import { escolhaDoIdioma, IDIOMA_AUTOMATICO, IDIOMA_DA_REUNIAO_PADRAO, idiomaFalado, nomeDoIdioma, type EscolhaDoIdioma } from "@shared/idioma-da-reuniao";
+import { CONTA_DA_DONA } from "@shared/const";
+import { ROTULO_DA_VOZ_DA_DONA } from "@shared/perfil-de-voz";
 import { gerarComAudioNoGemini } from "./gemini";
 
 /**
@@ -80,18 +82,74 @@ export function iniciosDasReunioesJuntadas(partes: ReadonlyArray<{ seq: number; 
   return inicios;
 }
 
+/**
+ * A marca que a fila (server/fila-de-transcricao.ts) põe no `result` da parte
+ * transcrita com a amostra da voz da dona (H3d): nessa parte, o rótulo fixo
+ * (ROTULO_DA_VOZ_DA_DONA) é a dona. A parte seguinte só leva a amostra se a
+ * anterior também levou (senão o rótulo fixo já pode ser de outra pessoa), e a
+ * montagem liga o rótulo à conta da dona (contasComAVozDaDona).
+ */
+export const MARCA_DA_VOZ_DA_DONA = "vozDaDona";
+
+export function parteUsouAVozDaDona(result: unknown): boolean {
+  return !!result && typeof result === "object" && !Array.isArray(result) && (result as Record<string, unknown>)[MARCA_DA_VOZ_DA_DONA] === true;
+}
+
+/** A parte guardada tem fala (fora da lacuna) com o rótulo fixo da voz da dona? */
+function parteTemORotuloDaDona(result: unknown): boolean {
+  const segmentos = (result as { segmentos?: unknown } | null)?.segmentos;
+  return Array.isArray(segmentos) && segmentos.some(segmento => {
+    const s = segmento as Partial<Segmento> | null;
+    return !!s && !s.lacuna && s.falante === ROTULO_DA_VOZ_DA_DONA;
+  });
+}
+
+/**
+ * As vozes ligadas às contas (H3c) depois da montagem: com alguma parte
+ * transcrita com a amostra e a voz da dona nas falas, o rótulo fixo dela fica
+ * ligado à conta dela ("owner"), sem tirar o que já estava ligado (a ligação
+ * da própria dona vence). null: nada a mudar. A dona corrige no "Quem é cada
+ * voz" como sempre: a IA pode errar.
+ *
+ * Só liga se TODA parte transcrita que tem o rótulo fixo nas falas foi
+ * transcrita com a amostra: numa reunião juntada (H17), o F1 de uma parte sem
+ * a amostra é outra pessoa, e ligá-lo à dona juntaria as duas. E não liga o
+ * rótulo a que a dona deu um nome livre (`nomes`): foi ela quem soltou a conta
+ * ao nomear a voz (o nome da conta venceria o dela na tela), e a montagem de
+ * depois (o reprocesso, a junção) não a desfaz.
+ */
+export function contasComAVozDaDona(
+  partes: ReadonlyArray<{ status: string; result: unknown }>,
+  segmentos: ReadonlyArray<Segmento>,
+  atuais: Record<string, string>,
+  nomes: Record<string, string> = {},
+): Record<string, string> | null {
+  const transcritas = partes.filter(parte => parte.status === "transcribed");
+  if (!transcritas.some(parte => parteUsouAVozDaDona(parte.result))) return null;
+  if (transcritas.some(parte => parteTemORotuloDaDona(parte.result) && !parteUsouAVozDaDona(parte.result))) return null;
+  if (!segmentos.some(segmento => !segmento.lacuna && segmento.falante === ROTULO_DA_VOZ_DA_DONA)) return null;
+  if (ROTULO_DA_VOZ_DA_DONA in atuais) return null;
+  if (nomes[ROTULO_DA_VOZ_DA_DONA]?.trim()) return null;
+  return { ...atuais, [ROTULO_DA_VOZ_DA_DONA]: CONTA_DA_DONA };
+}
+
 /** O número do rótulo da voz ("F3" é 3); o que não é rótulo vale 0. */
 export function numeroDoRotulo(falante: unknown): number {
   const casou = typeof falante === "string" ? /^F([1-9]\d*)$/.exec(falante) : null;
   return casou ? Number(casou[1]) : 0;
 }
 
-/** As falas com os rótulos das vozes deslocados em `deslocamento` (F1 vira F4 com 3); a lacuna e o que não é rótulo ficam. */
-export function deslocarRotulosDasFalas(segmentos: Segmento[], deslocamento: number): Segmento[] {
+/**
+ * As falas com os rótulos das vozes deslocados em `deslocamento` (F1 vira F4
+ * com 3); a lacuna, o que não é rótulo e os rótulos `fixos` ficam. O fixo é o
+ * da voz da dona (H3d): ela é a mesma pessoa em todas as reuniões juntadas.
+ */
+export function deslocarRotulosDasFalas(segmentos: Segmento[], deslocamento: number, fixos: readonly string[] = []): Segmento[] {
   if (!deslocamento) return segmentos;
   return segmentos.map(segmento => {
     const numero = numeroDoRotulo(segmento.falante);
-    return numero && !segmento.lacuna ? { ...segmento, falante: `F${numero + deslocamento}` } : segmento;
+    if (!numero || segmento.lacuna || fixos.includes(segmento.falante)) return segmento;
+    return { ...segmento, falante: `F${numero + deslocamento}` };
   });
 }
 
@@ -197,7 +255,33 @@ export function tempoEmTexto(segundos: number, comHoras = segundos >= 3600): str
   return comHoras || horas ? `${horas}:${minutosESegundos}` : minutosESegundos;
 }
 
-export function promptDaFatia(input: { idioma: EscolhaDoIdioma; duracaoSegundos: number; anterior?: ContextoDaFatiaAnterior }): string {
+/**
+ * A regra da voz da dona (H3d), quando a amostra vai junto: o rótulo fixo dela
+ * (ROTULO_DA_VOZ_DA_DONA), as outras vozes depois dele, e "F1" só com
+ * segurança. Errar para menos (a dona como "F2") a dona corrige ligando a voz;
+ * errar para mais juntaria outra pessoa a ela.
+ */
+export function regraDaVozDaDona(): string {
+  return `Antes do trecho vai uma AMOSTRA da voz da dona da reunião, só para reconhecê-la: não a transcreva. As falas dessa mesma voz levam sempre o rótulo "${ROTULO_DA_VOZ_DA_DONA}", e as outras vozes começam em "F2". Use "${ROTULO_DA_VOZ_DA_DONA}" só quando a voz for claramente a da amostra; na dúvida, dê à voz um rótulo próprio. Se a dona não fala no trecho, não use "${ROTULO_DA_VOZ_DA_DONA}".`;
+}
+
+/** Os textos que apresentam cada áudio no pedido com a amostra (H3d). */
+export const TEXTO_DA_AMOSTRA_DA_VOZ = "Amostra da voz da dona da reunião (só para reconhecer a voz; não transcreva):";
+export const TEXTO_DO_TRECHO_COM_AMOSTRA = "Trecho da reunião a transcrever:";
+
+/**
+ * A regra das vozes do prompt da parte. A mesma voz mantém o rótulo também
+ * quando interrompe, fala por cima ou só responde "sim": no teste manual T22
+ * (25/11/2026), o Falante 2 que interrompeu o Falante 3 virou um Falante 4. A
+ * regra não manda ficar com um rótulo antigo "na dúvida": juntar duas pessoas
+ * num rótulo só não tem conserto pelo texto, e o rótulo a mais a dona corrige
+ * na edição da transcrição (H18), trocando o falante da fala. Quem separa as
+ * vozes é o modelo, ouvindo o áudio; o servidor não tem como juntar rótulos
+ * depois sem o áudio (o perfil de voz é outro trabalho, H3d).
+ */
+export const REGRA_DAS_VOZES = '3) Separe as vozes: cada fala é um item, e "falante" é "F1", "F2", "F3"... A mesma voz fica sempre com o mesmo rótulo, do começo ao fim do trecho, também quando interrompe outra pessoa, fala ao mesmo tempo que ela, volta depois de um tempo calada ou diz uma palavra só ("sim", "isso", "não"). Interrupção, fala sobreposta e resposta curta não são sinal de voz nova: antes de criar um rótulo, compare a voz com as que já têm rótulo, e crie um novo só para uma voz que ainda não falou. Na fala sobreposta, cada voz é um item, com o próprio rótulo. Nunca use nomes de pessoas no rótulo.';
+
+export function promptDaFatia(input: { idioma: EscolhaDoIdioma; duracaoSegundos: number; anterior?: ContextoDaFatiaAnterior; vozDaDona?: boolean }): string {
   // As partes têm até 12 min (DURACAO_MAXIMA_DA_PARTE_SEGUNDOS); o "H:MM:SS"
   // só vale para a bancada, que aceita parte de qualquer tamanho.
   const comHoras = input.duracaoSegundos >= 3600;
@@ -215,14 +299,19 @@ export function promptDaFatia(input: { idioma: EscolhaDoIdioma; duracaoSegundos:
     "Regras:",
     "1) Transcrição literal: não resuma, não corrija e não invente. Preserve nomes próprios, empresas, números, telefones e e-mails.",
     `2) "inicio" e "fim" são o tempo da fala DENTRO deste trecho, contado do começo dele, escrito como texto ${formato}, de "${tempoEmTexto(0, comHoras)}" a "${fimDoTrecho}". Nunca escreva o tempo como número. O trecho tem ${tamanhoDoTrecho} de áudio: transcreva até o fim dele.`,
-    '3) Separe as vozes: cada fala é um item, e "falante" é "F1", "F2", "F3"... A mesma voz fica sempre com o mesmo rótulo. Nunca use nomes de pessoas no rótulo.',
+    REGRA_DAS_VOZES,
     "4) Quebre falas longas em itens de até 1 minuto, com o mesmo falante.",
     "5) Trecho que não dá para entender, música ou ruído longo: uma marca curta entre colchetes, na língua da fala em volta (em português: [inaudível], [música], [ruído]). Silêncio não vira item.",
   ];
   let proximaRegra = 6;
   if (input.idioma === IDIOMA_AUTOMATICO) linhas.push(`${proximaRegra++}) ${REGRA_DO_IDIOMA_DA_FALA}`);
+  if (input.vozDaDona) linhas.push(`${proximaRegra++}) ${regraDaVozDaDona()}`);
   if (input.anterior && (input.anterior.falantes.length || input.anterior.ultimasFalas.length)) {
-    linhas.push(`${proximaRegra}) Este trecho continua o anterior. Vozes já identificadas: ${input.anterior.falantes.join(", ") || "nenhuma"}. Reconheça as mesmas vozes e use os mesmos rótulos; voz nova recebe o próximo número livre.`);
+    // Só os rótulos na lista: "F1 (a dona)" ali o modelo copiaria como rótulo
+    // (FALANTE_VALIDO o recusa). Quem é a dona vai numa frase à parte.
+    const vozes = input.anterior.falantes;
+    const qualEADona = input.vozDaDona && vozes.includes(ROTULO_DA_VOZ_DA_DONA) ? ` O rótulo "${ROTULO_DA_VOZ_DA_DONA}" é a dona.` : "";
+    linhas.push(`${proximaRegra}) Este trecho continua o anterior. Vozes já identificadas: ${vozes.join(", ") || "nenhuma"}.${qualEADona} Reconheça as mesmas vozes e use os mesmos rótulos, também quando a voz só reaparece no meio de uma interrupção; voz nova (que não é nenhuma destas) recebe o próximo número livre.`);
     // Sem o tempo: o da fala anterior é absoluto (passa dos 600 s), e a regra 2
     // pede o tempo DENTRO do trecho; um exemplo com [10:23] ensinaria o modelo
     // a devolver tempos que o teto da parte achataria.
@@ -339,12 +428,12 @@ export class TemposForaDaParteError extends Error {
  * nulo) está fora do formato, o que é diferente do texto vazio (silêncio): se
  * todos vieram assim, é erro, e não parte em silêncio.
  */
-export function normalizarSegmentos(bruto: unknown, inicioSegundos: number, duracaoSegundos: number): Segmento[] {
-  return normalizarComContagens(bruto, inicioSegundos, duracaoSegundos).segmentos;
+export function normalizarSegmentos(bruto: unknown, inicioSegundos: number, duracaoSegundos: number, comAmostra = false): Segmento[] {
+  return normalizarComContagens(bruto, inicioSegundos, duracaoSegundos, comAmostra).segmentos;
 }
 
 /** O mesmo que normalizarSegmentos, com as contagens das falas cujo início não deu para usar. */
-function normalizarComContagens(bruto: unknown, inicioSegundos: number, duracaoSegundos: number): { segmentos: Segmento[]; tempos: TemposDaParte } {
+function normalizarComContagens(bruto: unknown, inicioSegundos: number, duracaoSegundos: number, comAmostra = false): { segmentos: Segmento[]; tempos: TemposDaParte } {
   const itens = (bruto as { segmentos?: unknown })?.segmentos;
   if (!Array.isArray(itens)) throw new Error("A transcrição da parte veio sem a lista de falas.");
   const teto = duracaoSegundos + FOLGA_DO_FIM_SEGUNDOS;
@@ -372,7 +461,11 @@ function normalizarComContagens(bruto: unknown, inicioSegundos: number, duracaoS
   const emSegundos = (t: TempoLido | null) => (t === null ? null : t.numero ? leitura.ler(t.segundos) : t.segundos);
 
   const segmentos: Segmento[] = [];
-  let ultimoFalante = "F1";
+  // A fala sem rótulo válido fica com o falante anterior; a primeira da parte,
+  // com o primeiro rótulo. Com a amostra (H3d), o primeiro é a dona, que a
+  // montagem liga à conta dela: o recurso passa a ser o primeiro das outras
+  // vozes (errar para menos, como na regra da voz da dona).
+  let ultimoFalante = comAmostra ? "F2" : "F1";
   let inicioAnterior = 0;
   let rotulosTrocados = 0;
   let semTempo = 0;
@@ -438,6 +531,9 @@ export async function transcreverFatia(input: {
   anterior?: ContextoDaFatiaAnterior;
   // A última tentativa da parte na fila (e a bancada, que tenta uma vez só).
   ultimaTentativa: boolean;
+  // A amostra da voz da dona (H3d, server/perfil-de-voz.ts): vai antes do
+  // trecho, e a voz dela leva o rótulo fixo (ROTULO_DA_VOZ_DA_DONA).
+  amostraDaVoz?: { audio: Buffer; mimeType: string };
 }): Promise<{ segmentos: Segmento[]; idioma: EscolhaDoIdioma; modelo: string; tempos?: TemposDaParte }> {
   // A escolha da reunião: um idioma falado (G16: os 10 da tela e os outros que
   // a IA transcreve) ou "Detectar sozinho". Sem escolha que valha, o padrão.
@@ -445,8 +541,11 @@ export async function transcreverFatia(input: {
   const { texto, modelo } = await gerarComAudioNoGemini({
     audio: input.audio,
     mimeType: input.mimeType,
-    prompt: promptDaFatia({ idioma, duracaoSegundos: input.duracaoSegundos, anterior: input.anterior }),
+    prompt: promptDaFatia({ idioma, duracaoSegundos: input.duracaoSegundos, anterior: input.anterior, vozDaDona: !!input.amostraDaVoz }),
     esquemaJson: esquemaDaFatia(idioma),
+    ...(input.amostraDaVoz ? {
+      amostraDaVoz: { ...input.amostraDaVoz, texto: TEXTO_DA_AMOSTRA_DA_VOZ, rotuloDoTrecho: TEXTO_DO_TRECHO_COM_AMOSTRA },
+    } : {}),
   });
   let bruto: unknown;
   try {
@@ -454,7 +553,7 @@ export async function transcreverFatia(input: {
   } catch (erro) {
     throw new Error("A transcrição da parte veio num formato inválido.", { cause: erro });
   }
-  const { segmentos, tempos } = normalizarComContagens(bruto, input.inicioSegundos, input.duracaoSegundos);
+  const { segmentos, tempos } = normalizarComContagens(bruto, input.inicioSegundos, input.duracaoSegundos, !!input.amostraDaVoz);
   if (!temposDegradados(tempos)) return { segmentos, idioma, modelo };
   if (!input.ultimaTentativa) throw new TemposForaDaParteError(tempos);
   console.warn(`[Transcrição] parte aceita na última tentativa com ${tempos.presasNoFim + tempos.semTempo} de ${tempos.total} falas com o tempo fora dela ou ilegível`);

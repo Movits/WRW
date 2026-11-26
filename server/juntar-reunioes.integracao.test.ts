@@ -220,6 +220,39 @@ describe.skipIf(!temBanco)("Juntar reuniões (integração)", () => {
     expect(await banco.select().from(meetingSummaryItems).where(eq(meetingSummaryItems.meetingId, a.id))).toEqual([]);
   });
 
+  /** Marca as partes da reunião como transcritas com a amostra da voz da dona (H3d). */
+  async function comAVozDaDona(meetingId: string) {
+    const banco = await db();
+    for (const parte of await partesDe(meetingId)) {
+      await banco.update(meetingAudioSlices).set({ result: { ...(parte.result as Record<string, unknown>), vozDaDona: true } }).where(eq(meetingAudioSlices.id, parte.id));
+    }
+  }
+
+  it("H3d: a reunião SEM o perfil juntada antes da gravada COM ele: o F1 da primeira (outra pessoa) não é ligado à dona", async () => {
+    const a = await emPartes(DONA, [[fala(5, "F1", "alguém abre"), fala(300, "F2", "outra pessoa")]]);
+    const b = await emPartes(DONA, [[fala(3, "F1", "a dona fala"), fala(50, "F2", "visita")]]);
+    await comAVozDaDona(b.id);
+    await juntar([a.id, b.id]);
+    const partes = await partesDe(a.id);
+    // A parte de B teve os rótulos deslocados: perdeu a marca, e a dona dela é F3.
+    expect((partes[1].result as { vozDaDona?: boolean }).vozDaDona).toBeUndefined();
+    expect((partes[1].result as { segmentos: Array<{ falante: string }> }).segmentos.map(s => s.falante)).toEqual(["F3", "F4"]);
+    await fila.rodarUmaVez({ ownerId: DONA });
+    const pronta = await reuniaoDe(a.id);
+    expect(pronta.status).toBe("ready");
+    expect(pronta.speakerAccounts).toBeNull();
+  });
+
+  it("H3d: as duas reuniões gravadas com o perfil: o F1 do alvo (a dona) segue ligado à conta dela depois da junção", async () => {
+    const a = await emPartes(DONA, [[fala(5, "F1", "a dona abre"), fala(300, "F2", "outra pessoa")]]);
+    const b = await emPartes(DONA, [[fala(3, "F1", "a dona de novo"), fala(50, "F2", "visita")]]);
+    await comAVozDaDona(a.id);
+    await comAVozDaDona(b.id);
+    await juntar([a.id, b.id]);
+    await fila.rodarUmaVez({ ownerId: DONA });
+    expect((await reuniaoDe(a.id)).speakerAccounts).toEqual({ F1: "owner" });
+  });
+
   it("a reunião do envio único: a gravação vira uma parte que a fila transcreve como outra conversa, sem o contexto nem os nomes da anterior", async () => {
     const banco = await db();
     const a = await emPartes(DONA, [[fala(5, "F1", "Ana abre")]], { speakerNames: { F1: "Ana" } });

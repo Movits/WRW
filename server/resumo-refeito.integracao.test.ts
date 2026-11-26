@@ -179,6 +179,30 @@ describe.skipIf(!temBanco)("Modelos do resumo e o refazer (integração)", () =>
     expect(await servico.resumoGuardadoDaDona(DONA, id)).toMatchObject({ estado: "pronto", modelo: "sales", emoji: "💼" });
   });
 
+  it("a decisão ignorada que a IA repete volta pendente, com o aviso de que voltou; decidi-la tira o aviso (T29, decisão 3 da #217)", async () => {
+    const { id, antes } = await resumoDecidido();
+    await servico.refazerResumoDaDona(DONA, id, { modelo: "sales" }, vaga);
+    gerarResumoDaReuniao.mockResolvedValue({ ...VENDAS, itens: [...VENDAS.itens, item("decision", "não renovar com a TRANSPORTADORA.")] });
+    await rodar();
+
+    const lido = await servico.resumoGuardadoDaDona(DONA, id);
+    const voltou = lido.itens.find(linha => linha.section === "decision" && linha.text === "não renovar com a TRANSPORTADORA.");
+    // Outra linha (a ignorada saiu), pendente e marcada; nada fica ignorado.
+    expect(voltou).toMatchObject({ status: "pending", voltouDoIgnorado: true });
+    expect(voltou!.id).not.toBe(antes["Não renovar com a transportadora"].id);
+    expect(lido.itens.filter(linha => linha.status === "ignored")).toEqual([]);
+    // Os outros novos não têm a marca.
+    expect(lido.itens.filter(linha => linha.voltouDoIgnorado).map(linha => linha.text)).toEqual(["não renovar com a TRANSPORTADORA."]);
+    // O link não recebe a marca.
+    const peloLink = await servico.resumoGuardadoPeloLink(await tokenDe(id));
+    expect(JSON.stringify(peloLink)).not.toContain("voltouDoIgnorado");
+
+    // Ignorar e desfazer: volta pendente comum, sem o aviso.
+    await servico.decidirItemDoResumo(DONA, voltou!.id!, "ignored");
+    await servico.decidirItemDoResumo(DONA, voltou!.id!, "pending");
+    expect((await servico.resumoGuardadoDaDona(DONA, id)).itens.find(linha => linha.id === voltou!.id)).toMatchObject({ status: "pending", voltouDoIgnorado: false });
+  });
+
   it("durante o refazer: decidir é conflito, e o link segue mostrando a versão anterior (sem os ignorados), marcada como anterior", async () => {
     const { id, antes } = await resumoDecidido();
     const token = await tokenDe(id);

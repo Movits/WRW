@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExcluirMinhaConta } from "@/components/ExcluirMinhaConta";
 import { ConexaoGoogleAgenda } from "@/components/ConexaoGoogleAgenda";
+import { PerfilDeVoz } from "@/components/PerfilDeVoz";
 import { ChavesDeAcesso } from "@/components/ChavesDeAcesso";
 import { ContaGoogleNoPerfil } from "@/components/ContaGoogleNoPerfil";
 import { AssistenteDeTexto } from "@/components/AssistenteDeTexto";
@@ -757,6 +758,10 @@ export default function Profile() {
         {/* A Google Agenda (H16b): só aparece com a função disponível no
             servidor; fora da edição, como a zona de risco abaixo. */}
         {!editing && <ConexaoGoogleAgenda />}
+
+        {/* O perfil de voz (H3d): a dona grava a própria voz, e as reuniões
+            dela a reconhecem. Fora da edição, como a Google Agenda. */}
+        {!editing && <PerfilDeVoz />}
 
         {/* As chaves de acesso (A7): entrar com Face ID ou digital. Só aparece
             com a função disponível neste endereço e fora da casca das lojas. */}

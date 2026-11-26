@@ -90,7 +90,7 @@ type ItemDaDona = ResumoDaDona["itens"][number];
 // `trechoForaDaTranscricao` só vem pelo link (H18): o trecho do item não está
 // mais na transcrição que a dona editou, e o link o manda vazio.
 type ItemNaTela = Omit<ResumoDoLink["itens"][number], "escritoPelaDona" | "trechoForaDaTranscricao"> & { escritoPelaDona?: boolean; trechoForaDaTranscricao?: boolean }
-  & Partial<Pick<ItemDaDona, "id" | "done" | "origin" | "editedAt">>;
+  & Partial<Pick<ItemDaDona, "id" | "done" | "origin" | "editedAt" | "voltouDoIgnorado">>;
 type Secao = ItemNaTela["section"];
 type ConsultaDoResumo<T> = { data?: T; isError: boolean; error: unknown; refetch: () => unknown };
 
@@ -631,6 +631,10 @@ function ItemDoResumo({ item, peloLink, documento, comVozes, idiomaDoTexto, idio
       {peloLink && item.escritoPelaDona && <span className="text-[11px] text-white/45">{t("meetings.summary.linkWrittenByOwner")}</span>}
       {!pendente && editar && <span className="ms-auto">{editar}</span>}
     </div>
+    {/* O item que a dona ignorou e a IA repetiu no "Refazer como…" (H4d):
+        volta para conferir, com o aviso de que voltou (decisão 3 da PR #217;
+        defeito do teste manual T29). */}
+    {pendente && !peloLink && item.voltouDoIgnorado && <p className="mt-2 text-xs text-amber-100/80">{t("meetings.summary.backFromIgnored")}</p>}
     {/* O trecho fica aberto enquanto o item espera a conferência; depois,
         recolhido. O item que a dona acrescentou não tem trecho. O do item que
         ela editou é o da versão da IA: "trecho original", porque pode não

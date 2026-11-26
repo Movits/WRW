@@ -1829,6 +1829,7 @@
       "blockersHeading": "Blockers, dependencies and constraints",
       "openQuestionsHeading": "Open questions",
       "toReview": "To review",
+      "backFromIgnored": "You had ignored this item, and the AI brought it back when redoing the summary. Confirm it or ignore it again.",
       "confirm": "Confirm",
       "ignore": "Ignore",
       "assignee": "Assigned to: {{nome}}",
@@ -3277,6 +3278,42 @@
       "errors": {
         "stillInAgenda": "This meeting is still in your schedule. Refresh the page."
       }
+    }
+  },
+  "perfilDeVoz": {
+    "title": "Voice profile",
+    "subtitle": "So your meetings recognize your voice and show your name on what you say.",
+    "intro": "Record about {{segundos}} seconds of your voice reading the text below out loud. In the next meetings you record, your speech will show your name instead of \"Speaker 1\". If the recognition gets it wrong, you fix it in \"Who is each voice\", as you already do today.",
+    "readAloud": "Read out loud",
+    "textToRead": "Good morning. This is my voice, recorded so Marquesa Global Match can recognize me in meetings. I speak at my usual pace, as in a work conversation. Today I will go over what I did this week, what the next steps are and who I need to talk to. Numbers, names and dates also come up: two thousand twenty-six, the fifteenth of March, thirty-seven people. Thank you for listening.",
+    "consent": "I authorize Marquesa Global Match to create a profile of my voice to identify me in meeting transcripts and summaries.",
+    "consentSupport": "The voice profile is biometric data. It is used only for this purpose, it is not required to use the platform and it can be turned off at any time. When turned off, the profile is deleted.",
+    "needsConsent": "To record, tick the authorization above.",
+    "record": "Record my voice",
+    "stop": "Stop and save",
+    "saving": "Saving...",
+    "cancel": "Cancel",
+    "listen": "Listen",
+    "rerecord": "Record again",
+    "turnOff": "Turn off and delete",
+    "turnOffConfirm": "Turning off the voice profile permanently deletes the recording of your voice. Meetings you record from now on will no longer recognize your voice on their own. Turn it off?",
+    "turnOffYes": "Yes, turn off and delete",
+    "turningOff": "Deleting...",
+    "active": "Voice profile on (recorded on {{data}}).",
+    "howItWorks": "The next meetings you record show your speech with your name. If it gets it wrong, fix it in \"Who is each voice\".",
+    "tooShort": "The recording is too short. Read the whole text: at least {{segundos}} seconds.",
+    "micError": "The microphone could not be used. Check the browser permission and try again.",
+    "unsupported": "This browser cannot record audio. Try an up-to-date Chrome, Edge or Safari.",
+    "toast": {
+      "saved": "Voice profile saved.",
+      "deleted": "Voice profile turned off and deleted."
+    },
+    "erros": {
+      "consentimentoPedido": "To create the voice profile, tick the authorization.",
+      "amostraInvalida": "The recording could not be used. Record again, reading the whole text (up to 1 minute).",
+      "semPerfil": "There is no voice profile recorded.",
+      "demais": "Too many recordings in a short time. Try again in an hour.",
+      "bucket": "We could not finish this right now. Nothing changed; try again in a moment."
     }
   },
   "googleAgenda": {

@@ -76,6 +76,18 @@ describe("Storage — quem pode baixar o quê", () => {
     expect(await podeBaixarChave(ouro, "", semSala)).toBe(false);
   });
 
+  it("amostra do perfil de voz (H3d): NEGADA a todas, inclusive à dona, Ouro e presidente", async () => {
+    // A amostra só sai pelo perfilDeVoz.ouvir (URL assinada curta, da própria
+    // dona). Se alguém escrever aqui uma regra para perfis-de-voz/, este teste
+    // quebra de propósito: a garantia não pode depender do "prefixo desconhecido".
+    const chave = "perfis-de-voz/email_dona/amostra.webm";
+    const presidente = { id: 40, openId: "email_presidente", role: "president" as string | null };
+    const admin = { id: 50, openId: "email_admin", role: "admin" as string | null };
+    for (const quem of [dona, bronze, ouro, presidente, admin]) {
+      expect(await podeBaixarChave(quem, chave, semSala)).toBe(false);
+    }
+  });
+
   it("um openId não vira dono de reunião alheia por prefixo parcial", async () => {
     // email_dona NÃO pode casar com email_dona_2
     const chave = "meetings/email_dona_2/m-9/recording.webm";

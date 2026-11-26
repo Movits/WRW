@@ -23,20 +23,29 @@ const chave = (secao: SecaoDoResumo, texto: string) => `${secao}\u0000${normaliz
  * confirmou, ou escreveu e ignorou. Na seção de um item só (o foco), o que
  * fica à vista ocupa o lugar: o foco novo, escrito com outras palavras, também
  * não entra; o foco que a dona ignorou não ocupa.
+ *
+ * O item novo que repete um ignorado da IA que sai (mesma seção e mesmo texto,
+ * pela mesma comparação) volta como pendente, marcado `voltouDoIgnorado`
+ * (decisão 3 da PR #217): a tela avisa que a dona o tinha ignorado e que a IA
+ * o trouxe de novo. Sem a marca, ele chegava como um item novo qualquer, e a
+ * lista dos ignorados sumia sem explicação (defeito do teste manual T29,
+ * 25/11). O repetido com outras palavras não é reconhecido: entra como novo.
  */
 export function numeracaoDoResumoRefeito(
   queFicam: readonly ItemQueFica[],
   novos: readonly ItemDoResumo[],
-): { queFicam: Array<{ id: string; position: number }>; novos: Array<ItemDoResumo & { position: number }> } {
+  ignoradosQueSaem: ReadonlyArray<{ section: SecaoDoResumo; text: string }> = [],
+): { queFicam: Array<{ id: string; position: number }>; novos: Array<ItemDoResumo & { position: number; voltouDoIgnorado: boolean }> } {
+  const ignorados = new Set(ignoradosQueSaem.map(item => chave(item.section, item.text)));
   const jaNoResumo = new Set(queFicam.map(item => chave(item.section, item.text)));
   const secoesOcupadas = new Set(queFicam.filter(item => item.status !== "ignored").map(item => item.section).filter(secao => SECOES_DE_UM_ITEM.has(secao)));
   const entram = novos.filter(item => !jaNoResumo.has(chave(item.section, item.text)) && !secoesOcupadas.has(item.section));
-  const numerados = { queFicam: [] as Array<{ id: string; position: number }>, novos: [] as Array<ItemDoResumo & { position: number }> };
+  const numerados = { queFicam: [] as Array<{ id: string; position: number }>, novos: [] as Array<ItemDoResumo & { position: number; voltouDoIgnorado: boolean }> };
   let position = 0;
   for (const secao of ORDEM_DAS_SECOES) {
     const ficamNaSecao = queFicam.filter(item => item.section === secao).sort((a, b) => a.position - b.position);
     for (const item of ficamNaSecao) numerados.queFicam.push({ id: item.id, position: position++ });
-    for (const item of entram.filter(novo => novo.section === secao)) numerados.novos.push({ ...item, position: position++ });
+    for (const item of entram.filter(novo => novo.section === secao)) numerados.novos.push({ ...item, position: position++, voltouDoIgnorado: ignorados.has(chave(item.section, item.text)) });
   }
   return numerados;
 }
