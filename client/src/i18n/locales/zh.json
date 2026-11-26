@@ -4619,5 +4619,12 @@
     "errTooManyTasks": "团队任务已达 500 个。请删除旧任务后再创建。",
     "errDueInvalid": "截止日期不是有效日期。",
     "errAgendaNotFound": "此已安排的会议已不存在。请刷新页面。"
+  },
+  "pushNoCelular": {
+    "reuniaoPronta": "您的会议已就绪",
+    "reuniaoProntaSemResumo": "您的会议已就绪，但没有摘要",
+    "lembreteDaAcao": "提醒：一项后续行动今天到期",
+    "lembreteDaReuniao": "提醒：{{hora}} 的会议",
+    "corpo": "点按以在 Marquesa Global Match 中打开。"
   }
 }

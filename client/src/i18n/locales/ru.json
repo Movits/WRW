@@ -4619,5 +4619,12 @@
     "errTooManyTasks": "В команде уже 500 задач. Удалите старые, чтобы создать новые.",
     "errDueInvalid": "Срок — не корректная дата.",
     "errAgendaNotFound": "Этой запланированной встречи больше нет. Обновите страницу."
+  },
+  "pushNoCelular": {
+    "reuniaoPronta": "Ваша встреча готова",
+    "reuniaoProntaSemResumo": "Ваша встреча готова, без резюме",
+    "lembreteDaAcao": "Напоминание: срок следующего шага — сегодня",
+    "lembreteDaReuniao": "Напоминание: встреча в {{hora}}",
+    "corpo": "Нажмите, чтобы открыть в Marquesa Global Match."
   }
 }

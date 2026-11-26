@@ -172,6 +172,9 @@ export const PLANO_DE_LIMPEZA = [
   // chave sintética sai junto com o resto.
   { tabela: "chaves_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "desafios_de_chave_de_acesso", coluna: "userId", chave: "id", acao: "apagar" },
+  // Os aparelhos do push no celular. O exame não usa o app, então o DELETE não
+  // encontra nada.
+  { tabela: "dispositivos_de_push", coluna: "userId", chave: "id", acao: "apagar" },
   // A conta Google ligada para entrar (A8). O exame não entra com o Google.
   { tabela: "contas_google", coluna: "userId", chave: "id", acao: "apagar" },
   { tabela: "trusted_devices", coluna: "userId", chave: "id", acao: "apagar" },

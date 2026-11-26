@@ -225,6 +225,13 @@
       "when": 1795649875575,
       "tag": "0031_perfil-de-voz",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "5",
+      "when": 1795695909617,
+      "tag": "0032_push-no-celular",
+      "breakpoints": true
     }
   ]
 }
