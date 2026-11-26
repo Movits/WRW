@@ -5,6 +5,7 @@ import { exigirDb } from "./db";
 import { storageApagarTodasAsVersoes, storagePut } from "./storage";
 import { analisarAudio, medirDuracaoDoAudio } from "./duracao-do-audio";
 import { converterParteEmMp3 } from "./conversao-do-audio";
+import { esperarVagaDeConversao } from "./baixar-audio-da-reuniao";
 import { ALLOWED_MEETING_AUDIO_TYPES, MEETING_AUDIO_TTL_MS, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA } from "./meeting-service";
 import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX, PARTE_NO_SERVIDOR_BYTES_MAX, PARTE_NO_SERVIDOR_SEGUNDOS_MAX, PARTES_POR_REUNIAO_MAX, type CodigoDaRecusaDaParte } from "@shared/const";
 
@@ -81,11 +82,15 @@ export function precisaConverterParaOGemini(codecs: readonly string[]): boolean 
   return codecs.some(codec => !CODECS_QUE_VAO_COMO_CHEGARAM.has(codec));
 }
 
-export type DependenciasDoRecebimento = { converter: typeof converterParteEmMp3 };
+export type DependenciasDoRecebimento = {
+  converter: typeof converterParteEmMp3;
+  /** A vaga de ffmpeg da instância, a mesma do "Baixar o áudio" (null: nenhuma no prazo da fila curta). */
+  vagaDeConversao: () => Promise<(() => void) | null>;
+};
 
 export async function receberParte(
   entrada: { ownerId: string; meetingId: string; seq: number; mimeType: string; bytes: Buffer },
-  deps: DependenciasDoRecebimento = { converter: converterParteEmMp3 },
+  deps: Partial<DependenciasDoRecebimento> = {},
 ) {
   const { ownerId, meetingId, seq } = entrada;
   const recebidos = entrada.bytes;
@@ -108,11 +113,19 @@ export async function receberParte(
   let mimeType = tipoRecebido;
   let duracao = analise.segundos;
   if (precisaConverterParaOGemini(analise.codecs)) {
+    const { converter = converterParteEmMp3, vagaDeConversao = () => esperarVagaDeConversao() } = deps;
+    // A instância tem 1 CPU: a conversão toma uma vaga do mesmo balcão dos
+    // ffmpeg do "Baixar o áudio" (CONVERSOES_DE_AUDIO_SIMULTANEAS), numa fila
+    // curta. Sem vaga, a recusa é passageira, e a tela manda a parte de novo.
+    const soltarVaga = await vagaDeConversao();
+    if (!soltarVaga) throw new FalhaPassageiraDaParte("Os conversores de áudio estão ocupados; envie esta parte de novo.");
     try {
-      bytes = await deps.converter(recebidos, tipoRecebido, DURACAO_MAXIMA_DA_PARTE_SEGUNDOS);
+      bytes = await converter(recebidos, tipoRecebido, DURACAO_MAXIMA_DA_PARTE_SEGUNDOS);
     } catch (erro) {
       console.error(`[Reuniões] a parte ${seq} (${tipoRecebido}, ${analise.codecs.join("+")}) não foi convertida em MP3:`, erro instanceof Error ? erro.message : erro);
       throw new RecusaDaParte("FORMATO", "Formato de áudio não suportado.");
+    } finally {
+      soltarVaga();
     }
     mimeType = "audio/mpeg";
     const medida = medirDuracaoDoAudio(bytes);

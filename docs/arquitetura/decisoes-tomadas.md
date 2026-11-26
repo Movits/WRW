@@ -843,7 +843,10 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   fora dos que o app sempre mandou (o Opus no WebM e no Ogg, o AAC no MP4, o Vorbis no
   Ogg, o MP3, o AAC em ADTS, o FLAC e o WAV em PCM), antes da linha e do bucket. A fila,
   o player, o "Baixar o áudio" e o reprocesso leem o MP3. A parte que o ffmpeg não
-  converte é recusada com `FORMATO`, que a tela já traduz nos 10 idiomas. Nenhuma chamada
+  converte é recusada com `FORMATO`, que a tela já traduz nos 10 idiomas. A instância tem 1
+  CPU: a conversão toma uma vaga do mesmo balcão dos ffmpeg do "Baixar o áudio" (2 ao
+  mesmo tempo, somando os dois usos), com uma fila curta de até 10 s; sem vaga, a recusa é
+  passageira e a tela manda a parte de novo (ressalva da validação da #262). Nenhuma chamada
   real ao Gemini foi feita para conferir: a decisão vem da documentação.
 - **O que fica:** a leitura da gravação inteira das reuniões antigas (`meeting_recordings`),
   pelo reprocesso e pela junção, com os tetos do envio único; o serviço

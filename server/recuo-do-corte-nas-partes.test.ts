@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { analisarAudio, medirDuracaoDoAudio } from "./duracao-do-audio";
 import { converterParteEmMp3 } from "./conversao-do-audio";
 
@@ -11,7 +11,7 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
 // O banco não pode ser tocado na recusa por formato: ela vem antes dele.
 const exigirDb = vi.hoisted(() => vi.fn(async () => { throw new Error("o banco não devia ser lido"); }));
 vi.mock("./db", async original => ({ ...(await original<typeof import("./db")>()), exigirDb }));
-const { precisaConverterParaOGemini, receberParte, RecusaDaParte } = await import("./fatias-de-reuniao");
+const { FalhaPassageiraDaParte, precisaConverterParaOGemini, receberParte, RecusaDaParte } = await import("./fatias-de-reuniao");
 
 /**
  * O recuo do corte nas partes (G14, parte 2): o arquivo curto que o corte do
@@ -56,6 +56,8 @@ describe("precisaConverterParaOGemini", () => {
 });
 
 describe("receberParte: a parte que não converte é recusada antes do banco", () => {
+  beforeEach(() => { exigirDb.mockClear(); });
+
   it("o ffmpeg falha: FORMATO, que a tela traduz, sem ler o banco", async () => {
     const bytes = wavAdpcm();
     expect(analisarAudio(bytes)).toEqual({ segundos: 1, codecs: ["wav:2"] });
@@ -76,6 +78,36 @@ describe("receberParte: a parte que não converte é recusada antes do banco", (
     } finally {
       erro.mockRestore();
     }
+  });
+
+  it("sem vaga de ffmpeg na fila curta (os 2 conversores da instância ocupados): recusa PASSAGEIRA, sem converter nem ler o banco", async () => {
+    const converter = vi.fn(async () => Buffer.from("mp3"));
+    const vagaDeConversao = vi.fn(async () => null);
+    const recusa = await receberParte({ ownerId: "dona-1", meetingId: "reuniao-1", seq: 0, mimeType: "audio/wav", bytes: wavAdpcm() }, { converter, vagaDeConversao })
+      .then(() => null, (e: unknown) => e);
+    expect(recusa).toBeInstanceOf(FalhaPassageiraDaParte);
+    expect(vagaDeConversao).toHaveBeenCalledTimes(1);
+    expect(converter).not.toHaveBeenCalled();
+    expect(exigirDb).not.toHaveBeenCalled();
+  });
+
+  it("a vaga volta depois da conversão, também quando ela falha; o WAV em PCM nem pede vaga", async () => {
+    const soltar = vi.fn();
+    const vagaDeConversao = vi.fn(async () => soltar);
+    const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await receberParte({ ownerId: "dona-1", meetingId: "reuniao-1", seq: 0, mimeType: "audio/wav", bytes: wavAdpcm() }, {
+        converter: async () => { throw new Error("ffmpeg caiu"); }, vagaDeConversao,
+      }).catch(() => undefined);
+      expect(soltar).toHaveBeenCalledTimes(1);
+    } finally {
+      erro.mockRestore();
+    }
+    // Um WAV em PCM: vai como chegou, sem vaga (a recusa aqui é a do banco dublado, depois da decisão).
+    const pcm = wavAdpcm();
+    pcm.writeUInt16LE(1, 20);
+    await receberParte({ ownerId: "dona-1", meetingId: "reuniao-1", seq: 0, mimeType: "audio/wav", bytes: pcm }, { vagaDeConversao }).catch(() => undefined);
+    expect(vagaDeConversao).toHaveBeenCalledTimes(1);
   });
 
   it("o MP3 que o ffmpeg devolve e que a medida não lê também é FORMATO, sem ler o banco", async () => {

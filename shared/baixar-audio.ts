@@ -43,7 +43,9 @@ export const JANELA_DO_AUDIO_MS = 60 * 60_000;
 /**
  * Quantos áudios a instância converte ao mesmo tempo, somando os que já foram
  * preparados e esperam o toque da dona. Acima disso, a preparação recusa com
- * AUDIO_OCUPADO, antes de ler qualquer coisa ou gravar auditoria.
+ * AUDIO_OCUPADO, antes de ler qualquer coisa ou gravar auditoria. Desde a G14,
+ * parte 2, o mesmo teto conta as conversões em MP3 da rota das partes (o recuo
+ * do corte, server/fatias-de-reuniao.ts): são os ffmpeg da instância, de 1 CPU.
  */
 export const CONVERSOES_DE_AUDIO_SIMULTANEAS = 2;
 

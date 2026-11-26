@@ -35,8 +35,11 @@ WebM) vai inteiro, como uma parte só. A rota converte em MP3, com o ffmpeg cont
 `server/conversao-do-audio.ts` (`converterParteEmMp3`), a parte de um codec que o Gemini não
 lista (`precisaConverterParaOGemini`, em `server/fatias-de-reuniao.ts`; o codec sai de
 `analisarAudio`, em `server/duracao-do-audio.ts`), e a que não converte é recusada com
-`FORMATO`, que a tela traduz. A LEITURA da gravação inteira das reuniões antigas
-(`meeting_recordings`) fica: o reprocesso e a junção a leem com os tetos do envio único.
+`FORMATO`, que a tela traduz. A conversão toma uma vaga do mesmo balcão dos ffmpeg do
+"Baixar o áudio" (`balcaoDoAudio.tentarConverter`, `CONVERSOES_DE_AUDIO_SIMULTANEAS` = 2, a
+instância tem 1 CPU), numa fila curta de até 10 s (`esperarVagaDeConversao`); sem vaga, a
+recusa é passageira (503 `TENTE_DE_NOVO`), e a tela manda a parte de novo. A LEITURA da
+gravação inteira das reuniões antigas (`meeting_recordings`) fica: o reprocesso e a junção a leem com os tetos do envio único.
 
 A exceção é binária: as partes da reunião gravada em partes chegam por
 `POST /api/reunioes/{meetingId}/partes/{seq}` (`_core/rota-das-partes.ts`, até 16 MB de áudio

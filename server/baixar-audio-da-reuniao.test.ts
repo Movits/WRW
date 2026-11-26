@@ -22,7 +22,7 @@ vi.mock("./db", () => ({
   },
 }));
 
-const { prepararAudioDaReuniao, partesParaBaixar, criarBalcaoDoAudio, criarConferenciaDoFfmpeg, FORMATO_DA_FICHA } = await import("./baixar-audio-da-reuniao");
+const { prepararAudioDaReuniao, partesParaBaixar, criarBalcaoDoAudio, criarConferenciaDoFfmpeg, esperarVagaDeConversao, FORMATO_DA_FICHA } = await import("./baixar-audio-da-reuniao");
 const { ACAO_AUDIO_BAIXADO, RECUSAS_DO_AUDIO, nomeDoArquivoDoAudio, tamanhoEstimadoDoAudio } = await import("@shared/baixar-audio");
 const { MEETING_AUDIO_TTL_MS } = await import("./meeting-service");
 
@@ -294,6 +294,43 @@ describe("o balcão das fichas", () => {
     tomada.terminar();
     expect(balcao.ocupadas()).toBe(0);
     expect(() => reserva.emitir(FICHA)).toThrow();
+  });
+
+  // G14, parte 2: a conversão da parte do recuo do corte usa o mesmo ffmpeg, e a instância tem 1 CPU.
+  it("a conversão da rota das partes divide as vagas com o download: com as duas tomadas, nem conversão nem download entram; soltar devolve uma vez só", () => {
+    const balcao = criarBalcaoDoAudio({ limite: 2 });
+    const primeira = balcao.tentarConverter()!;
+    const segunda = balcao.tentarConverter()!;
+    expect(balcao.ocupadas()).toBe(2);
+    expect(balcao.tentarConverter()).toBeNull();
+    expect(() => balcao.reservar()).toThrow(expect.objectContaining({ message: "AUDIO_OCUPADO" }));
+    primeira();
+    primeira();
+    expect(balcao.ocupadas()).toBe(1);
+    // O download que entra ocupa a vaga que sobrou: a conversão seguinte espera.
+    const reserva = balcao.reservar();
+    expect(balcao.tentarConverter()).toBeNull();
+    reserva.soltar();
+    segunda();
+    expect(balcao.ocupadas()).toBe(0);
+  });
+
+  it("a fila curta da conversão: espera a vaga que solta no meio e, sem vaga no prazo, devolve null", async () => {
+    const balcao = criarBalcaoDoAudio({ limite: 1 });
+    const tomada = balcao.tentarConverter()!;
+    let esperas = 0;
+    const esperar = async () => { esperas++; if (esperas === 3) tomada(); };
+    const soltar = await esperarVagaDeConversao(balcao, 10_000, esperar);
+    expect(soltar).toBeTypeOf("function");
+    expect(esperas).toBe(3);
+    expect(balcao.ocupadas()).toBe(1);
+
+    let semVaga = 0;
+    expect(await esperarVagaDeConversao(balcao, 1_000, async () => { semVaga++; })).toBeNull();
+    // 1 s em passos de 250 ms: quatro esperas e a última tentativa, sem espera depois dela.
+    expect(semVaga).toBe(4);
+    soltar!();
+    expect(balcao.ocupadas()).toBe(0);
   });
 });
 
