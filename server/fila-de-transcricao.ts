@@ -1,7 +1,10 @@
 import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { MENSAGEM_FALHA_DA_MONTAGEM, MENSAGEM_GRAVACAO_SEM_AUDIO_ENVIADO, MENSAGEM_PARTES_SEM_TRANSCRICAO } from "@shared/const";
 import { idiomaDaTranscricao } from "@shared/idioma-da-reuniao";
+import { contasDasVozes, nomesDosFalantes } from "@shared/const";
+import { ROTULO_DA_VOZ_DA_DONA } from "@shared/perfil-de-voz";
 import { meetingAudioSlices, meetings } from "../drizzle/schema";
+import { amostraDaVozDaDona } from "./perfil-de-voz";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { foraDaLixeira } from "./reuniao-visivel";
@@ -11,8 +14,8 @@ import { ObjetoAusenteNoStorageError, storageGetBytes } from "./storage";
 import { entradaDoResumo } from "./resumo-da-reuniao";
 import { TAMANHO_MAXIMO_DA_PARTE } from "./fatias-de-reuniao";
 import {
-  contextoParaAProxima, deslocarRotulosDasFalas, DURACAO_DA_FATIA_SEGUNDOS, ehInicioDeOutraReuniao, MARCA_DE_OUTRA_REUNIAO, montarTranscricao, numeroDoRotulo,
-  TemposForaDaParteError, transcreverFatia, type ContextoDaFatiaAnterior, type Segmento,
+  contasComAVozDaDona, contextoParaAProxima, deslocarRotulosDasFalas, DURACAO_DA_FATIA_SEGUNDOS, ehInicioDeOutraReuniao, MARCA_DA_VOZ_DA_DONA, MARCA_DE_OUTRA_REUNIAO,
+  montarTranscricao, numeroDoRotulo, parteUsouAVozDaDona, TemposForaDaParteError, transcreverFatia, type ContextoDaFatiaAnterior, type Segmento,
 } from "./transcricao-de-fatia";
 
 /**
@@ -248,9 +251,15 @@ async function desistirDasEsgotadas(db: Banco, agora: number, escopo: Escopo) {
  * também começa outra conversa. Aí não vai `anterior`: vem `rotulosUsados`,
  * os rótulos que as partes de antes já usam, para a fila pôr os desta parte
  * depois deles.
+ *
+ * `vozDaDonaContinua` (H3d): esta parte pode levar a amostra da voz da dona
+ * sem trocar quem é o rótulo fixo dela. Na mesma conversa, só se a parte
+ * anterior transcrita também levou (ou não há nenhuma); na outra conversa, só
+ * se todas as transcritas antes levaram. Uma reunião que começou sem a amostra
+ * (o perfil gravado no meio dela) segue sem ela até o fim.
  */
-async function contextoDaAnterior(db: Banco, meetingId: string, seq: number, propria: unknown): Promise<{ inicioMs: number; anterior?: ContextoDaFatiaAnterior; rotulosUsados?: string[] }> {
-  if (seq === 0) return { inicioMs: 0 };
+async function contextoDaAnterior(db: Banco, meetingId: string, seq: number, propria: unknown): Promise<{ inicioMs: number; anterior?: ContextoDaFatiaAnterior; rotulosUsados?: string[]; vozDaDonaContinua: boolean }> {
+  if (seq === 0) return { inicioMs: 0, vozDaDonaContinua: true };
   const anteriores = await db.select({
     seq: meetingAudioSlices.seq, status: meetingAudioSlices.status, durationMs: meetingAudioSlices.durationMs,
     offsetMs: meetingAudioSlices.offsetMs, result: meetingAudioSlices.result,
@@ -279,10 +288,11 @@ async function contextoDaAnterior(db: Banco, meetingId: string, seq: number, pro
       for (const segmento of Array.isArray(r?.segmentos) ? r.segmentos : []) if (numeroDoRotulo(segmento?.falante)) rotulos.add(String(segmento.falante));
       for (const falante of Array.isArray(r?.contexto?.falantes) ? r.contexto.falantes : []) if (numeroDoRotulo(falante)) rotulos.add(String(falante));
     }
-    return { inicioMs, rotulosUsados: Array.from(rotulos).sort((a, b) => numeroDoRotulo(a) - numeroDoRotulo(b)) };
+    const vozDaDonaContinua = anteriores.filter(parte => parte.status === "transcribed").every(parte => parteUsouAVozDaDona(parte.result));
+    return { inicioMs, rotulosUsados: Array.from(rotulos).sort((a, b) => numeroDoRotulo(a) - numeroDoRotulo(b)), vozDaDonaContinua };
   }
   const contexto = (ultimaTranscrita?.result as { contexto?: ContextoDaFatiaAnterior } | null)?.contexto;
-  return { inicioMs, anterior: contexto };
+  return { inicioMs, anterior: contexto, vozDaDonaContinua: !ultimaTranscrita || parteUsouAVozDaDona(ultimaTranscrita.result) };
 }
 
 async function transcreverUmaParte(db: Banco, parte: { id: string; meetingId: string; seq: number }, token: string) {
@@ -297,17 +307,41 @@ async function transcreverUmaParte(db: Banco, parte: { id: string; meetingId: st
   // tempos degradados (e devolve as contagens) em vez de pedir outra.
   const ultimaTentativa = linha.attempts >= TENTATIVAS_POR_PARTE;
   try {
-    const { inicioMs, anterior, rotulosUsados } = await contextoDaAnterior(db, parte.meetingId, parte.seq, linha.result);
+    const { inicioMs, anterior, rotulosUsados, vozDaDonaContinua } = await contextoDaAnterior(db, parte.meetingId, parte.seq, linha.result);
     const audio = await storageGetBytes(linha.storageKey, TAMANHO_MAXIMO_DA_PARTE);
-    const transcrita = await comVagaDeIA(() => transcreverFatia({
+    // O perfil de voz da dona (H3d, server/perfil-de-voz.ts): a amostra vai
+    // junto, e a voz dela sai com o rótulo fixo. Sem perfil, como antes.
+    let amostra = vozDaDonaContinua ? await amostraDaVozDaDona(db, linha.ownerId) : null;
+    const transcrever = (amostraDaVoz: typeof amostra) => comVagaDeIA(() => transcreverFatia({
       audio, mimeType: linha.mimeType, idioma: linha.idioma, inicioSegundos: inicioMs / 1000, duracaoSegundos: linha.durationMs / 1000, anterior,
-      ultimaTentativa,
+      ultimaTentativa, ...(amostraDaVoz ? { amostraDaVoz } : {}),
     }));
+    let transcrita: Awaited<ReturnType<typeof transcrever>>;
+    try {
+      transcrita = await transcrever(amostra);
+    } catch (erro) {
+      // A IA recusou o pedido com a amostra (uma amostra corrompida dá 400) ou
+      // cortou a resposta: a parte não paga pela amostra. Vai de novo, na mesma
+      // tentativa, sem ela, e fica sem a marca da voz da dona (as partes
+      // seguintes também seguem sem a amostra, e a montagem não liga o F1).
+      if (!amostra || !(erro instanceof GeminiRecusouChamadaError || erro instanceof GeminiRespostaCortadaError)) throw erro;
+      console.warn(`[Fila] a IA não aceitou a parte ${parte.seq} com a amostra da voz da dona (${codigoDoErro(erro)}); vai sem ela`);
+      amostra = null;
+      transcrita = await transcrever(null);
+    }
     const { modelo, tempos } = transcrita;
     // Outra conversa (a junção, H17): a IA rotulou as vozes do zero (F1, F2...),
-    // e os rótulos vão para depois dos que as partes de antes já usam.
+    // e os rótulos vão para depois dos que as partes de antes já usam. Com a
+    // amostra, a dona fica no rótulo fixo (é a mesma pessoa nas reuniões
+    // juntadas, todas dela) e as outras, que a IA começou em F2, vão para
+    // depois dos usados.
     const outraConversa = rotulosUsados !== undefined;
-    const segmentos = outraConversa ? deslocarRotulosDasFalas(transcrita.segmentos, Math.max(0, ...rotulosUsados.map(numeroDoRotulo))) : transcrita.segmentos;
+    const maiorUsado = outraConversa ? Math.max(0, ...rotulosUsados.map(numeroDoRotulo)) : 0;
+    const segmentos = !outraConversa
+      ? transcrita.segmentos
+      : amostra
+        ? deslocarRotulosDasFalas(transcrita.segmentos, Math.max(0, maiorUsado - 1), [ROTULO_DA_VOZ_DA_DONA])
+        : deslocarRotulosDasFalas(transcrita.segmentos, maiorUsado);
     const contexto = contextoParaAProxima(segmentos, outraConversa ? { falantes: rotulosUsados, ultimasFalas: [] } : anterior);
     // A marca da outra conversa fica no result depois de transcrita: se a parte
     // seguinte falhar de vez, a de depois dela não herda a conversa de antes.
@@ -317,7 +351,8 @@ async function transcreverUmaParte(db: Banco, parte: { id: string; meetingId: st
     // com os tempos degradados leva as contagens (`tempos`) no result, para
     // uma consulta achá-la.
     await db.update(meetingAudioSlices).set({
-      status: "transcribed", result: { segmentos, contexto, ...(tempos ? { tempos } : {}), ...marca }, model: modelo.slice(0, 80), offsetMs: inicioMs,
+      status: "transcribed", result: { segmentos, contexto, ...(tempos ? { tempos } : {}), ...marca, ...(amostra ? { [MARCA_DA_VOZ_DA_DONA]: true } : {}) },
+      model: modelo.slice(0, 80), offsetMs: inicioMs,
       lastError: null, lockToken: null, lockedUntil: null, updatedAt: Date.now(),
     }).where(and(eq(meetingAudioSlices.id, parte.id), eq(meetingAudioSlices.lockToken, token)));
   } catch (erro) {
@@ -438,7 +473,11 @@ async function montarUmaReuniao(db: Banco, reuniao: { id: string; ownerId: strin
     const { segmentos, texto } = montarTranscricao(transcritas, Math.max(reuniao.esperadas ?? 0, ...partes.map(p => p.seq + 1)));
     // A frase é compartilhada (shared/const.ts): a tela a mostra no idioma da dona.
     if (!texto.trim()) throw new Error(MENSAGEM_PARTES_SEM_TRANSCRICAO);
-    const [r] = await db.select({ idioma: meetings.language }).from(meetings).where(eq(meetings.id, reuniao.id)).limit(1);
+    const [r] = await db.select({ idioma: meetings.language, speakerAccounts: meetings.speakerAccounts, speakerNames: meetings.speakerNames }).from(meetings)
+      .where(and(eq(meetings.id, reuniao.id), eq(meetings.ownerId, reuniao.ownerId))).limit(1);
+    // A voz da dona reconhecida pela amostra (H3d) já sai ligada à conta dela,
+    // menos se a dona deu nome livre ao rótulo (ela soltou a conta).
+    const contasDasVozesNovas = contasComAVozDaDona(partes, segmentos, contasDasVozes(r?.speakerAccounts), nomesDosFalantes(r?.speakerNames));
     // A extração lê as falas com o rótulo da voz ("{F1}: fala"), a mesma
     // entrada do resumo: sem ele, a IA não via quem fala e chutava a presença
     // de quem fala sem dizer o próprio nome (revisão do pacote P2B). A
@@ -456,6 +495,7 @@ async function montarUmaReuniao(db: Banco, reuniao: { id: string; ownerId: strin
     // rótulos já usados (contextoDaAnterior), sem herdar as vozes nem os nomes.
     await gravarResultadoDaReuniao(db, {
       meetingId: reuniao.id, ownerId: reuniao.ownerId, ficha, limparAntes: true, zerarNomes: false, durationSeconds,
+      ...(contasDasVozesNovas ? { contasDasVozes: contasDasVozesNovas } : {}),
       // Com "Detectar sozinho" (G16), o idioma da transcrição (e do resumo) é o
       // que mais aparece nas falas de todas as partes; senão, o escolhido.
       transcription: { text: texto, segments: segmentos, language: idiomaDaTranscricao(r?.idioma, segmentos) },

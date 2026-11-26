@@ -26,6 +26,7 @@ vi.mock("@/lib/trpc", () => ({
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ user: { name: "Ana", email: "ana@exemplo.com", role: "silver" } }) }));
 vi.mock("@/components/ExcluirMinhaConta", () => ({ ExcluirMinhaConta: () => <div data-testid="zona-de-risco" /> }));
 vi.mock("@/components/ConexaoGoogleAgenda", () => ({ ConexaoGoogleAgenda: () => <div data-testid="google-agenda" /> }));
+vi.mock("@/components/PerfilDeVoz", () => ({ PerfilDeVoz: () => null }));
 vi.mock("@/components/ChavesDeAcesso", () => ({ ChavesDeAcesso: () => <div data-testid="chaves-de-acesso" /> }));
 vi.mock("@/components/ContaGoogleNoPerfil", () => ({ ContaGoogleNoPerfil: () => <div data-testid="conta-google" /> }));
 vi.mock("@/components/QualificacaoDoPerfil", () => ({ QualificacaoDoPerfil: () => null }));

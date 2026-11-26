@@ -77,7 +77,8 @@ Codex/OpenAI e do SDK da Anthropic"), `server/_core/trpc.ts` deixou de exportar 
      `server/CLAUDE.md`.
   3. O motor de perfis (`server/matching.ts`) não aplica a regra dos concorrentes:
      `satisfaz` devolve `true` no `have === need` sem passar por `saoConcorrentes`.
-     Uniformizar com o motor privado é decisão de produto.
+     Uniformizar com o motor privado é decisão de produto. (Decidido em 11/11, N6:
+     ver a entrada de 11/11/2026 abaixo.)
 
 ## 12/09/2026 — regra da demanda expressa
 
@@ -526,6 +527,120 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `ExportarReuniao.tsx`, `ImpressaoDaReuniao.tsx` e o trecho "Exportar a reunião em PDF"
   de `client/src/index.css`. Sem migração.
 
+## 16/11/2026 — a reunião volta a ter participantes e a consulta da administração (R1a e R1b)
+
+- **Quem:** Roberto, 16/11, no chat: de início, só as participantes e a administração
+  (quem quiser revisar uma reunião) acessam, e quem tem acesso pode mandar o link aberto.
+  Na mesma conversa: "o chat que a adm vê inclui tudo". Em 22/11 ele tirou o convite por
+  e-mail digitado. O jeito de fazer (os pontos abaixo marcados "do desenho") foi proposto
+  no desenho de 16/11 e vale enquanto o Roberto não o vetar.
+- **O quê:** é a R1, adiada em 12/11, de volta, sem tirar o link aberto. Em duas partes:
+  - **consulta da administração (R1a):** "a administração" é a admin e a presidência
+    (decisão de 30/10): é a 5ª exceção ao "Ouro = Presidente", e a conta Ouro sem cargo
+    não consulta. A consulta é só leitura (não pergunta à IA nem muda nada) e pede um
+    motivo antes de ler: um dos cinco da frase da Cris de 23/11 (apuração de denúncia,
+    segurança, suporte pedido pela usuária, obrigação legal, ordem judicial) e um texto
+    de 10 a 500 caracteres. A auditoria `MEETING_ADMIN_READ` é gravada na transação,
+    antes da leitura, e sem ela nada sai. A dona vê a data de cada consulta, sem o motivo
+    e sem quem consultou (do desenho);
+  - **participantes (R1b):** a dona convida quem tem conta, por um link de uso único
+    (`/convite/{token}`, vale 7 dias, só o hash no banco) ou entre as conexões aceitas
+    dela. A participante ouve, lê e pergunta, sem mudar nada, e sai quando quiser. O
+    primeiro convite de cada reunião pede a confirmação de que as pessoas que falaram
+    autorizaram, como o link (do desenho); juntar reuniões tira as participantes e pede a
+    confirmação de novo. Até 50 participantes por reunião (do desenho).
+- **Sem convite por e-mail digitado (22/11):** ele revelaria quem é membra, e o e-mail das
+  contas não é verificado.
+- **Reunião antiga:** a administração só consulta a reunião gravada com o aviso que prevê a
+  consulta (`2026-11-23` em diante, com o texto da Cris de 23/11). A gravada antes, quando
+  o aviso dizia "Só você acessa", fica fechada (`CONSULTA_REUNIAO_ANTERIOR_AO_AVISO`).
+- **Antes:** 10/11, "sem link público e sem senha", com a R1; 12/11, o link aberto no lugar
+  dela, "por enquanto". Agora as duas coisas valem juntas.
+- **Ainda não implementado:** a participante mandar o link aberto. Ela lê pela credencial
+  dela e não recebe o endereço `/r/{token}`; ligar o link continua só com a dona. A
+  pergunta (a participante pode também LIGAR o link?) está no desenho de 16/11, com a
+  recomendação de que não.
+- **Implementado em:** Pacote 6 (#247). `server/consulta-da-administracao.ts`, o router
+  `consultaDeReunioes` e `plataformaProcedure` em `server/routers/_procedures.ts`;
+  `server/participantes-da-reuniao.ts`; `VERSOES_QUE_PREVEEM_O_ACESSO` em
+  `shared/aviso-de-gravacao.ts` (o aviso `2026-11-23` veio na #240); na tela,
+  `ConsultaDeReunioesDaPlataforma.tsx`, `ConsultasDaAdministracao.tsx`,
+  `ParticipantesDaReuniao.tsx`, `ConviteDaReuniao.tsx` e `ReuniaoCompartilhada.tsx`. Migração
+  `0029_pacote-6` (`meeting_participants`).
+
+## 16/11/2026 — cada voz pode virar a conta de quem falou, e vozes se juntam (H3c)
+
+- **Quem:** Roberto, 16/11, no chat: um botão mostra as participantes da reunião (contas
+  da WRW), e para cada voz `{Fn}` a dona escolhe a conta de quem falou; o nome da conta
+  vira o nome da voz. Junto, um "juntar vozes" (F3 é a mesma pessoa que F1), porque na
+  gravação em partes cada parte é transcrita sozinha e a mesma pessoa pode virar F1 numa e
+  F3 na outra.
+- **O quê:** a dona liga a voz à própria conta ou à de uma participante ativa, digita um
+  nome livre (o da H3) ou junta vozes, com "Separar". A voz guarda `"owner"` ou o id da
+  participação, nunca o `users.id`, e o nome é lido na hora: a participante que sai, ou a
+  conta excluída, some da voz. O tempo de fala e o "ouvir só esta voz" somam as vozes
+  juntadas. Os nomes não vão à IA.
+- **Quem vê os nomes:** a dona, as participantes, a administração e o link aberto ligado
+  com a confirmação nova (H3b, acima). O nome da conta também sai pelo link, e o aviso do
+  convite diz isso à participante (do desenho, P12). A membra de um espaço de equipe (R2)
+  vê "Falante n" na voz ligada a uma participante, porque a participante não aceitou
+  aparecer para a equipe.
+- **Fica de fora:** a participante marcar "sou eu" na própria voz (do desenho, P13): a dona
+  escolhe, e a participante tira o nome dela saindo da reunião.
+- **Antes:** 14/11, "só a dona vê os nomes" (#204).
+- **Implementado em:** Pacote 6 (#247). `server/vozes-da-reuniao.ts` (`vozesParaQuemLe`),
+  `server/participantes-da-reuniao.ts` e `ParticipantesDaReuniao.tsx`; migração
+  `0029_pacote-6` (`meetings.speaker_accounts` e `meetings.speaker_merges`).
+
+## 16/11/2026 — as perguntas à IA ficam guardadas, e a administração vê todas (H6b)
+
+- **Quem:** Roberto, 16/11, no chat: "o chat que a adm vê inclui tudo".
+- **O quê, pelo desenho de 16/11:** o "Pergunte à reunião" passa a guardar a pergunta e a
+  resposta de quem quer que pergunte: a dona, a participante e a visitante do link (esta
+  sem nada que a identifique). A dona vê todas, com quem perguntou; a participante, só as
+  dela; a administração, todas; o link não tem histórico, só a resposta da hora, com uma
+  frase sob a caixa dizendo que a pergunta fica guardada. A resposta é guardada com os
+  rótulos `{Fn}`, nunca com nomes.
+- **Ainda não implementada:** não há tabela das perguntas (`meeting_questions`) na `main`,
+  e a tela ainda diz "Nada disto foi gravado". Do pacote da H6b, só entraram as cinco
+  sugestões prontas no Pergunte (decisões-chave, ações, revisão rápida, rascunho de e-mail
+  e conceitos), no Pacote 5a (#234). Por isso, hoje a consulta da administração (#247) não
+  mostra perguntas.
+- **Com a Cris:** a frase da visitante sob a caixa de pergunta e a menção às perguntas
+  guardadas no aviso de gravação. Os textos de 23/11 não falam delas.
+- **Em aberto, no desenho (P9 e P10):** a dona ver as perguntas das participantes e do link
+  (recomendação: sim) e as perguntas ficarem enquanto a reunião existir (recomendação: sim).
+
+## 16/11/2026 — os modelos de resumo entram sem esperar a Glenda (H4d)
+
+- **Quem:** Roberto, 16/11, no chat: a Glenda pediu tudo o que o HiNoter oferece, então os
+  modelos de resumo (H4d) e a exportação (H8, acima) entram sem esperar a resposta dela.
+- **O quê:** a dona escolhe o modelo ao pedir o resumo (Geral, Networking, Mentoria, Vendas
+  ou 1:1) e pode "Refazer como…" outro. As seções são as mesmas; muda a instrução à IA. Os
+  itens que ela confirmou e as ações feitas ficam, e os pendentes e os ignorados são
+  trocados.
+- **Antes:** 15/11, a H4d esperava a Glenda (ver "o resumo guardado", acima).
+- **Implementado em:** Pacote 2 do gravador (#217). `shared/modelos-de-resumo.ts`,
+  `server/modelos-de-resumo.ts` e `ModeloDoResumo.tsx`; o código fica em
+  `meeting_summaries.template`. Os modelos da própria dona (H4e) vieram depois, em
+  `server/modelos-proprios.ts` e `MeusModelosDeResumo.tsx`.
+
+## 16/11/2026 — o áudio da reunião fica 30 dias, e a #134 fecha
+
+- **Quem:** Roberto, 16/11.
+- **O quê:** o áudio das reuniões fica 30 dias, e não 24 h. Com 24 h, não dá tempo de
+  mandar o link aberto às participantes nem de a administração revisar a reunião, e os
+  textos do app já prometiam 30 dias. O áudio sai de verdade do bucket: uma varredura
+  agendada (no boot e a cada 5 minutos) apaga todas as versões no Backblaze B2, e a linha
+  só sai do banco depois que o objeto saiu.
+- **O destino da #134** (do Nicolas, "áudio apagado 24 h depois da transcrição"): fechada em
+  16/11, substituída pela #214. Da #134 vieram o agendador, o expurgo de todas as versões
+  (`storageApagarTodasAsVersoes`) e a regra da linha que só sai depois do objeto; a regra
+  das 24 h ficou de fora.
+- **Em aberto:** a pergunta "30 dias está bom?" foi para a Glenda.
+- **Implementado em:** #214, dentro do Pacote 1 do gravador (#216).
+  `server/varredura-de-gravacoes.ts` e `storageApagarTodasAsVersoes` em `server/storage.ts`.
+
 ## 21/11/2026 — o gravador sem o envio único, com o recuo do corte (G14, parte 1)
 
 - **Quem:** o Claude, no pacote 5b do gravador, pelo pedido de fazer a G14 "pelo caminho
@@ -741,6 +856,36 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   (`PARTE_NO_SERVIDOR_BYTES_MAX` e `PARTE_NO_SERVIDOR_SEGUNDOS_MAX`),
   `client/src/hooks/useImportacaoEmPartes.ts` (o `recuo` do `importar`) e
   `client/src/pages/Meetings.tsx` (`recuoDoCorte`). Sem migração.
+
+## 11/11/2026 — o motor de perfis aplica a regra dos concorrentes (N6)
+
+- **Quem:** o Roberto, em 11/11, confirmado depois (item N6 do plano).
+- **O quê:** o motor de PERFIS (`server/matching.ts`, que cruza usuárias entre si) passa a
+  aplicar as duas regras que o motor privado já aplicava no cruzamento de "o que tenho" com
+  "o que preciso": concorrentes não se atendem (`saoConcorrentes`, antes de qualquer outro
+  critério) e nada casa por palavra solta. "exportar vinho" × "importar vinho" casa;
+  "exportar" × "exportar" não. Fecha a lição 3 da lista de 28/08 a 02/09, acima.
+- **O que não muda:** as outras dimensões do motor de perfis não leem termo (a
+  especialidade igual vale 60, o setor igual 70), e o portão da IA
+  (`server/portao-da-demanda-expressa.ts`) não entrou nesta decisão.
+- **Onde:** `satisfaz` em `server/matching.ts`, com o teste
+  `server/motor-de-perfis-concorrentes.test.ts`.
+
+## 24 e 25/11/2026 — o perfil de voz da dona (H3d)
+
+- **Quem:** o Roberto aprovou em 24/11 o item HN-24 da auditoria; a Cris (advogada) deu em
+  25/11 o texto da caixa, o texto de apoio e os pontos técnicos.
+- **O quê:** a dona grava cerca de 30 s da própria voz, e as reuniões gravadas depois a
+  reconhecem: a amostra vai com cada parte ao Gemini, a voz dela sai no rótulo F1, ligado à
+  conta dela (H3c). Consentimento próprio, desmarcado e separado dos Termos; registro de cada
+  consentimento e revogação com a versão do texto, sem a voz, que sobrevive à exclusão;
+  exclusão definitiva (bucket com todas as versões e a linha), também na exclusão da conta.
+- **Escolhas desta PR, a confirmar:** o registro dos consentimentos fica depois da exclusão
+  da conta (como prova, sem a voz); a amostra do perfil gravado no meio de uma reunião não
+  entra nas partes seguintes dela; o rótulo fixo é F1; desligar o perfil não muda as
+  reuniões já transcritas.
+- **Onde:** `server/perfil-de-voz.ts`, `server/fila-de-transcricao.ts`, migração
+  `0031_perfil-de-voz`, `client/src/components/PerfilDeVoz.tsx`.
 
 ---
 

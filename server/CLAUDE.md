@@ -246,13 +246,26 @@ qualquer outro critério), slug exato → 100, mesmo objeto do termo → 100, me
 na mesma família, entre consultoria e assessoria, no apoio que nomeia a profissão, na
 assessoria sobre área da profissão — "Assessoria tributária" diante da advocacia ou da
 contabilidade tributária — ou os dois lados só com a família, "Contabilidade" × "Contador"
-e "Serviços contábeis" × "Contador", também com a oferta dirigida só a um destinatário
-comum, "Contabilidade para pequenas empresas" × "Contador", `mesmaFamiliaEEspecialidade`),
-necessidade que nomeia só a família do serviço → 60 (`necessidadeGenericaNomeiaOServico`,
-que inclui a oferta GENÉRICA diante da necessidade da mesma família com só público ou
-finalidade — "Contabilidade" × "Contador para pequenas empresas", "Logística" ×
-"logística para exportar meu café"; dar 100 quando o público está em
-`DESTINATARIOS_COMUNS` é decisão em aberto), necessidade que declara o ASSUNTO do serviço
+e "Serviços contábeis" × "Contador", também com o destinatário comum dos dois lados —
+decisão do Roberto de 16/09: "Contabilidade para pequenas empresas" × "Contador",
+"Contabilidade" × "Contador para MEI", "Contador de MEI" ou "Contador MEI", "Contabilidade
+para MEI" × "Contador de MEI"; depois de "para" vale a lista `DESTINATARIOS_COMUNS` (MEI,
+pequenas empresas, startups, negócios, clientes...), e sem "para" só o inequívoco
+(`destinatarioNosLemas`: MEI, EPP, startup, o porte com a empresa, pessoa física), porque
+ali "de" também é assunto: "Consultoria de negócios", "Advogado de empresas" e "Tradutor
+particular" não são destinatário —, `mesmaFamiliaEEspecialidade`), necessidade que nomeia
+só a família do serviço → 60 (`necessidadeGenericaNomeiaOServico`, que inclui a oferta
+GENÉRICA diante da necessidade da mesma família com finalidade ou público que não é
+destinatário comum — "Logística" × "logística para exportar meu café", "Marketing" ×
+"Marketing para restaurantes" — e, quando o texto PEDE o serviço (marca de pedido de
+pt/en/es antes dele, `pedidoPedeOServico`), com complemento que as listas não conhecem —
+"Advocacia" × "Preciso de advogado marítimo", "Contabilidade" × "Procuro contador rural" —,
+salvo o complemento que nomeia contraparte em qualquer alternativa (`PAPEIS_DE_COMERCIO`,
+`SOCIOS` e o que a decisão nomeia: representante e parceiro comerciais, atacadista,
+franqueado, cliente...), que dá 0: "Preciso de consultoria de distribuidor"; decisões do
+Roberto de 16/09; sem o pedido, "advogado marítimo" e "We are maritime lawyers" seguem 0; e
+a prestadora que PROCURA clientes — "Contador procura clientes", marca de pedido depois do
+serviço — não pede o serviço e dá 0, `servicoEhQuemPede`), necessidade que declara o ASSUNTO do serviço
 sem nomeá-lo → 60 com tipo `semantic` (`necessidadeDeclaraOAssuntoDoServico`: vocabulário
 curado de tributário, internacionalização e regulatório sanitário, e a necessidade tem de
 pedir ajuda ou uma ação, sem pedir no resto a contraparte, o capital ou o registro de
@@ -265,11 +278,15 @@ OPOSTAS, ou mesma categoria; duas pontas que querem a mesma coisa são concorren
 **`server/matching.ts`** cruza perfis de usuárias em 6 dimensões ponderadas, com LLM só no
 insight: complementaridade 30, setor 20, investimento 20, especialidade 15, valores 10,
 localização 5 (somam 100), com corte em 40 — um par vira match sem nenhum termo cruzado.
-**Este motor não aplica a regra dos concorrentes:** `satisfaz` devolve `true` já no
-`have === need` e no slug igual, sem passar por `saoConcorrentes`, então "exportar" ×
-"exportar" conta como necessidade atendida e ainda SOBE a complementaridade, a dimensão de
-maior peso. Uniformizar os dois motores é decisão de produto, não ajuste local: a nota do
-motor de perfis mudaria para todas. **`routers/profileMatches.ts`** expõe esses matches no
+**Desde o N6 (decisão do Roberto de 11/11) este motor aplica as duas regras do privado** no
+cruzamento de "o que tenho" com "o que preciso": `satisfaz` pergunta `saoConcorrentes`
+ANTES de tudo (antes do texto igual, do mapa curado e do slug), então concorrentes não
+contam como necessidade atendida nem sobem a complementaridade ("exportar" × "exportar" e
+"Exportar vinho" × "Exportar vinho" não casam; "exportar vinho" × "importar vinho" casa), e
+palavra solta não casa (o que sobra é o mapa curado, o slug, `nomeiamAMesmaCoisa` e as
+regras da demanda expressa; teste em `server/motor-de-perfis-concorrentes.test.ts`). As
+outras dimensões não leem termo: a especialidade igual continua valendo 60 e o setor igual
+70, mesmo entre concorrentes. **`routers/profileMatches.ts`** expõe esses matches no
 Dashboard com trava de consentimento dos dois lados.
 
 **Regra da demanda expressa, nos três motores e nos prompts.** Item de "o que tenho"
@@ -291,7 +308,9 @@ mesma necessidade ("Advogado tributarista" × "Advocacia tributária"). Os outro
   oportunidade que declara a necessidade; `server/portao-da-demanda-expressa.ts` confere a
   citação, e que ela pede um serviço que o perfil oferece, antes de exibir (citação de
   contraparte — distribuidor, investidor —, de autodescrição da empresa ou de assunto que
-  nenhum serviço do perfil presta é barrada). Oportunidade que OFERECE serviço só vai a
+  nenhum serviço do perfil presta é barrada quando não nomeia serviço; "Preciso de
+  consultoria de distribuidor" e "Contador procura clientes" ainda passam ali, limite em
+  `docs/arquitetura/README.md` §2c). Oportunidade que OFERECE serviço só vai a
   quem declarou algo que possa ser aquele serviço.
 - **"O que você busca?"** (12 opções, `shared/o-que-busca.ts`): nenhuma opção libera
   serviço sozinha ("Serviço Especializado" é genérica), e o texto de "Outra necessidade"
@@ -483,6 +502,37 @@ todo procedimento que muda a reunião tem a dona no WHERE. As vozes guardam `"ow
 da PARTICIPAÇÃO (nunca o `users.id`), e o nome da conta é resolvido na leitura
 (`vozesParaQuemLe`); reprocessar e juntar reuniões zeram as três colunas das vozes
 (`VOZES_ZERADAS`). A exclusão da reunião e da conta (das duas pontas) levam as participações.
+
+## O perfil de voz da dona (H3d)
+
+`server/perfil-de-voz.ts` (router `perfilDeVoz`), `shared/perfil-de-voz.ts`, tabelas
+`voice_profiles` (uma linha por dona) e `voice_profile_consents`, e a seção do Perfil
+(`client/src/components/PerfilDeVoz.tsx`). A dona grava 10 a 60 s da própria voz (a tela pede
+cerca de 30 s, lendo um texto; até 1 MB, o conteúdo conferido pelos primeiros bytes), guardados
+no bucket sob `perfis-de-voz/<openId>/`, prefixo que o proxy `/manus-storage` nega a todo
+mundo: só a dona ouve, por `perfilDeVoz.ouvir`, e o link aberto, as participantes e a
+consulta da administração (R1a) nunca leem a amostra. É dado biométrico (LGPD art. 11):
+
+- a primeira gravação exige o consentimento da caixa (texto da Cris, desmarcada, separada do
+  aceite dos Termos), com a versão do texto (`VERSOES_DO_TEXTO_DO_PERFIL_DE_VOZ`), o idioma e
+  o texto exibido; `voice_profile_consents` guarda cada consentimento e cada revogação (data,
+  hora, versão, idioma, texto e hash, IP e navegador, sem a voz), nunca recebe UPDATE e
+  sobrevive à exclusão do perfil e da conta;
+- desligar é DEFINITIVO: na transação com a linha travada, a linha sai, a revogação entra e a
+  amostra sai do bucket com TODAS as versões (`storageApagarTodasAsVersoes`); se o bucket
+  recusar, a transação desfaz e nada muda. Regravar apaga a antiga do mesmo jeito antes de a
+  troca valer, sem pedir a caixa de novo. A exclusão da conta registra a revogação (origem
+  `exclusao_da_conta`), apaga a amostra com todas as versões e a linha
+  (`server/exclusao-de-conta.ts`, regra 7); o exame de produção não grava perfil;
+- a fila (`server/fila-de-transcricao.ts`) manda a amostra ANTES do trecho em cada parte da
+  reunião da dona (`amostraDaVozDaDona`; cerca de US$ 0,0007 por parte), e o prompt pede o
+  rótulo fixo `F1` (`ROTULO_DA_VOZ_DA_DONA`) para a voz dela, com as outras a partir de F2 e
+  "na dúvida, outro rótulo". A parte guarda a marca `vozDaDona`; a seguinte só leva a amostra
+  se a anterior levou (o perfil gravado no meio de uma reunião não entra nela), e na junção
+  (H17) o F1 fica fixo e as outras vozes vão para depois das usadas. A montagem liga o F1 à
+  conta da dona em `speaker_accounts` (H3c), sem tirar a ligação que já havia
+  (`contasComAVozDaDona`): nada entra sozinho que a dona não corrija no "Quem é cada voz".
+  Desligar o perfil não mexe nas reuniões já transcritas.
 
 ## Os espaços de equipe (R2)
 

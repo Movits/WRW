@@ -19,11 +19,11 @@ const invokeLLM = vi.hoisted(() => vi.fn());
 vi.mock("./_core/llm", () => ({ invokeLLM: (...a: unknown[]) => invokeLLM(...a) }));
 
 const { getDb } = await import("./db");
-const { meetingAudioSlices, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
+const { meetingAudioSlices, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users, voiceProfiles } = await import("../drizzle/schema");
 const fila = await import("./fila-de-transcricao");
 const { ObjetoAusenteNoStorageError } = await import("./storage");
-const { GeminiIndisponivelError } = await import("./gemini");
-const { TemposForaDaParteError } = await import("./transcricao-de-fatia");
+const { GeminiIndisponivelError, GeminiRecusouChamadaError } = await import("./gemini");
+const { TemposForaDaParteError, MARCA_DE_OUTRA_REUNIAO } = await import("./transcricao-de-fatia");
 const { marcarReunioesInterrompidas, iniciarReprocessamento, REGRA_DOS_ROTULOS_NA_EXTRACAO, ReprocessamentoRecusado } = await import("./meeting-service");
 const { terminaComALinhaPresa: comALinhaPresa } = await import("./test/linha-presa");
 
@@ -75,6 +75,7 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     await apagarPelaChave(banco, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
     await apagarPelaChave(banco, meetingAudioSlices, eq(meetingAudioSlices.ownerId, DONA));
     await apagarPelaChave(banco, meetings, eq(meetings.ownerId, DONA));
+    await banco.delete(voiceProfiles).where(eq(voiceProfiles.ownerId, DONA));
     await banco.delete(users).where(eq(users.openId, DONA));
   });
   beforeEach(async () => {
@@ -84,6 +85,7 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     await apagarPelaChave(banco, meetingTranscripts, eq(meetingTranscripts.ownerId, DONA));
     await apagarPelaChave(banco, meetingAudioSlices, eq(meetingAudioSlices.ownerId, DONA));
     await apagarPelaChave(banco, meetings, eq(meetings.ownerId, DONA));
+    await banco.delete(voiceProfiles).where(eq(voiceProfiles.ownerId, DONA));
     fila.religarParaTestes();
     transcreverFatia.mockReset();
     storageGetBytes.mockReset();
@@ -92,6 +94,164 @@ describe.skipIf(!temBanco)("Fila de transcrição no banco (integração)", () =
     invokeLLM.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ entities: [], contacts: [] }) } }] });
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  // ── O perfil de voz da dona (H3d) ──────────────────────────────────────────
+  const AMOSTRA = Buffer.from("amostra-da-voz-da-dona");
+  async function perfilDeVoz() {
+    await (await db()).insert(voiceProfiles).values({
+      id: crypto.randomUUID(), ownerId: DONA, storageKey: `perfis-de-voz/${DONA}/amostra.webm`, mimeType: "audio/webm", bytes: AMOSTRA.length,
+      durationMs: 30_000, createdAt: AGORA(), updatedAt: AGORA(),
+    });
+    storageGetBytes.mockImplementation(async (chave: string) => (chave.startsWith("perfis-de-voz/") ? AMOSTRA : Buffer.from("audio")));
+  }
+
+  it("H3d: com o perfil de voz, cada parte leva a amostra, e a montagem liga a voz da dona à conta dela", async () => {
+    await perfilDeVoz();
+    const id = await reuniao("uploading", 2);
+    await parte(id, 0);
+    await parte(id, 1);
+    transcreverFatia.mockImplementation(async ({ inicioSegundos }: { inicioSegundos: number }) => ({
+      segmentos: [
+        { inicio: inicioSegundos + 1, fim: inicioSegundos + 2, falante: "F1", texto: "fala da dona" },
+        { inicio: inicioSegundos + 3, fim: inicioSegundos + 4, falante: "F2", texto: "fala de outra pessoa" },
+      ], idioma: "pt-BR", modelo: "gemini-teste",
+    }));
+    await rodar();
+    await rodar();
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(2);
+    for (const [pedido] of transcreverFatia.mock.calls) expect(pedido.amostraDaVoz).toEqual({ audio: AMOSTRA, mimeType: "audio/webm" });
+    expect((await partesDe(id)).every(p => (p.result as { vozDaDona?: boolean }).vozDaDona === true)).toBe(true);
+    const r = await reuniaoDe(id);
+    expect(r.status).toBe("ready");
+    expect(r.speakerAccounts).toEqual({ F1: "owner" });
+  });
+
+  it("H3d: sem perfil, a parte vai sem a amostra e nenhuma voz é ligada", async () => {
+    const id = await reuniao("uploading", 1);
+    await parte(id, 0);
+    transcreverFatia.mockResolvedValue({ segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "fala" }], idioma: "pt-BR", modelo: "gemini-teste" });
+    await rodar();
+    await rodar();
+    expect(transcreverFatia.mock.calls[0][0].amostraDaVoz).toBeUndefined();
+    expect((await reuniaoDe(id)).speakerAccounts).toBeNull();
+  });
+
+  it("H3d: o perfil gravado no meio da reunião não entra nas partes seguintes (o F1 de antes pode ser outra pessoa)", async () => {
+    const id = await reuniao("recording", null);
+    await parte(id, 0);
+    transcreverFatia.mockResolvedValue({ segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "fala" }], idioma: "pt-BR", modelo: "gemini-teste" });
+    await rodar();
+    await perfilDeVoz();
+    await parte(id, 1);
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(2);
+    expect(transcreverFatia.mock.calls[1][0].amostraDaVoz).toBeUndefined();
+  });
+
+  it("H3d: a IA recusou o pedido com a amostra: a parte vai de novo, na mesma tentativa, sem ela, e fica sem a marca", async () => {
+    await perfilDeVoz();
+    const id = await reuniao("uploading", 1);
+    await parte(id, 0);
+    transcreverFatia.mockImplementation(async ({ amostraDaVoz }: { amostraDaVoz?: unknown }) => {
+      if (amostraDaVoz) throw new GeminiRecusouChamadaError(400, "a amostra veio corrompida");
+      return { segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "fala" }], idioma: "pt-BR", modelo: "gemini-teste" };
+    });
+    await rodar();
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(2);
+    expect(transcreverFatia.mock.calls[0][0].amostraDaVoz).toBeDefined();
+    expect(transcreverFatia.mock.calls[1][0].amostraDaVoz).toBeUndefined();
+    const [p0] = await partesDe(id);
+    expect(p0).toMatchObject({ status: "transcribed", attempts: 1, lastError: null });
+    expect((p0.result as { vozDaDona?: boolean }).vozDaDona).toBeUndefined();
+    const r = await reuniaoDe(id);
+    expect(r.status).toBe("ready");
+    // Sem a marca, o F1 não é ligado à dona.
+    expect(r.speakerAccounts).toBeNull();
+  });
+
+  it("H3d: a recusa SEM a amostra continua definitiva (nada de segunda chamada)", async () => {
+    const id = await reuniao("uploading", 1);
+    await parte(id, 0);
+    transcreverFatia.mockRejectedValue(new GeminiRecusouChamadaError(400));
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(1);
+    expect((await partesDe(id))[0]).toMatchObject({ status: "failed", lastError: "IA_RECUSOU" });
+  });
+
+  it("H3d: a amostra que sumiu do bucket não derruba a parte: ela vai sem a amostra", async () => {
+    await perfilDeVoz();
+    storageGetBytes.mockImplementation(async (chave: string) => {
+      if (chave.startsWith("perfis-de-voz/")) throw new ObjetoAusenteNoStorageError(chave);
+      return Buffer.from("audio");
+    });
+    const id = await reuniao("uploading", 1);
+    await parte(id, 0);
+    transcreverFatia.mockResolvedValue({ segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "fala" }], idioma: "pt-BR", modelo: "gemini-teste" });
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(1);
+    expect(transcreverFatia.mock.calls[0][0].amostraDaVoz).toBeUndefined();
+    const [p0] = await partesDe(id);
+    expect(p0.status).toBe("transcribed");
+    expect((p0.result as { vozDaDona?: boolean }).vozDaDona).toBeUndefined();
+  });
+
+  it("H3d: na reunião juntada que retranscreve, com todas as partes de antes marcadas, a dona fica no F1 e as outras vozes vão para depois das usadas", async () => {
+    await perfilDeVoz();
+    const id = await reuniao("uploading", 2);
+    await parte(id, 0, {
+      status: "transcribed", offsetMs: 0,
+      result: { vozDaDona: true, segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "dona na primeira" }, { inicio: 3, fim: 4, falante: "F2", texto: "outra na primeira" }], contexto: { falantes: ["F1", "F2"], ultimasFalas: [] } },
+    });
+    await parte(id, 1, { result: { [MARCA_DE_OUTRA_REUNIAO]: true } });
+    transcreverFatia.mockResolvedValue({
+      segmentos: [{ inicio: 601, fim: 602, falante: "F1", texto: "dona na segunda" }, { inicio: 603, fim: 604, falante: "F2", texto: "terceira pessoa" }],
+      idioma: "pt-BR", modelo: "gemini-teste",
+    });
+    await rodar();
+    await rodar();
+    expect(transcreverFatia).toHaveBeenCalledTimes(1);
+    const pedido = transcreverFatia.mock.calls[0][0];
+    expect(pedido.amostraDaVoz).toBeDefined();
+    expect(pedido.anterior).toBeUndefined();
+    const [, p1] = await partesDe(id);
+    // maiorUsado 2: o F1 fica (a dona), o F2 da IA vai a F3 (deslocamento 2 - 1).
+    expect((p1.result as { segmentos: Array<{ falante: string }> }).segmentos.map(s => s.falante)).toEqual(["F1", "F3"]);
+    expect((p1.result as { vozDaDona?: boolean }).vozDaDona).toBe(true);
+    expect((await reuniaoDe(id)).speakerAccounts).toEqual({ F1: "owner" });
+  });
+
+  it("H3d: na reunião juntada que retranscreve, com uma parte de antes SEM a marca, a amostra não vai, tudo desloca e o F1 não é ligado", async () => {
+    await perfilDeVoz();
+    const id = await reuniao("uploading", 2);
+    await parte(id, 0, {
+      status: "transcribed", offsetMs: 0,
+      result: { segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "alguém na primeira" }], contexto: { falantes: ["F1"], ultimasFalas: [] } },
+    });
+    await parte(id, 1, { result: { [MARCA_DE_OUTRA_REUNIAO]: true } });
+    transcreverFatia.mockResolvedValue({
+      segmentos: [{ inicio: 601, fim: 602, falante: "F1", texto: "alguém na segunda" }], idioma: "pt-BR", modelo: "gemini-teste",
+    });
+    await rodar();
+    await rodar();
+    expect(transcreverFatia.mock.calls[0][0].amostraDaVoz).toBeUndefined();
+    const [, p1] = await partesDe(id);
+    expect((p1.result as { segmentos: Array<{ falante: string }> }).segmentos.map(s => s.falante)).toEqual(["F2"]);
+    expect((await reuniaoDe(id)).speakerAccounts).toBeNull();
+  });
+
+  it("H3d: a montagem não liga o F1 a que a dona deu nome livre (a junção zera as contas e mantém os nomes)", async () => {
+    const id = await reuniao("uploading", 1, { speakerNames: { F1: "Ana" } });
+    await parte(id, 0, {
+      status: "transcribed", offsetMs: 0,
+      result: { vozDaDona: true, segmentos: [{ inicio: 1, fim: 2, falante: "F1", texto: "fala" }] },
+    });
+    await rodar();
+    const r = await reuniaoDe(id);
+    expect(r.status).toBe("ready");
+    expect(r.speakerAccounts).toBeNull();
   });
 
   it("transcreve na ordem: a parte 1 espera a 0, e leva o contexto e o início dela", async () => {
