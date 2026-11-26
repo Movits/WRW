@@ -424,15 +424,63 @@ describe("DocumentoParaResumir: as fotos de um texto", () => {
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
-  it(`no máximo ${FOTOS_POR_DOCUMENTO_MAX} fotos: as que passam ficam de fora, com o aviso, e os botões desligam`, () => {
+  it(`no máximo ${FOTOS_POR_DOCUMENTO_MAX} fotos pela galeria: as que passam ficam de fora, com o aviso ao lado dos botões`, () => {
     render(<DocumentoParaResumir {...props}/>);
     abrirFotos();
     const muitas = Array.from({ length: FOTOS_POR_DOCUMENTO_MAX + 1 }, (_, i) => foto(`${i}.jpg`));
     fireEvent.change(screen.getByTestId("entrada-das-fotos"), { target: { files: muitas } });
     expect(screen.getAllByRole("img")).toHaveLength(FOTOS_POR_DOCUMENTO_MAX);
+    const aviso = screen.getByRole("alert");
+    expect(aviso).toHaveTextContent("Um documento tem no máximo 20 fotos: as que passaram disso ficaram de fora.");
+    // O aviso fica logo abaixo dos botões das fotos, antes das miniaturas: com
+    // 20 delas na tela do iPhone, o aviso do fim da página ficava fora da vista.
+    const tirar = screen.getByRole("button", { name: "Tirar foto" });
+    expect(tirar.compareDocumentPosition(aviso) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(aviso.compareDocumentPosition(screen.getByRole("list")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tirar).toHaveAccessibleDescription(aviso.textContent!);
+  });
+
+  // T44, passo 2 (iPhone, 26/11/2026): fotos tiradas uma a uma pela câmera. No
+  // 20º os botões desligavam, e o toque seguinte não fazia nada, sem aviso.
+  it(`pela câmera, uma a uma: depois da ${FOTOS_POR_DOCUMENTO_MAX}ª, o toque em Tirar foto não abre a câmera e diz por quê`, () => {
+    const cliqueNaEntrada = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    render(<DocumentoParaResumir {...props}/>);
+    abrirFotos();
+    const tirar = () => screen.getByRole("button", { name: "Tirar foto" });
+    for (let i = 0; i < FOTOS_POR_DOCUMENTO_MAX; i++) {
+      fireEvent.click(tirar());
+      fireEvent.change(screen.getByTestId("entrada-da-camera"), { target: { files: [foto(`${i}.jpg`)] } });
+    }
+    expect(cliqueNaEntrada).toHaveBeenCalledTimes(FOTOS_POR_DOCUMENTO_MAX);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(tirar()).toBeEnabled();
+    fireEvent.click(tirar());
+    expect(cliqueNaEntrada).toHaveBeenCalledTimes(FOTOS_POR_DOCUMENTO_MAX);
+    expect(screen.getByRole("alert")).toHaveTextContent("Este documento já tem 20 fotos, o máximo. Remova uma foto para acrescentar outra.");
+    expect(screen.getAllByRole("img")).toHaveLength(FOTOS_POR_DOCUMENTO_MAX);
+    // A galeria também não abre, e avisa igual.
+    fireEvent.click(screen.getByRole("button", { name: "Escolher fotos" }));
+    expect(cliqueNaEntrada).toHaveBeenCalledTimes(FOTOS_POR_DOCUMENTO_MAX);
+    // Uma foto a menos: o aviso sai, e a câmera volta a abrir.
+    fireEvent.click(screen.getByRole("button", { name: "Remover a foto 1" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.click(tirar());
+    expect(cliqueNaEntrada).toHaveBeenCalledTimes(FOTOS_POR_DOCUMENTO_MAX + 1);
+    cliqueNaEntrada.mockRestore();
+  });
+
+  it("a foto que chega pela câmera com o documento já cheio (duas escolhas seguidas) fica de fora com o aviso", () => {
+    render(<DocumentoParaResumir {...props}/>);
+    abrirFotos();
+    const quase = Array.from({ length: FOTOS_POR_DOCUMENTO_MAX - 1 }, (_, i) => foto(`${i}.jpg`));
+    fireEvent.change(screen.getByTestId("entrada-das-fotos"), { target: { files: quase } });
+    // Duas entregas antes de a tela redesenhar: a segunda já não cabe.
+    act(() => {
+      fireEvent.change(screen.getByTestId("entrada-da-camera"), { target: { files: [foto("a.jpg")] } });
+      fireEvent.change(screen.getByTestId("entrada-da-camera"), { target: { files: [foto("b.jpg")] } });
+    });
+    expect(screen.getAllByRole("img")).toHaveLength(FOTOS_POR_DOCUMENTO_MAX);
     expect(screen.getByRole("alert")).toHaveTextContent("Um documento tem no máximo 20 fotos: as que passaram disso ficaram de fora.");
-    expect(screen.getByRole("button", { name: "Tirar foto" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Escolher fotos" })).toBeDisabled();
   });
 
   it("a foto que o aparelho não abre: diz qual, e nada nasce", async () => {

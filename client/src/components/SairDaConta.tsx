@@ -1,10 +1,11 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { haAudioNoAparelhoParaOSair } from "@/lib/retomada-das-partes";
 import { motivoDaOcupacao, useSessaoOcupada, type MotivoDaOcupacao } from "@/lib/sessao-ocupada";
 
 type Traduzir = (chave: string) => string;
@@ -45,6 +46,12 @@ export function useAvisoDeSairFalhou(): () => void {
  * motivo, e "Continuar aqui" é o botão padrão, com o foco (o AlertDialog foca o
  * Cancel ao abrir, e o Esc também fica). Sem ocupação, sai direto, como antes.
  *
+ * O registro em memória não basta: o Sair apaga as partes da gravação que
+ * ficaram no aparelho (liberarTodas), e a contagem que as põe no registro pode
+ * estar atrasada ou ter falhado (T19, iPhone em modo avião, 26/11/2026). Com o
+ * registro livre, o clique pergunta ao aparelho (haAudioNoAparelhoParaOSair)
+ * antes de sair; com parte lá, o diálogo do áudio não enviado abre.
+ *
  * Devolve o pedido de saída, para o botão, e o diálogo, que quem usa desenha
  * FORA do menu que se fecha ao clicar: dentro dele, o diálogo sumiria junto.
  * A guarda de que toda saída passa por aqui está em SairDaConta.test.tsx.
@@ -61,15 +68,30 @@ export function useSairDaConta(sair: () => void): { pedirSaida: () => void; dial
   // termina), fica o motivo do clique, e nada sai sem a dona escolher.
   const motivo = sessao.motivo ?? motivoDoClique;
 
-  function pedirSaida() {
-    // Lido na hora do clique, e não o da última renderização.
-    const motivoAgora = motivoDaOcupacao();
-    if (!motivoAgora) {
-      sair();
-      return;
-    }
+  // A conferência do aparelho em curso: o segundo toque não sai por ela.
+  const conferindo = useRef(false);
+
+  function perguntar(motivoAgora: MotivoDaOcupacao) {
     setMotivoDoClique(motivoAgora);
     setAberto(true);
+  }
+
+  function pedirSaida() {
+    if (conferindo.current) return;
+    // Lido na hora do clique, e não o da última renderização.
+    const motivoAgora = motivoDaOcupacao();
+    if (motivoAgora) return perguntar(motivoAgora);
+    // Sem IndexedDB no navegador, nada ficou no aparelho: sai direto.
+    if (typeof indexedDB === "undefined") return sair();
+    conferindo.current = true;
+    void haAudioNoAparelhoParaOSair().then(haAudio => {
+      conferindo.current = false;
+      // O registro pode ter mudado enquanto o aparelho respondia.
+      const motivoDepois = motivoDaOcupacao();
+      if (motivoDepois) return perguntar(motivoDepois);
+      if (haAudio) return perguntar("audio-nao-enviado");
+      sair();
+    });
   }
 
   const dialogo = (

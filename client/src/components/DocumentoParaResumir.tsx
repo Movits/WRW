@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Camera, CircleAlert, FileText, Images, Loader2, Send, X } from "lucide-react";
 import { toast } from "sonner";
@@ -90,6 +90,17 @@ export function DocumentoParaResumir(props: {
   const [fase, setFase] = useState<"parada" | "preparando" | "enviando">("parada");
   const [prontas, setProntas] = useState(0);
   const [erro, setErro] = useState<string | null>(null);
+  // O aviso do teto de fotos, ao lado dos botões das fotos, e não lá embaixo
+  // com os outros erros (T44, iPhone, 26/11/2026): com 20 miniaturas na tela, o
+  // aviso do fim da página ficava fora da vista, e no 20º os botões desligavam,
+  // e o toque seguinte não dizia nada. Agora toda foto recusada pelo teto avisa
+  // aqui, e a tela rola até o aviso.
+  const [avisoDasFotos, setAvisoDasFotos] = useState<string | null>(null);
+  const caixaDoAvisoDasFotos = useRef<HTMLParagraphElement | null>(null);
+  const idDoAvisoDasFotos = useId();
+  useEffect(() => {
+    if (avisoDasFotos) caixaDoAvisoDasFotos.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [avisoDasFotos]);
   const entradaDoPdf = useRef<HTMLInputElement | null>(null);
   const entradaDaCamera = useRef<HTMLInputElement | null>(null);
   const entradaDasFotos = useRef<HTMLInputElement | null>(null);
@@ -133,9 +144,22 @@ export function DocumentoParaResumir(props: {
     setErro(null);
     const novas = Array.from(lista ?? []).filter(arquivo => !arquivo.type || arquivo.type.startsWith("image/"));
     if (!novas.length) return;
-    const cabem = Math.max(0, FOTOS_POR_DOCUMENTO_MAX - fotos.length);
-    if (novas.length > cabem) setErro(t("meetings.document.photosLimit", { quantidade: FOTOS_POR_DOCUMENTO_MAX }));
-    setFotos(atuais => [...atuais, ...novas.slice(0, cabem).map(arquivo => ({ id: crypto.randomUUID(), arquivo, url: URL.createObjectURL(arquivo) }))]);
+    // As fotos de agora, e não as da última renderização: duas escolhas
+    // seguidas não passam juntas do teto.
+    const cabem = Math.max(0, FOTOS_POR_DOCUMENTO_MAX - fotosNaTela.current.length);
+    setAvisoDasFotos(novas.length > cabem ? t("meetings.document.photosLimit", { quantidade: FOTOS_POR_DOCUMENTO_MAX }) : null);
+    const aceitas = novas.slice(0, cabem).map(arquivo => ({ id: crypto.randomUUID(), arquivo, url: URL.createObjectURL(arquivo) }));
+    fotosNaTela.current = [...fotosNaTela.current, ...aceitas];
+    setFotos(atuais => [...atuais, ...aceitas]);
+  }
+
+  // Com o documento cheio, o botão não abre a câmera nem a galeria: diz por quê.
+  function abrirEntradaDeFotos(entrada: HTMLInputElement | null) {
+    if (fotosNaTela.current.length >= FOTOS_POR_DOCUMENTO_MAX) {
+      setAvisoDasFotos(t("meetings.document.photosFull", { quantidade: FOTOS_POR_DOCUMENTO_MAX }));
+      return;
+    }
+    entrada?.click();
   }
 
   function tirarFoto(id: string) {
@@ -144,6 +168,8 @@ export function DocumentoParaResumir(props: {
       if (saindo) URL.revokeObjectURL(saindo.url);
       return atuais.filter(foto => foto.id !== id);
     });
+    // Com uma foto a menos, cabe outra: o aviso do teto deixa de valer.
+    setAvisoDasFotos(null);
   }
 
   const temArquivo = origem === "pdf" ? pdf !== null : fotos.length > 0;
@@ -211,6 +237,7 @@ export function DocumentoParaResumir(props: {
         void utils.meetings.list.invalidate();
         for (const foto of fotos) URL.revokeObjectURL(foto.url);
         setFotos([]);
+        setAvisoDasFotos(null);
         setPdf(null);
         setAutorizado(false);
         toast.success(t("meetings.document.sent"));
@@ -281,9 +308,10 @@ export function DocumentoParaResumir(props: {
       <p className="text-xs text-white/40">{t("meetings.document.pdfLimit", { mb: DOCUMENTO_BYTES_MAX / MB })}</p>
     </div> : <div className="space-y-3">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <button type="button" disabled={ocupado || fotos.length >= FOTOS_POR_DOCUMENTO_MAX} onClick={() => entradaDaCamera.current?.click()} className="rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center items-center gap-2 text-sm disabled:opacity-40"><Camera size={17}/> {t("meetings.document.takePhoto")}</button>
-        <button type="button" disabled={ocupado || fotos.length >= FOTOS_POR_DOCUMENTO_MAX} onClick={() => entradaDasFotos.current?.click()} className="rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center items-center gap-2 text-sm disabled:opacity-40"><Images size={17}/> {t("meetings.document.choosePhotos")}</button>
+        <button type="button" disabled={ocupado} aria-describedby={avisoDasFotos ? idDoAvisoDasFotos : undefined} onClick={() => abrirEntradaDeFotos(entradaDaCamera.current)} className="rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center items-center gap-2 text-sm disabled:opacity-40"><Camera size={17}/> {t("meetings.document.takePhoto")}</button>
+        <button type="button" disabled={ocupado} aria-describedby={avisoDasFotos ? idDoAvisoDasFotos : undefined} onClick={() => abrirEntradaDeFotos(entradaDasFotos.current)} className="rounded-xl border border-white/20 text-white/80 hover:bg-white/5 py-3 inline-flex justify-center items-center gap-2 text-sm disabled:opacity-40"><Images size={17}/> {t("meetings.document.choosePhotos")}</button>
       </div>
+      {avisoDasFotos && <p ref={caixaDoAvisoDasFotos} id={idDoAvisoDasFotos} role="alert" className="rounded-xl border border-red-400/25 bg-red-400/10 p-3 text-sm text-red-200">{avisoDasFotos}</p>}
       {fotos.length > 0 && <ol aria-label={t("meetings.document.photosListLabel")} className="grid grid-cols-3 gap-2 sm:grid-cols-4">
         {fotos.map((foto, posicao) => <li key={foto.id} className="relative overflow-hidden rounded-lg border border-white/10 bg-black/20">
           <img src={foto.url} alt={t("meetings.document.photoAlt", { numero: posicao + 1 })} className="aspect-[3/4] w-full object-cover"/>

@@ -2223,6 +2223,8 @@ describe("Reuniões — o vídeo do YouTube (H13)", () => {
     expect(screen.queryByRole("button", { name: /Tentar de novo/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/Tentar de novo lê o vídeo outra vez/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Reprocessar/ })).not.toBeInTheDocument();
+    // T44, passo 6: sem o botão, a tela diz por quê.
+    expect(screen.getByText("Tentar de novo com este mesmo vídeo daria o mesmo resultado, por isso não há o botão. Para resumir outro vídeo, use “Resumir vídeo do YouTube”.")).toBeInTheDocument();
   });
 
   it.each([
