@@ -264,6 +264,19 @@ describe("a numeração do resumo refeito", () => {
     expect(numeracao.novos.map(item => [item.position, item.section, item.text])).toEqual([[2, "focus", "Venda de café para a Alemanha"]]);
   });
 
+  it("o novo que repete um ignorado da IA que sai (mesma seção, sem contar maiúsculas e pontuação) volta marcado; com outras palavras ou em outra seção, não (T29)", () => {
+    const ignorados = [{ section: "decision" as const, text: "Não renovar com a transportadora." }];
+    const novos = [novo("decision", "não renovar com a TRANSPORTADORA"), novo("question", "Não renovar com a transportadora"), novo("decision", "Trocar de transportadora")];
+    const numeracao = numeracaoDoResumoRefeito([], novos, ignorados);
+    expect(numeracao.novos.map(item => [item.section, item.text, item.voltouDoIgnorado])).toEqual([
+      ["decision", "não renovar com a TRANSPORTADORA", true],
+      ["decision", "Trocar de transportadora", false],
+      ["question", "Não renovar com a transportadora", false],
+    ]);
+    // Sem a lista dos ignorados (o primeiro resumo), nada volta marcado.
+    expect(numeracaoDoResumoRefeito([], novos).novos.every(item => !item.voltouDoIgnorado)).toBe(true);
+  });
+
   it("primeiro resumo (nada fica): os novos, numerados de 0 na ordem do formato", () => {
     const numeracao = numeracaoDoResumoRefeito([], [novo("decision", "D"), novo("action", "A")]);
     expect(numeracao.queFicam).toEqual([]);

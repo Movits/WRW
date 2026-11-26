@@ -1829,6 +1829,7 @@
       "blockersHeading": "Blocages, dépendances et contraintes",
       "openQuestionsHeading": "Questions en suspens",
       "toReview": "À vérifier",
+      "backFromIgnored": "Vous aviez ignoré cet élément, et l’IA l’a ramené en refaisant le résumé. Confirmez-le ou ignorez-le à nouveau.",
       "confirm": "Confirmer",
       "ignore": "Ignorer",
       "assignee": "Responsable : {{nome}}",
@@ -3277,6 +3278,42 @@
       "errors": {
         "stillInAgenda": "Cette réunion est toujours dans votre agenda. Actualisez la page."
       }
+    }
+  },
+  "perfilDeVoz": {
+    "title": "Profil vocal",
+    "subtitle": "Pour que vos réunions reconnaissent votre voix et affichent votre nom sur vos interventions.",
+    "intro": "Enregistrez environ {{segundos}} secondes de votre voix en lisant le texte ci-dessous à voix haute. Dans les prochaines réunions que vous enregistrerez, vos paroles porteront votre nom, et non « Intervenant 1 ». Si la reconnaissance se trompe, vous corrigez dans « Qui est chaque voix », comme aujourd’hui.",
+    "readAloud": "Lisez à voix haute",
+    "textToRead": "Bonjour. Voici ma voix, enregistrée pour que Marquesa Global Match me reconnaisse dans les réunions. Je parle à mon rythme habituel, comme dans une conversation de travail. Aujourd’hui, je vais raconter ce que j’ai fait cette semaine, quelles sont les prochaines étapes et à qui je dois parler. Des chiffres, des noms et des dates apparaissent aussi : deux mille vingt-six, le quinze mars, trente-sept personnes. Merci de m’avoir écoutée.",
+    "consent": "J’autorise Marquesa Global Match à créer un profil de ma voix pour m’identifier dans les transcriptions et les résumés des réunions.",
+    "consentSupport": "Le profil vocal est une donnée biométrique. Il est utilisé uniquement à cette fin, il n’est pas obligatoire pour utiliser la plateforme et peut être désactivé à tout moment. Lorsqu’il est désactivé, le profil est supprimé.",
+    "needsConsent": "Pour enregistrer, cochez l’autorisation ci-dessus.",
+    "record": "Enregistrer ma voix",
+    "stop": "Arrêter et enregistrer",
+    "saving": "Enregistrement...",
+    "cancel": "Annuler",
+    "listen": "Écouter",
+    "rerecord": "Réenregistrer",
+    "turnOff": "Désactiver et supprimer",
+    "turnOffConfirm": "Désactiver le profil vocal supprime définitivement l’enregistrement de votre voix. Les réunions que vous enregistrerez désormais ne reconnaîtront plus votre voix d’elles-mêmes. Désactiver ?",
+    "turnOffYes": "Oui, désactiver et supprimer",
+    "turningOff": "Suppression...",
+    "active": "Profil vocal activé (enregistré le {{data}}).",
+    "howItWorks": "Les prochaines réunions que vous enregistrerez affichent vos paroles avec votre nom. En cas d’erreur, corrigez dans « Qui est chaque voix ».",
+    "tooShort": "L’enregistrement est trop court. Lisez tout le texte : au moins {{segundos}} secondes.",
+    "micError": "Impossible d’utiliser le microphone. Vérifiez l’autorisation du navigateur et réessayez.",
+    "unsupported": "Ce navigateur n’enregistre pas l’audio. Essayez Chrome, Edge ou Safari à jour.",
+    "toast": {
+      "saved": "Profil vocal enregistré.",
+      "deleted": "Profil vocal désactivé et supprimé."
+    },
+    "erros": {
+      "consentimentoPedido": "Pour créer le profil vocal, cochez l’autorisation.",
+      "amostraInvalida": "L’enregistrement n’a pas pu être utilisé. Enregistrez à nouveau en lisant tout le texte (1 minute au maximum).",
+      "semPerfil": "Aucun profil vocal n’est enregistré.",
+      "demais": "Trop d’enregistrements en peu de temps. Réessayez dans une heure.",
+      "bucket": "Nous n’avons pas pu terminer pour l’instant. Rien n’a changé ; réessayez dans un instant."
     }
   },
   "googleAgenda": {

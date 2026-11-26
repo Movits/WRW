@@ -59,7 +59,7 @@ import { CONCORRENCIA_DO_EXPURGO_DO_AUDIO } from "./storage";
 import {
   contextMedia, dealRoomDocuments, dealRooms, loginAttempts, meetingAttachments, meetingAudioSlices, meetingDocuments, meetingRecordings,
   meetings, opportunities, opportunityMatches, privateContacts, sivcDocuments, sivcVerifications,
-  strategicGroups, users, googleAgendaConexoes,
+  strategicGroups, users, googleAgendaConexoes, voiceProfileConsents, voiceProfiles,
 } from "../drizzle/schema";
 import { encryptData } from "./security";
 import { URL_DE_REVOGACAO } from "./google-oauth";
@@ -125,7 +125,11 @@ describe("A) toda coluna de usuária do schema tem destino declarado na exclusã
     // 88: os 85, mais os espaços de equipe (R2): meeting_folder_members.owner_id e
     // userId, e meeting_folder_tasks.owner_id; com a conta Google (A8, contas_google.userId), 89.
     // 95: os 89 das associações somados aos 6 das reuniões, das equipes e da conta Google.
-    expect(PARES).toHaveLength(95);
+    // 97: os 95, mais o perfil de voz (H3d): voice_profiles.owner_id (sai) e
+    // voice_profile_consents.owner_id (fica: a prova do consentimento e da revogação).
+    expect(PARES).toHaveLength(97);
+    expect(PARES).toContainEqual({ tabela: "voice_profiles", coluna: "owner_id" });
+    expect(PARES).toContainEqual({ tabela: "voice_profile_consents", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "meeting_folder_members", coluna: "owner_id" });
     expect(PARES).toContainEqual({ tabela: "meeting_folder_members", coluna: "userId" });
     expect(PARES).toContainEqual({ tabela: "meeting_folder_tasks", coluna: "owner_id" });
@@ -194,6 +198,7 @@ describe("A2) a ordem do plano não deixa órfão", () => {
 // `condicao` é o WHERE inteiro, para os testes que o renderizam pelo dialeto.
 type Delecao = { tabela: unknown; colunas: string[]; sql: string; condicao: unknown };
 let delecoes: Delecao[] = [];
+let insercoes: Array<{ tabela: unknown; valores: Record<string, unknown> }> = [];
 let atualizacoes: Array<{ tabela: unknown; valores: Record<string, unknown>; condicao?: unknown }> = [];
 let linhasPorTabela: Map<unknown, unknown[]>;
 let apagadosNoBucket: string[] = [];
@@ -236,8 +241,14 @@ function textoDe(condicao: unknown): string {
 function selecionar(tabela: unknown) {
   const linhas = linhasPorTabela.get(tabela) ?? [];
   const resultado = Promise.resolve(linhas);
+  // O perfil de voz (H3d) lê com .limit() e .orderBy() depois do WHERE.
+  const encadeavel = (): Record<string, unknown> => ({
+    limit: () => encadeavel(),
+    orderBy: () => encadeavel(),
+    then: resultado.then.bind(resultado),
+  });
   return {
-    where: () => resultado,
+    where: () => encadeavel(),
     then: resultado.then.bind(resultado),
   };
 }
@@ -251,6 +262,13 @@ const fakeDb = {
       delecoes.push({ tabela, colunas: colunasDe(condicao), sql: textoDe(condicao), condicao });
       ordemDosEfeitos.push("delete");
       return [{ affectedRows: (linhasPorTabela.get(tabela) ?? []).length || 1 }];
+    },
+  }),
+  insert: (tabela: unknown) => ({
+    values: async (valores: Record<string, unknown>) => {
+      insercoes.push({ tabela, valores });
+      ordemDosEfeitos.push(`insert:${getTableName(tabela as MySqlTable)}`);
+      return [{ affectedRows: 1 }];
     },
   }),
   // O mysql2 devolve [ResultSetHeader, campos] também no UPDATE.
@@ -284,6 +302,7 @@ beforeEach(() => {
   bucketDublado.apagarTodasAsVersoes.mockClear();
   bucketDublado.apagarSimples.mockClear();
   delecoes = [];
+  insercoes = [];
   atualizacoes = [];
   apagadosNoBucket = [];
   ordemDosEfeitos = [];
@@ -963,5 +982,91 @@ describe("B9) os anexos do resumo saem com a conta, e o que o bucket recusou fic
     linhasPorTabela.set(meetingAttachments, [{ id: "anexo-2", chave: "meetings/open-OUTRA/r/anexo-0000.webp" }]);
     await excluirConta(fakeDb, CONTA, { apagarArquivo });
     expect(apagadosNoBucket.some(chave => chave.includes("open-OUTRA"))).toBe(false);
+  });
+});
+
+// ═══════════ B10) o perfil de voz (H3d): a amostra e a linha saem, o registro fica ═══════════
+describe("B10) o perfil de voz sai de vez, e a revogação fica registrada", () => {
+  it("a amostra da dona sai do bucket com TODAS as versões (o apagador padrão), e a de outra conta não é colhida", async () => {
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: "perfis-de-voz/open-7/amostra.webm" }]);
+    const chaves = await lerChavesDaConta(fakeDb, CONTA);
+    expect(await chavesDeArquivosDaConta(fakeDb, chaves)).toContain("perfis-de-voz/open-7/amostra.webm");
+    await excluirConta(fakeDb, CONTA, { revogarGoogle: async () => "revogada" as const });
+    expect(bucketDublado.apagarTodasAsVersoes).toHaveBeenCalledWith("perfis-de-voz/open-7/amostra.webm");
+    expect(bucketDublado.apagarSimples).not.toHaveBeenCalledWith("perfis-de-voz/open-7/amostra.webm");
+
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-x", chave: "perfis-de-voz/open-OUTRA/amostra.webm" }]);
+    expect(await chavesDeArquivosDaConta(fakeDb, chaves)).not.toContain("perfis-de-voz/open-OUTRA/amostra.webm");
+  });
+
+  it("registra a revogação (origem exclusao_da_conta, sem a voz) ANTES de a linha do perfil sair, e o registro não é apagado", async () => {
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: "perfis-de-voz/open-7/amostra.webm" }]);
+    linhasPorTabela.set(voiceProfileConsents, [{ versao: "perfil-de-voz-2026-11-25" }]);
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    const revogacao = insercoes.find(i => i.tabela === voiceProfileConsents);
+    expect(revogacao?.valores).toMatchObject({ ownerId: "open-7", evento: "revogou", origem: "exclusao_da_conta", versaoDoTexto: "perfil-de-voz-2026-11-25" });
+    expect(Object.keys(revogacao!.valores)).not.toContain("storageKey");
+    const insercao = ordemDosEfeitos.indexOf("insert:voice_profile_consents");
+    const delecaoDoPerfil = delecoes.findIndex(d => d.tabela === voiceProfiles);
+    expect(insercao).toBeGreaterThanOrEqual(0);
+    expect(delecaoDoPerfil).toBeGreaterThanOrEqual(0);
+    // A inserção vem antes de qualquer DELETE do plano.
+    expect(ordemDosEfeitos.indexOf("delete")).toBeGreaterThan(insercao);
+    expect(delecoes.find(d => d.tabela === voiceProfiles)?.colunas).toEqual(["owner_id", "id"]);
+    expect(delecoes.some(d => d.tabela === voiceProfileConsents)).toBe(false);
+    expect(relatorio.passos.map(p => p.nome)).toContain("voice_profile_consents (revogação, INSERT)");
+  });
+
+  it("sem perfil, nenhuma revogação é registrada", async () => {
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(insercoes.some(i => i.tabela === voiceProfileConsents)).toBe(false);
+  });
+
+  const AMOSTRA = "perfis-de-voz/open-7/amostra.webm";
+  const delecaoDoPerfil = () => delecoes.find(d => d.tabela === voiceProfiles);
+
+  it("sem falha, sai a linha do perfil cuja amostra saiu do bucket, pelo id e pela dona", async () => {
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: AMOSTRA }]);
+    await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(apagadosNoBucket).toContain(AMOSTRA);
+    expect(renderizar(delecaoDoPerfil()!.condicao)).toEqual({
+      sql: "(`voice_profiles`.`owner_id` = ? and `voice_profiles`.`id` in (?))",
+      params: ["open-7", "perfil-1"],
+    });
+  });
+
+  it("o bucket recusou SÓ a amostra: a linha do perfil fica (é o único ponteiro para a voz), e o resto sai", async () => {
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: AMOSTRA }]);
+    bucketFalha.add(AMOSTRA);
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(relatorio.arquivosComFalha).toEqual([AMOSTRA]);
+    // O DELETE do perfil não casa nenhuma linha: a varredura a acha sem a conta.
+    expect(renderizar(delecaoDoPerfil()!.condicao).params).toEqual(["open-7"]);
+    expect(renderizar(delecaoDoPerfil()!.condicao).sql).toMatch(/and false\)$/);
+    // O áudio de reunião, que não falhou, sai como sempre; a conta também.
+    expect(apagadosNoBucket).toContain("meetings/open-7/reuniao-1/recording.webm");
+    expect(delecoes.some(d => d.tabela === users)).toBe(true);
+  });
+
+  it("o perfil regravado depois da leitura das chaves fica: a amostra nova não foi tentada", async () => {
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: AMOSTRA }]);
+    // A regravação acontece enquanto a exclusão fala com o bucket.
+    const regravandoNoMeio = async (chave: string) => {
+      await apagarArquivo(chave);
+      linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: "perfis-de-voz/open-7/nova.webm" }]);
+    };
+    await excluirConta(fakeDb, CONTA, { apagarArquivo: regravandoNoMeio });
+    expect(apagadosNoBucket).toContain(AMOSTRA);
+    expect(apagadosNoBucket).not.toContain("perfis-de-voz/open-7/nova.webm");
+    expect(renderizar(delecaoDoPerfil()!.condicao).sql).toMatch(/and false\)$/);
+  });
+
+  it("a revogação não se repete: se o último evento da dona já é uma revogação, a exclusão não grava outra", async () => {
+    linhasPorTabela.set(voiceProfiles, [{ id: "perfil-1", chave: AMOSTRA }]);
+    // O dublê devolve a mesma linha para a última revogação e o último consentimento: a mesma hora conta como revogado.
+    linhasPorTabela.set(voiceProfileConsents, [{ quando: 1_000, versao: "perfil-de-voz-2026-11-25" }]);
+    const relatorio = await excluirConta(fakeDb, CONTA, { apagarArquivo });
+    expect(insercoes.some(i => i.tabela === voiceProfileConsents)).toBe(false);
+    expect(relatorio.passos.map(p => p.nome)).not.toContain("voice_profile_consents (revogação, INSERT)");
   });
 });

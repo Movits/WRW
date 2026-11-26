@@ -346,6 +346,11 @@ export class GeminiSemTextoError extends Error {
  * - O raciocínio vai sempre no nível baixo (raciocinioBaixo), dentro do teto de
  *   saída; os prazos e o teto de saída vêm de quem chama, e o padrão é o da
  *   parte do áudio.
+ * - `antes`: arquivos que vão ANTES do principal, cada um com o texto que o
+ *   apresenta (a amostra da voz da dona, H3d, server/perfil-de-voz.ts). Com
+ *   eles, o principal ganha o texto `rotuloDoPrincipal`, para o modelo não
+ *   confundir os dois. Cada um passa pelo mesmo teto; sem eles, o corpo é o
+ *   de sempre.
  * - `reservaSoAteMs`: a reserva só é tentada se o modelo principal desistiu
  *   antes desse tempo, contado do começo da chamada. Sem ele, a reserva vem
  *   sempre que o principal está lotado. Quem trabalha contra a varredura de
@@ -363,13 +368,23 @@ export async function gerarComArquivoNoGemini(input: {
   timeoutMs?: number;
   orcamentoMs?: number;
   reservaSoAteMs?: number;
+  antes?: ReadonlyArray<{ texto: string; bytes: Buffer; mimeType: string }>;
+  rotuloDoPrincipal?: string;
 }): Promise<{ texto: string; modelo: string }> {
   const teto = Math.min(input.tetoInlineBytes, TETO_INLINE_DO_GEMINI_BYTES);
-  if (!input.bytes.length || input.bytes.length > teto) throw new ArquivoForaDoTetoDoGeminiError(input.bytes.length, teto);
+  for (const arquivo of [...(input.antes ?? []), input]) {
+    if (!arquivo.bytes.length || arquivo.bytes.length > teto) throw new ArquivoForaDoTetoDoGeminiError(arquivo.bytes.length, teto);
+  }
   const dados = input.bytes.toString("base64");
+  const antes = (input.antes ?? []).flatMap(arquivo => [
+    { text: arquivo.texto },
+    { inline_data: { mime_type: arquivo.mimeType, data: arquivo.bytes.toString("base64") } },
+  ]);
   const corpo = (modelo: string) => ({
     contents: [{ parts: [
       { text: input.prompt },
+      ...antes,
+      ...(antes.length && input.rotuloDoPrincipal ? [{ text: input.rotuloDoPrincipal }] : []),
       { inline_data: { mime_type: input.mimeType, data: dados } },
     ] }],
     generationConfig: {
@@ -414,15 +429,32 @@ export async function gerarComArquivoNoGemini(input: {
   return { texto, modelo };
 }
 
+/** O tipo do áudio como o Gemini o nomeia. */
+function tipoDoAudioNoGemini(mimeType: string): string {
+  return mimeType === "audio/mpeg" ? "audio/mp3" : mimeType === "audio/m4a" ? "audio/mp4" : mimeType;
+}
+
 /**
  * A transcrição de uma parte da gravação em partes (server/transcricao-de-fatia.ts):
- * o áudio inline, com o teto da parte, pela chamada genérica.
+ * o áudio inline, com o teto da parte, pela chamada genérica. Com a amostra
+ * da voz da dona (H3d), ela vai antes do trecho, cada um com o texto que o
+ * apresenta.
  */
-export async function gerarComAudioNoGemini(input: { audio: Buffer; mimeType: string; prompt: string; esquemaJson?: unknown }): Promise<{ texto: string; modelo: string }> {
-  const geminiMimeType = input.mimeType === "audio/mpeg" ? "audio/mp3" : input.mimeType === "audio/m4a" ? "audio/mp4" : input.mimeType;
+export async function gerarComAudioNoGemini(input: {
+  audio: Buffer;
+  mimeType: string;
+  prompt: string;
+  esquemaJson?: unknown;
+  amostraDaVoz?: { audio: Buffer; mimeType: string; texto: string; rotuloDoTrecho: string };
+}): Promise<{ texto: string; modelo: string }> {
+  const amostra = input.amostraDaVoz;
   return gerarComArquivoNoGemini({
-    bytes: input.audio, mimeType: geminiMimeType, prompt: input.prompt, esquemaJson: input.esquemaJson,
+    bytes: input.audio, mimeType: tipoDoAudioNoGemini(input.mimeType), prompt: input.prompt, esquemaJson: input.esquemaJson,
     tetoInlineBytes: TETO_INLINE_DO_AUDIO_BYTES,
+    ...(amostra ? {
+      antes: [{ texto: amostra.texto, bytes: amostra.audio, mimeType: tipoDoAudioNoGemini(amostra.mimeType) }],
+      rotuloDoPrincipal: amostra.rotuloDoTrecho,
+    } : {}),
   });
 }
 

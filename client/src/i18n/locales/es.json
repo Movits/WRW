@@ -1829,6 +1829,7 @@
       "blockersHeading": "Bloqueos, dependencias y restricciones",
       "openQuestionsHeading": "Cuestiones pendientes",
       "toReview": "Por revisar",
+      "backFromIgnored": "Habías ignorado este elemento y la IA lo volvió a incluir al rehacer el resumen. Confírmalo o vuelve a ignorarlo.",
       "confirm": "Confirmar",
       "ignore": "Ignorar",
       "assignee": "Responsable: {{nome}}",
@@ -3277,6 +3278,42 @@
       "errors": {
         "stillInAgenda": "Esta reunión sigue en tu agenda. Actualiza la página."
       }
+    }
+  },
+  "perfilDeVoz": {
+    "title": "Perfil de voz",
+    "subtitle": "Para que tus reuniones reconozcan tu voz y muestren tu nombre en lo que dices.",
+    "intro": "Graba unos {{segundos}} segundos de tu voz leyendo en voz alta el texto de abajo. En las próximas reuniones que grabes, tu habla saldrá con tu nombre, y no \"Hablante 1\". Si el reconocimiento se equivoca, lo corriges en \"Quién es cada voz\", como ya lo haces hoy.",
+    "readAloud": "Lee en voz alta",
+    "textToRead": "Buenos días. Esta es mi voz, grabada para que Marquesa Global Match me reconozca en las reuniones. Hablo a mi ritmo de siempre, como en una conversación de trabajo. Hoy voy a contar lo que hice esta semana, cuáles son los próximos pasos y con quién necesito hablar. También aparecen números, nombres y fechas: dos mil veintiséis, quince de marzo, treinta y siete personas. Gracias por escuchar.",
+    "consent": "Autorizo a Marquesa Global Match a crear un perfil de mi voz para identificarme en las transcripciones y resúmenes de las reuniones.",
+    "consentSupport": "El perfil de voz es un dato biométrico. Se usa solo para este fin, no es obligatorio para usar la plataforma y puede desactivarse en cualquier momento. Al desactivarlo, el perfil se elimina.",
+    "needsConsent": "Para grabar, marca la autorización de arriba.",
+    "record": "Grabar mi voz",
+    "stop": "Detener y guardar",
+    "saving": "Guardando...",
+    "cancel": "Cancelar",
+    "listen": "Escuchar",
+    "rerecord": "Volver a grabar",
+    "turnOff": "Desactivar y eliminar",
+    "turnOffConfirm": "Desactivar el perfil de voz elimina definitivamente la grabación de tu voz. Las reuniones que grabes a partir de ahora ya no reconocerán tu voz por sí solas. ¿Desactivar?",
+    "turnOffYes": "Sí, desactivar y eliminar",
+    "turningOff": "Eliminando...",
+    "active": "Perfil de voz activado (grabado el {{data}}).",
+    "howItWorks": "Las próximas reuniones que grabes muestran tu habla con tu nombre. Si se equivoca, corrígelo en \"Quién es cada voz\".",
+    "tooShort": "La grabación quedó corta. Lee el texto completo: son al menos {{segundos}} segundos.",
+    "micError": "No se pudo usar el micrófono. Revisa el permiso del navegador e inténtalo de nuevo.",
+    "unsupported": "Este navegador no graba audio. Prueba con Chrome, Edge o Safari actualizados.",
+    "toast": {
+      "saved": "Perfil de voz guardado.",
+      "deleted": "Perfil de voz desactivado y eliminado."
+    },
+    "erros": {
+      "consentimentoPedido": "Para crear el perfil de voz, marca la autorización.",
+      "amostraInvalida": "No se pudo usar la grabación. Graba de nuevo, leyendo el texto completo (hasta 1 minuto).",
+      "semPerfil": "No hay un perfil de voz grabado.",
+      "demais": "Demasiadas grabaciones en poco tiempo. Inténtalo de nuevo dentro de una hora.",
+      "bucket": "No pudimos terminar ahora. No cambió nada; inténtalo de nuevo en unos momentos."
     }
   },
   "googleAgenda": {

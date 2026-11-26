@@ -430,6 +430,22 @@ describe("contexto entre as partes", () => {
     expect(ctx.falantes).toEqual(["F1", "F2", "F10"]);
   });
 
+  it("T22: a mesma voz mantém o rótulo ao interromper, falar por cima ou responder curto, na primeira parte e nas seguintes; rótulo novo só para voz que ainda não falou", () => {
+    const primeira = promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 600 });
+    const seguinte = promptDaFatia({ idioma: "pt-BR", duracaoSegundos: 600, anterior: { falantes: ["F1", "F2", "F3"], ultimasFalas: [{ inicio: 1, fim: 2, falante: "F3", texto: "oi" }] } });
+    for (const prompt of [primeira, seguinte]) {
+      expect(prompt).toContain("também quando interrompe outra pessoa, fala ao mesmo tempo que ela");
+      expect(prompt).toContain("Interrupção, fala sobreposta e resposta curta não são sinal de voz nova");
+      expect(prompt).toContain("crie um novo só para uma voz que ainda não falou");
+      expect(prompt).toContain("Na fala sobreposta, cada voz é um item, com o próprio rótulo.");
+      expect(prompt).toContain("Nunca use nomes de pessoas no rótulo.");
+      // Sem "na dúvida, o rótulo antigo": juntar duas pessoas não tem conserto pelo texto.
+      expect(prompt).not.toMatch(/na dúvida/i);
+    }
+    expect(seguinte).toContain("Vozes já identificadas: F1, F2, F3. Reconheça as mesmas vozes e use os mesmos rótulos, também quando a voz só reaparece no meio de uma interrupção");
+    expect(seguinte).toContain("F3: oi");
+  });
+
   it("parte sem fala nenhuma passa adiante as últimas falas de antes", () => {
     const antes = { falantes: ["F1"], ultimasFalas: [{ inicio: 1, fim: 2, falante: "F1", texto: "oi" }] };
     expect(contextoParaAProxima([], antes)).toEqual(antes);
