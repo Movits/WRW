@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'org.wrwglobal'
+version = '0.1.0'
+
+android {
+  namespace "org.wrwglobal.chavesnawebview"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+}
+
+dependencies {
+  // A mesma versão que o react-native-webview 14 usa: setWebAuthenticationSupport
+  // existe desde a 1.12.0.
+  implementation "androidx.webkit:webkit:1.14.0"
+}
