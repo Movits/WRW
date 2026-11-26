@@ -117,6 +117,36 @@ describe.skipIf(!temBanco)("Reunião gravada em partes no banco (integração)",
     expect(await partes(id)).toHaveLength(1);
   });
 
+  // G14, parte 2: o recuo do corte manda inteiro, como uma parte só, o arquivo
+  // que o corte do navegador não lê; o codec fora da lista do Gemini (aqui, o
+  // ADPCM no WAV) vira MP3 antes da linha e do bucket. O conversor é um dublê
+  // (o ffmpeg de verdade está em recuo-do-corte-nas-partes.test.ts).
+  it("recuo do corte: a parte num codec que o Gemini não lista é guardada em MP3, com a duração do MP3; o reenvio do mesmo arquivo se reconhece", async () => {
+    const { id } = await iniciar();
+    const adpcm = wav(4);
+    adpcm.writeUInt16LE(2, 20);
+    const mp3DeMentira = wav(3, 5);
+    const converter = vi.fn(async () => mp3DeMentira);
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      expect(await receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: adpcm }, { converter })).toEqual({ seq: 0, repetida: false });
+      expect(converter).toHaveBeenCalledWith(adpcm, "audio/wav", DURACAO_MAXIMA_DA_PARTE_SEGUNDOS);
+      const [linha] = await partes(id);
+      expect(linha).toMatchObject({ status: "received", mimeType: "audio/mpeg", durationMs: 3000, sizeBytes: mp3DeMentira.length });
+      expect(linha.storageKey).toMatch(/\.mp3$/);
+      expect(storagePut.mock.calls[0][1]).toBe(mp3DeMentira);
+      expect(storagePut.mock.calls[0][2]).toBe("audio/mpeg");
+      expect(await receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: adpcm }, { converter })).toEqual({ seq: 0, repetida: true });
+      expect(await partes(id)).toHaveLength(1);
+      // O WAV em PCM vai como chegou, sem passar pelo conversor.
+      await receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wav(2) }, { converter });
+      expect(converter).toHaveBeenCalledTimes(2);
+      expect((await partes(id)).find(p => p.seq === 1)).toMatchObject({ mimeType: "audio/wav" });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("dois envios da mesma parte ao mesmo tempo: uma linha só", async () => {
     const { id } = await iniciar();
     const audio = wav(2);

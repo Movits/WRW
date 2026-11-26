@@ -160,6 +160,11 @@ export const FORMATO_DA_FICHA = /^[A-Za-z0-9_-]{32}$/;
  * preparação dá certo e só volta quando a ficha vence sem uso ou quando o
  * download termina, de qualquer jeito. Em memória, como os tetos dos outros
  * procedimentos: o Render roda uma instância.
+ *
+ * O teto é dos ffmpeg da instância (1 CPU), e não só do download: a conversão
+ * da parte do recuo do corte em MP3 (G14, parte 2, server/fatias-de-reuniao.ts)
+ * toma uma vaga do mesmo balcão enquanto o ffmpeg dela roda (tentarConverter),
+ * e o download que chega com as vagas tomadas recebe AUDIO_OCUPADO, como sempre.
  */
 export function criarBalcaoDoAudio(opcoes: { limite?: number; validadeMs?: number; relogio?: () => number } = {}) {
   const limite = opcoes.limite ?? CONVERSOES_DE_AUDIO_SIMULTANEAS;
@@ -168,15 +173,17 @@ export function criarBalcaoDoAudio(opcoes: { limite?: number; validadeMs?: numbe
   const fichas = new Map<string, { ficha: FichaDoAudio; venceEm: number }>();
   let reservas = 0;
   let emCurso = 0;
+  let convertendo = 0;
   const varrer = () => {
     const agora = relogio();
     fichas.forEach((guardada, numero) => { if (guardada.venceEm <= agora) fichas.delete(numero); });
   };
+  const tomadas = () => reservas + fichas.size + emCurso + convertendo;
   return {
     /** Reserva uma vaga, ou recusa com AUDIO_OCUPADO. A vaga vira ficha (emitir) ou volta (soltar). */
     reservar() {
       varrer();
-      if (reservas + fichas.size + emCurso >= limite) {
+      if (tomadas() >= limite) {
         throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: RECUSAS_DO_AUDIO.ocupado });
       }
       reservas++;
@@ -219,16 +226,32 @@ export function criarBalcaoDoAudio(opcoes: { limite?: number; validadeMs?: numbe
         },
       };
     },
-    /** Quantas vagas estão tomadas agora (reservas, fichas no prazo e downloads em curso). */
+    /**
+     * A vaga de uma conversão da rota das partes (G14, parte 2): devolve quem a
+     * solta, ou null com as vagas tomadas. Soltar duas vezes não devolve duas.
+     */
+    tentarConverter(): (() => void) | null {
+      varrer();
+      if (tomadas() >= limite) return null;
+      convertendo++;
+      let solta = false;
+      return () => {
+        if (solta) return;
+        solta = true;
+        convertendo--;
+      };
+    },
+    /** Quantas vagas estão tomadas agora (reservas, fichas no prazo, downloads e conversões em curso). */
     ocupadas() {
       varrer();
-      return reservas + fichas.size + emCurso;
+      return tomadas();
     },
     /** Só os testes: zera o balcão. */
     esquecer() {
       fichas.clear();
       reservas = 0;
       emCurso = 0;
+      convertendo = 0;
     },
   };
 }
@@ -237,6 +260,28 @@ export type BalcaoDoAudio = ReturnType<typeof criarBalcaoDoAudio>;
 
 /** O balcão da instância. */
 export const balcaoDoAudio = criarBalcaoDoAudio();
+
+/** Quanto a parte do recuo do corte espera uma vaga de ffmpeg antes da recusa passageira. */
+export const ESPERA_PELA_VAGA_DE_CONVERSAO_MS = 10_000;
+const PASSO_DA_ESPERA_PELA_VAGA_MS = 250;
+
+/**
+ * A fila curta da conversão da parte: tenta a vaga do balcão e, com as vagas
+ * tomadas, tenta de novo a cada 250 ms, até `esperaMs`. Sem vaga no prazo,
+ * devolve null, e a rota das partes responde a recusa passageira (503
+ * TENTE_DE_NOVO), que a tela manda de novo depois da espera dela.
+ */
+export async function esperarVagaDeConversao(
+  balcao: Pick<BalcaoDoAudio, "tentarConverter"> = balcaoDoAudio,
+  esperaMs = ESPERA_PELA_VAGA_DE_CONVERSAO_MS,
+  esperar: (ms: number) => Promise<void> = ms => new Promise(pronto => setTimeout(pronto, ms)),
+): Promise<(() => void) | null> {
+  for (let esperado = 0; ; esperado += PASSO_DA_ESPERA_PELA_VAGA_MS) {
+    const soltar = balcao.tentarConverter();
+    if (soltar || esperado >= esperaMs) return soltar;
+    await esperar(PASSO_DA_ESPERA_PELA_VAGA_MS);
+  }
+}
 
 /** Até 32 MB por parte lida: a parte tem até 16 MB (TAMANHO_MAXIMO_DA_PARTE), e o envio único, até 10 MB. */
 export const LIMITE_DA_PARTE_LIDA = 32 * 1024 * 1024;

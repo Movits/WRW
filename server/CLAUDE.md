@@ -16,22 +16,30 @@ compression, cabeçalhos de segurança, bloqueio de scanners, rate limit global,
 parsers, proxy de storage, tRPC em `/api/trpc` e, por fim, Vite em middleware (dev) ou
 estático de `dist/public` (prod). Não há proxy de dev: front e API na mesma origem.
 
-Body parsers: 5 MB por padrão e 15 MB em SETE procedimentos de upload —
-`meetings.submitRecording`, `meetings.anexarAoResumo` (as fotos e os desenhos do resumo,
-H4g e H4h), `contexts.uploadMedia`, `network.uploadPhoto`,
-`network.uploadCard`, `dealRoom.uploadDocument` e `sivc.uploadDocument`. Antes deles vem
+Body parsers: 5 MB por padrão e 15 MB em SEIS procedimentos de upload —
+`meetings.anexarAoResumo` (as fotos e os desenhos do resumo, H4g e H4h),
+`contexts.uploadMedia`, `network.uploadPhoto`, `network.uploadCard`,
+`dealRoom.uploadDocument` e `sivc.uploadDocument`. Antes deles vem
 `corpoGrandeParaUploads` (`_core/corpo-grande-para-uploads.ts`), que reconhece os mesmos
 procedimentos quando chegam dentro de um LOTE do tRPC (`/api/trpc/a,b` não casa com
-nenhum recorte por caminho). Upload novo entra nos dois lugares. O lote tem teto: até
-`CHAMADAS_POR_LOTE_MAX` chamadas (50, `shared/lote-do-trpc.ts`), e o navegador corta os
-dele em 20, porque o limite da API conta o lote inteiro como um pedido.
+nenhum recorte por caminho). Upload novo entra nos dois lugares, e
+`server/corpo-grande-para-uploads.test.ts` confere que as duas listas batem. O lote tem
+teto: até `CHAMADAS_POR_LOTE_MAX` chamadas (50, `shared/lote-do-trpc.ts`), e o navegador
+corta os dele em 20, porque o limite da API conta o lote inteiro como um pedido.
 
-`meetings.submitRecording` (o envio único: o áudio inteiro, em base64, até 10 min e 10 MB)
-não é mais caminho do gravador desde a G14: a tela só o chama no recuo do corte (o arquivo
-curto de um formato que o corte reconhece mas não lê), com `recuoDoCorte: true`, e cada
-chamada deixa no log a linha `[Reuniões] envio único (submitRecording)`, com a marca ou sem
-ela (a sem marca é de um cliente de fora do app). Áudio novo de reunião vai pela rota das
-partes, abaixo.
+O envio único (`meetings.submitRecording`: o áudio inteiro, em base64, até 10 min e 10 MB)
+saiu na G14, parte 2 (25/11/2026, com o aval do Roberto). Todo áudio novo de reunião chega
+pela rota das partes, abaixo, também o recuo do corte: o arquivo curto de um formato que o
+corte do navegador reconhece mas não lê (o ALAC do Gravador do iPhone, o AC-3, o Vorbis no
+WebM) vai inteiro, como uma parte só. A rota converte em MP3, com o ffmpeg contido de
+`server/conversao-do-audio.ts` (`converterParteEmMp3`), a parte de um codec que o Gemini não
+lista (`precisaConverterParaOGemini`, em `server/fatias-de-reuniao.ts`; o codec sai de
+`analisarAudio`, em `server/duracao-do-audio.ts`), e a que não converte é recusada com
+`FORMATO`, que a tela traduz. A conversão toma uma vaga do mesmo balcão dos ffmpeg do
+"Baixar o áudio" (`balcaoDoAudio.tentarConverter`, `CONVERSOES_DE_AUDIO_SIMULTANEAS` = 2, a
+instância tem 1 CPU), numa fila curta de até 10 s (`esperarVagaDeConversao`); sem vaga, a
+recusa é passageira (503 `TENTE_DE_NOVO`), e a tela manda a parte de novo. A LEITURA da
+gravação inteira das reuniões antigas (`meeting_recordings`) fica: o reprocesso e a junção a leem com os tetos do envio único.
 
 A exceção é binária: as partes da reunião gravada em partes chegam por
 `POST /api/reunioes/{meetingId}/partes/{seq}` (`_core/rota-das-partes.ts`, até 16 MB de áudio
@@ -462,7 +470,8 @@ sem ele).
 
 ## Reunião que falha na IA se reprocessa pelo áudio guardado
 
-`processMeetingRecording` guarda o áudio no bucket antes da IA; `meetings.reprocess`
+`processMeetingRecording` (o envio único de antes, sem rota desde a G14, parte 2) guardava o
+áudio no bucket antes da IA; `meetings.reprocess`
 (`iniciarReprocessamento` em `server/meeting-service.ts`) lê esses bytes de volta
 (`storageGetBytes`) e roda de novo transcrição e extração, sem gravar áudio nem renovar os
 30 dias. Cada execução tem uma FICHA: o `updated_at` que ela grava ao tomar a reunião para

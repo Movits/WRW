@@ -68,7 +68,7 @@ vi.mock("@/lib/trpc", () => ({
       compartilhadasComigo: { useQuery: () => ({ data: { reunioes: [], convites: [] } }) },
       responderConviteDeConexao: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
       ...Object.fromEntries([
-        "create", "submitRecording", "decideEntity", "decideContactSuggestion", "translateTranscript", "delete", "reprocess",
+        "decideEntity", "decideContactSuggestion", "translateTranscript", "delete", "reprocess",
         "resumirVideoDoYoutube", "refazerVideoDoYoutube", "pedirResumo", "refazerResumo", "decidirItemDoResumo", "confirmarItensDoResumo", "audioDoResumo", "pedirComplemento", "decidirComplemento",
         "marcarAcaoFeita", "traduzirResumo", "perguntar", "perguntarDuranteAGravacao", "rascunharEmailDeRetorno", "ligarLinkAberto",
         "desligarLinkAberto", "novaSenhaDoLink", "tirarSenhaDoLink", "mudarAudioDoLink", "mandarParaALixeira",

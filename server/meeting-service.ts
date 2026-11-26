@@ -61,9 +61,7 @@ import { foraDaLixeira, reuniaoForaDeVista, reuniaoVisivel } from "./reuniao-vis
 /**
  * Os tetos do ENVIO ÚNICO (10 MB e 10 min), que moram em shared/const.ts porque
  * a tela confere os mesmos. Os nomes de sempre ficam aqui para os imports não
- * mudarem; quem os usa é o envio único (desde a G14, só o recuo do corte do
- * arquivo e um cliente de fora do app, se houver: ver meetings.submitRecording)
- * e a leitura da gravação inteira das reuniões antigas, no reprocesso e na
+ * mudarem; quem os usa é a leitura da gravação inteira das reuniões antigas, no reprocesso e na
  * junção (server/juntar-reunioes.ts). A gravação em partes não passa por eles:
  * tem o teto próprio (GRAVACAO_EM_PARTES_SEGUNDOS_MAX, em
  * server/fatias-de-reuniao.ts), que desde a G13b é também o limite por reunião
@@ -88,8 +86,8 @@ export const MEETING_AUDIO_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /**
  * A recusa da duração no envio único. Dizia "No modo atual, cada reunião pode
  * ter no máximo 10 minutos", o que deixou de valer na G13b (a reunião em partes
- * vai até 12 h): o teto é só do envio de um arquivo só, que desde a G14 sobra no
- * recuo do corte e num cliente de fora do app (meetings.submitRecording).
+ * vai até 12 h): o teto é só do envio de um arquivo só (processMeetingRecording),
+ * cuja rota (meetings.submitRecording) saiu na G14, parte 2 (25/11/2026).
  */
 export const MENSAGEM_REUNIAO_LONGA_DEMAIS = "Este áudio passa dos 10 minutos que o envio de um arquivo só aceita.";
 export const MENSAGEM_DURACAO_ILEGIVEL = "Não foi possível ler a duração deste áudio. Envie o arquivo em MP3, M4A, WAV, OGG ou WebM.";

@@ -22,17 +22,12 @@ import { decidirPendenciasDaPessoaSugerida } from "../network-extracao";
 import { candidatosParaVincular, conexoesDaReuniao } from "../reuniao-no-match";
 import { hasValidConsent } from "./consent";
 import {
-  ALLOWED_MEETING_AUDIO_TYPES,
   deletePrivateMeeting,
   getPrivateMeeting,
   iniciarReprocessamento,
   listPrivateMeetings,
-  MAX_MEETING_DURATION_SECONDS,
   MEETING_TRANSCRIPT_LANGUAGES,
-  processMeetingRecording,
   ReprocessamentoRecusado,
-  ReuniaoForaDoEstado,
-  ReuniaoTomadaPorOutraExecucao,
   translatePrivateMeetingTranscript,
   nomearFalante,
   NomesSoComReuniaoPronta,
@@ -440,10 +435,11 @@ export const meetingsRouter = router({
     return data;
   }),
 
-  // O envio único (meetings.submitRecording) nasce aqui. Desde a G14 a tela só
-  // o usa para importar um arquivo (o recuo do corte), e manda a origem
-  // 'arquivo': sem ela, a reunião ficava fora do filtro "Importadas" (H7d).
-  // A origem segue opcional para a aba aberta antes disto, que fica nula.
+  // A reunião do envio único nascia aqui, e o áudio vinha depois pelo
+  // meetings.submitRecording, que saiu na G14, parte 2 (25/11/2026): a tela não
+  // chama mais este procedimento, e toda reunião com áudio nasce pelo
+  // iniciarGravacao. Ele fica por enquanto (os testes de detalhes e de idioma
+  // ainda o usam); a reunião que nasce aqui não recebe áudio.
   create: procedimentoDaReuniao.input(createMeetingInput.extend({
     origem: z.enum(["gravacao", "arquivo"]).optional(),
   })).mutation(async ({ ctx, input }) => {
@@ -516,42 +512,6 @@ export const meetingsRouter = router({
         }
         throw erro;
       }
-    }),
-
-  // O envio único: o áudio inteiro, em base64, num pedido só, até 10 min e 10
-  // MB. Desde a G14 o gravador do app não o usa mais (a gravação e o arquivo
-  // vão em partes, pela rota das partes); a tela só o chama no recuo do corte,
-  // o arquivo curto de um formato que o corte reconhece mas não lê (ALAC,
-  // AC-3, o Vorbis no WebM), e manda `recuoDoCorte: true`. Ele fica aqui por
-  // esse recuo e por um cliente de fora do repositório que ainda o chame (o
-  // "app Expo" que o shared/const.ts cita): cada chamada deixa no log uma
-  // linha, com a marca ou sem ela, e a chamada sem a marca é a desse cliente.
-  // Tirar a rota, ou levar o recuo às partes, espera uma semana desse log
-  // (docs/arquitetura/gravador-de-reunioes.md, G14). Os tetos ficam também
-  // porque o reprocesso e a junção leem a gravação inteira das reuniões
-  // antigas com eles (meeting-service.ts e juntar-reunioes.ts).
-  submitRecording: procedimentoDaReuniao
-    .input(z.object({
-      meetingId: z.string().uuid(),
-      audioBase64: z.string().min(20).max(14_000_000),
-      mimeType: z.enum(ALLOWED_MEETING_AUDIO_TYPES),
-      durationSeconds: z.number().positive().max(MAX_MEETING_DURATION_SECONDS),
-      language: idiomaDaReuniaoNaEntrada,
-      recuoDoCorte: z.literal(true).optional(),
-    }))
-    .mutation(async ({ ctx, input }) => {
-      const { recuoDoCorte, ...envio } = input;
-      console.info(`[Reuniões] envio único (submitRecording): ${recuoDoCorte ? "recuo do corte do arquivo" : "sem a marca do recuo do corte (cliente de fora do app?)"}, ${envio.mimeType}`);
-      let result: Awaited<ReturnType<typeof processMeetingRecording>>;
-      try {
-        result = await processMeetingRecording({ ...envio, ownerId: ctx.user.openId });
-      } catch (erro) {
-        if (erro instanceof ReuniaoForaDoEstado || erro instanceof ReuniaoTomadaPorOutraExecucao) {
-          throw new TRPCError({ code: "CONFLICT", message: erro.message });
-        }
-        throw erro;
-      }
-      return { success: true, transcriptLength: result.transcript.length, entities: result.extraction.entities.length, contacts: result.extraction.contacts.length };
     }),
 
   // O resumo de um vídeo do YouTube (H13, server/youtube.ts): a dona cola o

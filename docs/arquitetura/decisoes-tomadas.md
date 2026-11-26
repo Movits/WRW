@@ -820,6 +820,46 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `sala-de-video.md`, com o que ainda falta decidir: compartilhar a tela, a conta no
   Daily, a senha do link de visitante e o que acontece no teto do orçamento.
 
+## 25/11/2026 — o fim do envio único: o recuo do corte vai pelas partes (G14, parte 2)
+
+- **Decisão:** sai a rota `meetings.submitRecording` (o áudio inteiro, em base64, até 10
+  min e 10 MB), com a linha `[Reuniões] envio único` do log, o recorte de 15 MB do body
+  parser e a entrada em `corpoGrandeParaUploads`. Os procedimentos de upload em base64
+  passam de sete a seis. Todo áudio novo de reunião chega pela rota das partes.
+- **Quem e por quê:** o Roberto autorizou em 25/11: ninguém além dos programadores usa o
+  app, e ele quer a estrutura limpa antes da importação de uma base grande de usuárias.
+  A espera de uma semana de log sem chamada sem a marca, que a parte 1 deixou como
+  condição, foi dispensada por essa decisão.
+- **O recuo do corte:** o arquivo curto de um formato que o corte do navegador reconhece
+  mas não lê (o ALAC do Gravador do iPhone, o AC-3, o Vorbis no WebM, o ADPCM no WAV) vai
+  inteiro, como uma parte só, pela importação em partes, quando cabe numa: até 16 MB e,
+  quando o navegador lê a duração, até 12 min. Sem a duração legível (o Chrome não toca o
+  ALAC), ele vai, e o servidor mede nos bytes. Antes eram 10 MB e 10 min, e o arquivo sem
+  a duração legível recebia o aviso de converter.
+- **O que o Gemini aceita:** a página de áudio da documentação (lida em 25/11/2026) lista
+  TIPOS (WAV, MP3, AIFF, AAC, OGG, FLAC, MPEG, M4A, Opus, WebM e alguns crus), e não diz
+  que codec cabe em cada contêiner; o ALAC e o AC-3 não aparecem. Por isso a rota das
+  partes converte em MP3, com o ffmpeg contido do "Baixar o áudio", a parte de um codec
+  fora dos que o app sempre mandou (o Opus no WebM e no Ogg, o AAC no MP4, o Vorbis no
+  Ogg, o MP3, o AAC em ADTS, o FLAC e o WAV em PCM), antes da linha e do bucket. A fila,
+  o player, o "Baixar o áudio" e o reprocesso leem o MP3. A parte que o ffmpeg não
+  converte é recusada com `FORMATO`, que a tela já traduz nos 10 idiomas. A instância tem 1
+  CPU: a conversão toma uma vaga do mesmo balcão dos ffmpeg do "Baixar o áudio" (2 ao
+  mesmo tempo, somando os dois usos), com uma fila curta de até 10 s; sem vaga, a recusa é
+  passageira e a tela manda a parte de novo (ressalva da validação da #262). Nenhuma chamada
+  real ao Gemini foi feita para conferir: a decisão vem da documentação.
+- **O que fica:** a leitura da gravação inteira das reuniões antigas (`meeting_recordings`),
+  pelo reprocesso e pela junção, com os tetos do envio único; o serviço
+  `processMeetingRecording`, sem rota, que os testes usam para montar essas reuniões; e o
+  `meetings.create`, que a tela não chama mais (os testes de detalhes e de idioma ainda o
+  usam; tirá-lo é o passo seguinte).
+- **Onde:** `server/fatias-de-reuniao.ts` (`precisaConverterParaOGemini` e
+  `receberParte`), `server/conversao-do-audio.ts` (`converterParteEmMp3`),
+  `server/duracao-do-audio.ts` (`analisarAudio`), `shared/const.ts`
+  (`PARTE_NO_SERVIDOR_BYTES_MAX` e `PARTE_NO_SERVIDOR_SEGUNDOS_MAX`),
+  `client/src/hooks/useImportacaoEmPartes.ts` (o `recuo` do `importar`) e
+  `client/src/pages/Meetings.tsx` (`recuoDoCorte`). Sem migração.
+
 ## 11/11/2026 — o motor de perfis aplica a regra dos concorrentes (N6)
 
 - **Quem:** o Roberto, em 11/11, confirmado depois (item N6 do plano).

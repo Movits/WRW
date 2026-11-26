@@ -511,3 +511,76 @@ export async function codificarVozEmMp3(
     clearTimeout(prazo);
   }
 }
+
+/** O prazo do ffmpeg que converte a parte de um codec que o Gemini não lista (12 min de áudio). */
+export const PRAZO_DA_PARTE_CONVERTIDA_MS = 120_000;
+/** O MP3 da parte convertida nunca passa disto: 12 min a 64 kbps são ~5,8 MB. */
+export const PARTE_CONVERTIDA_MAX_BYTES = 16 * 1024 * 1024;
+
+/** O ffmpeg que lê a parte do arquivo e escreve o MP3 (mono, 24 kHz, a taxa do áudio baixado), no máximo `segundos`. */
+export function argumentosDaParteEmMp3(arquivo: string, segundos: number): string[] {
+  return [
+    "-hide_banner", "-nostdin", "-loglevel", "error",
+    "-protocol_whitelist", "file", "-format_whitelist", FORMATOS_LIDOS, "-codec_whitelist", DECODIFICADORES,
+    "-i", arquivo,
+    "-map", "0:a:0", "-vn", "-sn", "-dn", "-t", String(segundos),
+    "-ac", "1", "-ar", String(AMOSTRAS_POR_SEGUNDO_DO_AUDIO),
+    "-c:a", "libmp3lame", "-b:a", `${BITS_POR_SEGUNDO_DO_AUDIO / 1000}k`, "-write_xing", "0", "-id3v2_version", "0", "-f", "mp3", "pipe:1",
+  ];
+}
+
+/**
+ * A parte de um codec que o Gemini não lista, em MP3 (G14, parte 2): o recuo do
+ * corte manda inteiro, como uma parte só, o arquivo curto que o corte do
+ * navegador reconhece mas não lê (o ALAC do Gravador do iPhone, o AC-3, o
+ * Vorbis no WebM), e a rota das partes o converte antes de guardar
+ * (server/fatias-de-reuniao.ts, precisaConverterParaOGemini). Assim a fila
+ * manda ao Gemini um tipo da lista dele, e o player da tela, o "Baixar o
+ * áudio" e o reprocesso leem um MP3.
+ *
+ * O mesmo ffmpeg contido do "Baixar o áudio" (só o PATH no ambiente, como
+ * nobody com o servidor como root, prioridade baixa, só os formatos e os
+ * decodificadores do áudio da reunião), com o arquivo numa pasta temporária
+ * (o MP4 com o índice no fim só se lê com saltos), apagada no fim. Lança se o
+ * ffmpeg não subir, falhar, passar do prazo ou do tamanho, ou não escrever nada.
+ */
+export async function converterParteEmMp3(
+  bytes: Buffer, mimeType: string, segundosNoMaximo: number,
+  deps: Pick<DependenciasDaConversao, "ffmpeg" | "pastaTemporaria" | "avisar" | "aoIniciar" | "prioridade" | "usuario" | "spawn"> & { prazoMs?: number } = {},
+): Promise<Buffer> {
+  if (!bytes.length) throw new Error("Sem áudio para converter.");
+  const avisar = deps.avisar ?? (mensagem => console.error(mensagem));
+  const controle = new AbortController();
+  const prazo = setTimeout(() => controle.abort(new Error("O ffmpeg passou do prazo da parte convertida.")), deps.prazoMs ?? PRAZO_DA_PARTE_CONVERTIDA_MS);
+  let pasta: string | null = null;
+  let processo: Processo | null = null;
+  try {
+    pasta = await mkdtemp(path.join(deps.pastaTemporaria ?? os.tmpdir(), "wrw-parte-"));
+    await chmod(pasta, 0o711).catch(() => undefined);
+    const arquivo = path.join(pasta, `parte.${EXTENSAO[mimeType] ?? "bin"}`);
+    await writeFile(arquivo, bytes, { mode: 0o644 });
+    processo = await iniciarFfmpeg(deps.ffmpeg ?? "ffmpeg", argumentosDaParteEmMp3(arquivo, Math.ceil(segundosNoMaximo)), controle.signal, {
+      avisar, aoIniciar: deps.aoIniciar, prioridade: deps.prioridade, usuario: deps.usuario, spawn: deps.spawn,
+    });
+    const pedacos: Buffer[] = [];
+    let total = 0;
+    processo.filho.stdout?.on("data", (pedaco: Buffer) => {
+      total += pedaco.length;
+      if (total > PARTE_CONVERTIDA_MAX_BYTES) controle.abort(new Error("O MP3 da parte passou do tamanho máximo."));
+      else pedacos.push(pedaco);
+    });
+    const { codigo, sinal } = await processo.fim;
+    if (controle.signal.aborted) throw controle.signal.reason instanceof Error ? controle.signal.reason : new Error("O ffmpeg foi interrompido.");
+    if (codigo !== 0) throw new Error(`O ffmpeg saiu com ${codigo ?? sinal}: ${processo.erros().slice(0, 300)}`);
+    const mp3 = Buffer.concat(pedacos);
+    if (!mp3.length) throw new Error("O ffmpeg não escreveu o MP3 da parte.");
+    return mp3;
+  } finally {
+    clearTimeout(prazo);
+    if (processo && processo.filho.exitCode === null && processo.filho.signalCode === null) {
+      processo.filho.kill("SIGKILL");
+      await esperarNoMaximo(processo.fim, PRAZO_PARA_OS_FFMPEG_SAIREM_MS);
+    }
+    if (pasta) await rm(pasta, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(() => undefined);
+  }
+}
