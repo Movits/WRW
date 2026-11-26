@@ -35,6 +35,7 @@ function NotifIcon({ type }: { type: string }) {
     new_message: "✉️",
     lembrete: "⏰",
     reuniao_pronta: "🎙️",
+    deal_closed: "🤝",
   };
   return <span className="text-base">{icons[type] ?? "🔔"}</span>;
 }

@@ -1480,7 +1480,27 @@
     "sendDocsSecurely": "Securely send confidential documents.",
     "youLabel": "You",
     "docsProtectedNotice": "All documents shared in this room are protected by the signed NDA. Sharing them outside this platform violates the agreed terms.",
-    "fileSizeKb": "{{size}} KB"
+    "fileSizeKb": "{{size}} KB",
+    "encerrarBotao": "Close and record the deal",
+    "encerrarTitulo": "Record the closed deal",
+    "encerrarSubtitulo": "Payment happens outside the platform. What stays here is the record of what was agreed.",
+    "campoMoeda": "Currency",
+    "campoValor": "Deal value",
+    "campoPercentual": "Agreed commission (%)",
+    "campoComissao": "Commission owed",
+    "campoObservacoes": "Notes",
+    "campoObservacoesPlaceholder": "Anything that helps identify this deal later",
+    "avisoComissaoTitulo": "Commission owed to Marquesa Global Match",
+    "avisoComissaoDetalhe": "Calculated on the intermediation fee, capped at 50%.",
+    "erroTetoComissao": "The agreed commission cannot exceed 50% of the intermediation fee.",
+    "encerrarConfirmar": "Record and close",
+    "encerrarCancelar": "Cancel",
+    "encerrarSucesso": "Deal recorded and negotiation closed.",
+    "encerrarFalha": "The deal could not be recorded.",
+    "encerradaTitulo": "Negotiation closed",
+    "encerradaPagamentoFora": "Payment happens outside the platform; this is the record of what was agreed.",
+    "campoHonorarios": "Intermediation fee",
+    "erroHonorariosMaior": "The intermediation fee cannot be greater than the deal value."
   },
   "meetings": {
     "participants": {

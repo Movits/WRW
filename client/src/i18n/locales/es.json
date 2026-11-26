@@ -1480,7 +1480,27 @@
     "sendDocsSecurely": "Envía documentos confidenciales con seguridad.",
     "youLabel": "Tú",
     "docsProtectedNotice": "Todos los documentos compartidos en esta sala están protegidos por el NDA firmado. Compartirlos fuera de esta plataforma viola los términos acordados.",
-    "fileSizeKb": "{{size}} KB"
+    "fileSizeKb": "{{size}} KB",
+    "encerrarBotao": "Cerrar y registrar el negocio",
+    "encerrarTitulo": "Registrar el negocio cerrado",
+    "encerrarSubtitulo": "El pago ocurre fuera de la plataforma. Lo que queda aquí es el registro de lo acordado.",
+    "campoMoeda": "Moneda",
+    "campoValor": "Valor del negocio",
+    "campoPercentual": "Comisión acordada (%)",
+    "campoComissao": "Comisión debida",
+    "campoObservacoes": "Observaciones",
+    "campoObservacoesPlaceholder": "Lo que ayude a identificar el negocio después",
+    "avisoComissaoTitulo": "Comisión debida a Marquesa Global Match",
+    "avisoComissaoDetalhe": "Calculada sobre los honorarios de intermediación, con tope del 50%.",
+    "erroTetoComissao": "La comisión acordada no puede superar el 50% de los honorarios de intermediación.",
+    "encerrarConfirmar": "Registrar y cerrar",
+    "encerrarCancelar": "Cancelar",
+    "encerrarSucesso": "Negocio registrado y negociación cerrada.",
+    "encerrarFalha": "No se pudo registrar el negocio.",
+    "encerradaTitulo": "Negociación cerrada",
+    "encerradaPagamentoFora": "El pago corre fuera de la plataforma; este es el registro de lo acordado.",
+    "campoHonorarios": "Honorarios de intermediación",
+    "erroHonorariosMaior": "Los honorarios de intermediación no pueden ser mayores que el valor del negocio."
   },
   "meetings": {
     "participants": {
