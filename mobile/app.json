@@ -2,6 +2,7 @@
   "expo": {
     "name": "WRW",
     "slug": "wrw",
+    "owner": "marquesa-match",
     "scheme": "wrw",
     "version": "1.0.0",
     "platforms": ["ios", "android"],
@@ -39,6 +40,11 @@
           "resizeMode": "contain"
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "84ab79e3-08ce-4442-842a-85d333421de6"
+      }
+    }
   }
 }
