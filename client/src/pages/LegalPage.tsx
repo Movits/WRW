@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { TIPOGRAFIA_DO_TERMO, textoDoTermoParaExibir } from "@/components/TermoGeralDeUso";
+import { PoliticaDePrivacidade } from "@/components/PoliticaDePrivacidade";
 
 // Páginas públicas de Privacidade e Termos, para onde o rodapé aponta.
 //
@@ -15,11 +16,12 @@ import { TIPOGRAFIA_DO_TERMO, textoDoTermoParaExibir } from "@/components/TermoG
 // versão que o aceite registra, por um procedimento público que não devolve
 // dado de usuária nenhuma (consent.termoGeralPublico).
 //
-// A Política de Privacidade continua pendente de verdade — é a tarefa "Receber
-// os textos jurídicos da Cris", em aberto no quadro do projeto —, então aquela
-// página segue dizendo que o documento próprio virá, mas para de prometer o que
-// não existe e aponta para as cláusulas de dados do Termo Geral, que estão em
-// vigor hoje.
+// A Política de Privacidade dizia até 25/11/2026 que estava "sendo redigida".
+// Desde então /privacidade mostra a política em documento próprio
+// (components/PoliticaDePrivacidade.tsx): um texto provisório nosso, decidido
+// pelo Roberto em 25/11, que vale até a Cris mandar o definitivo, porque o
+// Google exige a política publicada para verificar o app. Não é versão de termo
+// em document_versions (não tem aceite e não revoga nenhum).
 //
 // As duas telas seguem em pt-BR fixo, como o resto desta página sempre esteve
 // (ver CLAUDE.md): o documento jurídico só existe em português, e traduzir a
@@ -49,25 +51,8 @@ function LegalShell({ title, children, largo = false }: { title: string; childre
 
 export function PrivacyPage() {
   return (
-    <LegalShell title="Política de Privacidade">
-      <p>
-        A política de privacidade em documento próprio está sendo redigida pela
-        assessoria jurídica da plataforma e será publicada nesta página.
-      </p>
-      <p>
-        O que já vale hoje, e vale juridicamente, é o{" "}
-        <Link href="/termos">
-          <span className="text-[#c98f70] underline cursor-pointer">Termo Geral de Uso, Proteção de Dados e Intermediação Digital</span>
-        </Link>
-        , aceito por toda usuária no cadastro: ele trata do tratamento de dados
-        pessoais, da base legal, do prazo de guarda e dos seus direitos.
-      </p>
-      <p>
-        Na prática, e por desenho do produto: a sua base de contatos é privada e
-        nunca é exposta a outras usuárias; o que você escolhe disponibilizar na
-        rede global vai sem nome e sem contato; dados sensíveis ficam guardados
-        de forma cifrada; e nenhuma informação sua é vendida.
-      </p>
+    <LegalShell title="Política de Privacidade" largo>
+      <PoliticaDePrivacidade />
     </LegalShell>
   );
 }

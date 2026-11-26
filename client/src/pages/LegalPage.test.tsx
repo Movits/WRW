@@ -121,15 +121,116 @@ describe("a tela entre uma tentativa e outra", () => {
 });
 
 describe("página pública de Privacidade", () => {
-  it("aponta para o Termo Geral, que é o documento em vigor hoje", () => {
+  // Até 25/11/2026 a página dizia que a política "está sendo redigida". O Google
+  // exige a política publicada para verificar o app (login com Google e Google
+  // Agenda), e o Roberto decidiu publicar já o texto provisório, até a Cris
+  // mandar o definitivo.
+
+  it("não diz mais que a política está sendo redigida", () => {
+    render(<PrivacyPage />);
+
+    expect(document.body.textContent ?? "").not.toMatch(/sendo redigida/i);
+  });
+
+  it("diz no topo que é a versão provisória de 25/11/2026, em revisão jurídica", () => {
+    render(<PrivacyPage />);
+
+    expect(screen.getByText("Versão provisória de 25/11/2026, em revisão pela assessoria jurídica.")).toBeInTheDocument();
+  });
+
+  it("tem as seções principais da política", () => {
+    render(<PrivacyPage />);
+
+    const secoes = screen.getAllByRole("heading", { level: 2 }).map(h => h.textContent ?? "");
+    for (const esperada of [
+      /Quem trata os seus dados/,
+      /Encarregado/,
+      /Que dados tratamos/,
+      /Intelig[êe]ncia artificial/,
+      /compartilhados/,
+      /Transfer[êe]ncia internacional/,
+      /administra[çc][ãa]o [àa]s grava[çc][õo]es/,
+      /Bases legais/,
+      /quanto tempo guardamos/,
+      /Seguran[çc]a/,
+      /direitos/,
+      /Exclus[ãa]o da conta/,
+      /Cookies/,
+      /Menores/,
+      /Altera[çc][õo]es/,
+    ]) {
+      expect(secoes.some(s => esperada.test(s)), `falta a seção ${esperada}`).toBe(true);
+    }
+  });
+
+  it("nomeia a controladora e o canal do Encarregado que o Termo Geral traz", () => {
+    render(<PrivacyPage />);
+
+    const texto = document.body.textContent ?? "";
+    expect(texto).toMatch(/GK Gest[ãa]o Administrativa e de Neg[óo]cios LTDA/);
+    expect(texto).toContain("62.982.808/0001-79");
+    expect(texto).toContain("wrw@wrwglobal.org");
+  });
+
+  it("diz os prazos que o código cumpre: áudio 30 dias, transcrição até a exclusão", () => {
+    render(<PrivacyPage />);
+
+    const texto = document.body.textContent ?? "";
+    expect(texto).toMatch(/[áa]udio[^.]*30 dias/i);
+    expect(texto).toMatch(/transcri[çc][ãa]o[^.]*at[ée] voc[êe] excluir a reuni[ãa]o/i);
+    expect(texto).toContain("art. 33 da LGPD");
+    expect(texto).toContain("art. 18 da LGPD");
+  });
+
+  it("não promete que só a dona acessa a reunião: participantes e membras de equipe também leem", () => {
+    // Achado da validação da #261: a R1b (participantes) e a R2 (equipes) leem
+    // a reunião pronta, e o texto dizia "só você acessa".
+    render(<PrivacyPage />);
+
+    const texto = document.body.textContent ?? "";
+    expect(texto).toMatch(/participantes que\s+voc[êe] convida/);
+    expect(texto).toMatch(/membras da equipe/);
+    expect(texto).not.toMatch(/A reuni[ãa]o [ée] sua: s[óo] voc[êe] acessa/);
+  });
+
+  it("na exclusão da conta, diz o que fica e as exceções dos arquivos no armazenamento", () => {
+    render(<PrivacyPage />);
+
+    const texto = document.body.textContent ?? "";
+    expect(texto).toMatch(/consentimentos e das revoga[çc][õo]es do perfil de voz/);
+    expect(texto).toMatch(/quatro tipos de registro de auditoria/);
+    expect(texto).toMatch(/foto de perfil e os arquivos dos documentos de\s+oportunidade/);
+    expect(texto).toMatch(/aceites dos termos/);
+  });
+
+  it("não condiciona o acesso Ouro a um termo que pode não estar vigente", () => {
+    render(<PrivacyPage />);
+
+    const texto = document.body.textContent ?? "";
+    expect(texto).not.toMatch(/com o seu consentimento ao termo do Smart Match/);
+    expect(texto).toMatch(/Quando o\s+termo de acesso Ouro estiver publicado/);
+  });
+
+  it("cobre a cópia do áudio no aparelho e os escopos openid e email da conexão da Agenda", () => {
+    render(<PrivacyPage />);
+
+    const texto = document.body.textContent ?? "";
+    expect(texto).toMatch(/C[óo]pia do [áa]udio no seu aparelho/);
+    expect(texto).toMatch(/A conex[ãa]o tamb[ée]m pede o identificador e o e-mail/);
+    expect(texto).toMatch(/sala de negocia[çc][ãa]o/);
+  });
+
+  it("usa o nome visível Marquesa Global Match, e não os antigos", () => {
+    render(<PrivacyPage />);
+
+    const texto = document.body.textContent ?? "";
+    expect(texto).toMatch(/Marquesa Global Match/);
+    expect(texto).not.toMatch(/MarquesaMatch|\bWRW\b|Mulheres que Movem/);
+  });
+
+  it("continua apontando para o Termo Geral", () => {
     render(<PrivacyPage />);
 
     expect(screen.getByText(/Termo Geral de Uso, Prote[çc][ãa]o de Dados e Intermedia[çc][ãa]o Digital/)).toBeInTheDocument();
-  });
-
-  it("continua dizendo a verdade sobre a política própria, que ainda não existe", () => {
-    render(<PrivacyPage />);
-
-    expect(screen.getByText(/est[áa] sendo redigida/i)).toBeInTheDocument();
   });
 });
