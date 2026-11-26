@@ -48,7 +48,7 @@ export type DetectorDePausa = {
 
 type ConstrutorDoContexto = new () => AudioContext;
 
-function construtorDoContexto(): ConstrutorDoContexto | undefined {
+export function construtorDoContexto(): ConstrutorDoContexto | undefined {
   // O webkitAudioContext é o do Safari antigo.
   const global = globalThis as unknown as { AudioContext?: ConstrutorDoContexto; webkitAudioContext?: ConstrutorDoContexto };
   return global.AudioContext ?? global.webkitAudioContext;
@@ -83,7 +83,7 @@ export function trechoCalmo(amostras: ArrayLike<number>, quantas: number, bloco:
  * devolva (o resume e o close do AudioContext). O detector é um extra da
  * troca: se ele falha, a troca sai no tempo, como antes, e não há o que avisar.
  */
-function semFalha(acao: () => unknown) {
+export function semFalha(acao: () => unknown) {
   try {
     const resultado = acao() as { catch?: (aoFalhar: () => undefined) => unknown } | null | undefined;
     if (typeof resultado?.catch === "function") resultado.catch(() => undefined);
