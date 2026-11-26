@@ -24,6 +24,7 @@ import { corpoGrandeParaUploads } from "./corpo-grande-para-uploads";
 import { registrarRotaDasPartes, tratarCorpoGrandeDasPartes } from "./rota-das-partes";
 import { registrarRotaDoAudioBaixado } from "./rota-do-audio-baixado";
 import { registrarRotaDoDocumento } from "./rota-do-documento";
+import { registrarRotaDoWebhookDaSala, tratarCorpoGrandeDoWebhookDaSala } from "./rota-do-webhook-da-sala";
 import { registrarArquivosDoLeitorDePdf } from "./arquivos-do-leitor-de-pdf";
 import { criarDiagnosticoDoIp, criarLimiteDaApi, criarLimiteGeral } from "./limite-de-requisicoes";
 import { linhaDosModelosDeIa } from "./modelos-de-ia";
@@ -222,6 +223,11 @@ async function startServer() {
   registrarArquivosDoLeitorDePdf(app);
   registrarRotaDasPartes(app);
   app.use(tratarCorpoGrandeDasPartes);
+  // Os avisos do Daily sobre as salas de vídeo (V1): a assinatura é conferida
+  // sobre o corpo cru, então a rota lê o próprio corpo e vem antes de todo
+  // express.json, como as partes (server/_core/rota-do-webhook-da-sala.ts).
+  registrarRotaDoWebhookDaSala(app);
+  app.use(tratarCorpoGrandeDoWebhookDaSala);
 
   // Uploads dentro de um LOTE do tRPC ("/api/trpc/a,b"): os recortes por
   // caminho abaixo não casam com a lista; este middleware reconhece cada

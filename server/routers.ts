@@ -37,6 +37,7 @@ import { perguntasEntreReunioesRouter } from "./routers/perguntasEntreReunioes";
 import { consultaDeReunioesRouter } from "./routers/consultaDeReunioes";
 import { perfilDeVozRouter } from "./routers/perfilDeVoz";
 import { pushNoCelularRouter } from "./routers/pushNoCelular";
+import { salaDeVideoRouter } from "./routers/salaDeVideo";
 
 // ============================================================
 // ROUTER PRINCIPAL — cada área vive em server/routers/<área>.ts
@@ -97,6 +98,9 @@ export const appRouter = router({
   consultaDeReunioes: consultaDeReunioesRouter,
   // O perfil de voz da dona (H3d): gravar, ouvir, regravar e desligar, com o consentimento próprio.
   perfilDeVoz: perfilDeVozRouter,
+  // A sala de vídeo da reunião (V1): abrir (Prata ou acima), a ficha da dona, das
+  // participantes e dos visitantes, o link de visitante e o encerrar.
+  salaDeVideo: salaDeVideoRouter,
 });
 
 export type AppRouter = typeof appRouter;

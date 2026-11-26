@@ -383,6 +383,36 @@ ligada, como tira as chaves de acesso. No app das lojas e nos navegadores de den
 outros apps (Instagram, Facebook), o botão não aparece: a Google recusa entrar de
 dentro de WebView.
 
+### Só para a sala de vídeo (opcional)
+
+A sala de vídeo da reunião (V1 do estudo `docs/arquitetura/sala-de-video.md`;
+`server/sala-de-video.ts` e `server/daily.ts`), sobre o Daily, com o vídeo no servidor
+de São Paulo. Só existe com as duas primeiras variáveis; sem elas, a sala some da tela e
+todo procedimento de `salaDeVideo` recusa com `SALA_INDISPONIVEL`. A conta no Daily ainda
+não existe (decisão pendente no estudo: quem cria, em qual cartão e quem aceita o DPA).
+
+| Variável | Para quê | Valor |
+|---|---|---|
+| `DAILY_API_KEY` | criar a sala, emitir a ficha de cada pessoa e apagar a sala | a chave da API, no painel do Daily |
+| `DAILY_DOMINIO` | o endereço da sala, `https://<dominio>.daily.co/<sala>` | o subdomínio da conta (`marquesa` ou `marquesa.daily.co`) |
+| `DAILY_WEBHOOK_SEGREDO` | opcional: conferir a assinatura dos avisos de quem entrou e saiu, para o orçamento | um segredo em base64 de 16 bytes ou mais, o mesmo passado como `hmac` ao criar o webhook |
+
+**O webhook**, depois do deploy com as variáveis: criar no Daily (`POST /webhooks`, com
+a chave) apontando para `https://wrwglobal.org/api/sala-de-video/avisos`, com o `hmac`
+igual ao `DAILY_WEBHOOK_SEGREDO` e os eventos `participant.joined`, `participant.left` e
+`meeting.ended`. O Daily manda um `{"test":"test"}` assinado na criação, e a rota responde
+200. Sem o segredo, a rota dá 404 e o orçamento conta cada sala pelo teto dela (8 pessoas
+por 120 minutos, cerca de 23 salas por mês), aberta ou fechada.
+
+**O orçamento** é uma constante do código (`MINUTOS_PESSOA_POR_MES` em
+`shared/sala-de-video.ts`: 22.500 minutos-pessoa, os 10 mil grátis mais os US$ 50 a US$
+0,004), mudada por PR quando o orçamento mudar. Sala nova que passaria do teto do mês é
+recusada; aos 80%, a presidência recebe um aviso no sino.
+
+**A conferir com a conta de verdade** (a V1 se testa com a API dublada): `max_participants`
+é de plano pago no Daily (exige o cartão), a unidade do cabeçalho `X-Webhook-Timestamp`
+(o código aceita segundos ou milissegundos) e a assinatura sobre o corpo cru.
+
 ### Só para o exame de produção
 
 `scripts/checar-producao.mjs` roda na sua máquina, não no Render, e por isso não

@@ -89,6 +89,12 @@ export const PLANO_DE_LIMPEZA = [
   // participante. O exame não convida ninguém; a conta QA que convidar sai com o resto.
   { tabela: "meeting_participants", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_participants", coluna: "userId", chave: "id", acao: "apagar" },
+  // A sala de vídeo (V1): as salas da dona QA, as presenças nelas e a conta QA
+  // como participante na sala de outra. O exame não abre sala; a conta QA que
+  // abrir sai com o resto. O consumo do mês não tem coluna de pessoa e fica.
+  { tabela: "meeting_room_presences", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  { tabela: "meeting_room_presences", coluna: "userId", chave: "id", acao: "apagar" },
+  { tabela: "meeting_rooms", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meetings", coluna: "owner_id", chave: "openId", acao: "apagar" },
   // Os espaços de equipe (R2): o exame não cria equipe, mas a conta QA que
   // criar, ou que entrar numa, sai com o resto. Antes das pastas.

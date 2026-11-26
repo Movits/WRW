@@ -132,6 +132,8 @@ describe("a varredura do router: quem leva a guarda", () => {
       "enrichment.createSuggestedContext": "suggestionId é da sugestão do enriquecimento, não da reunião",
       "enrichment.ignoreSuggestion": "suggestionId é da sugestão do enriquecimento, não da reunião",
       "enrichment.undoSuggestion": "suggestionId é da sugestão do enriquecimento, não da reunião",
+      "salaDeVideo.estado": "estadoDaSala lê a reunião com reuniaoVisivel no WHERE; a da lixeira é SALA_REUNIAO_NAO_ENCONTRADA (sala-de-video.integracao.test.ts)",
+      "salaDeVideo.abrir": "abrirSala lê a reunião com reuniaoVisivel, e de novo, travada, antes de gravar a sala; a da lixeira é SALA_REUNIAO_NAO_ENCONTRADA (sala-de-video.integracao.test.ts)",
     };
     const fora = procedimentos
       .filter(([caminho, procedimento]) => !caminho.startsWith("meetings.") && apontaParaReuniao(procedimento))

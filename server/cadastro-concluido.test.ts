@@ -168,6 +168,8 @@ describe("o appRouter inteiro", () => {
     "ativacaoDeCadastro.ver", "ativacaoDeCadastro.ativar",
     // Entrar com a conta Google (A8): o login e o cadastro perguntam se o botão aparece.
     "contaGoogle.disponivel",
+    // A sala de vídeo (V1): o visitante sem conta entra pelo link da sala, só com o nome.
+    "salaDeVideo.verLinkDeVisitante", "salaDeVideo.entrarComoVisitante",
   ]);
   let caminhos: string[] = [];
 

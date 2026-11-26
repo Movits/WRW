@@ -57,6 +57,7 @@ import { etiquetasDaReuniao } from "@shared/detalhes-da-reuniao";
 import { nomesDosPonteiros } from "./detalhes-da-reuniao";
 import { edicaoDaTranscricao, transcricaoEstaEditada, type EdicaoDaTranscricao } from "./editar-transcricao";
 import { foraDaLixeira, reuniaoForaDeVista, reuniaoVisivel } from "./reuniao-visivel";
+import { apagarSalasDaReuniao } from "./sala-de-video";
 
 /**
  * Os tetos do ENVIO ÚNICO (10 MB e 10 min), que moram em shared/const.ts porque
@@ -2360,6 +2361,9 @@ async function apagarDerivadosDaReuniao(db: Banco, ownerId: string, meetingId: s
   // convites pendentes. Não entram em apagarDerivadosSemGravacao: reprocessar
   // não tira ninguém.
   await db.delete(meetingParticipants).where(and(eq(meetingParticipants.meetingId, meetingId), eq(meetingParticipants.ownerId, ownerId)));
+  // A sala de vídeo da reunião (V1) e as presenças dela (com o nome do
+  // visitante e o aceite do aviso) saem com a reunião; o consumo do mês fica.
+  await apagarSalasDaReuniao(db, ownerId, meetingId);
   // O resumo por e-mail (H22): o endereço de quem recebeu, dado de terceiros,
   // sai com a reunião, também antes do bucket. A linha fica, sem ele, para o
   // teto da dona (server/resumo-por-email.ts): excluir a reunião não devolve
@@ -2492,6 +2496,8 @@ export async function apagarDerivadosDaReuniaoJuntada(tx: BancoOuTransacao, owne
   await apagarDerivadosSemGravacao(tx, ownerId, meetingId, true);
   // A reunião juntada à outra deixa de existir: as participantes dela saem (R1b).
   await tx.delete(meetingParticipants).where(and(eq(meetingParticipants.meetingId, meetingId), eq(meetingParticipants.ownerId, ownerId)));
+  // E a sala de vídeo dela (V1), com as presenças.
+  await apagarSalasDaReuniao(tx, ownerId, meetingId);
   await apagarAvisosDaReuniao(tx, ownerId, meetingId);
   await soltarGravacaoDaAgenda(tx, ownerId, meetingId);
 }
