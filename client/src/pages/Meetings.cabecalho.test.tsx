@@ -26,11 +26,11 @@ const duble = vi.hoisted(() => ({
   // o padrão desde a G13b, retoma o que ficou no aparelho ao montar a página:
   // lê a conta e fala com o servidor por aqui.
   utils: {
-    meetings: { list: { invalidate: vi.fn() }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+    meetings: { avisoDeGravacao: { invalidate: async () => undefined }, list: { invalidate: vi.fn() }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
     reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
     networkInteligente: { pendencias: { reset: vi.fn() } },
     auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
-    client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
+    client: { meetings: { aceitarAvisoDeGravacao: { mutate: async () => ({ versao: "2026-11-24", aceitoEm: 1 }) }, iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
         transcricaoDaGravacao: { query: async () => ({ status: "recording", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} }) } } },
   },
 }));
@@ -47,6 +47,8 @@ vi.mock("@/lib/trpc", () => ({
     equipes: { minhas: { useQuery: () => ({ data: { equipes: [], convites: [] } }) }, responderConvite: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     useUtils: () => duble.utils,
     meetings: {
+      // Gravar com um toque: o aviso de gravação ainda não aceito na conta (a caixa aparece).
+      avisoDeGravacao: { useQuery: () => ({ data: { versaoVigente: "2026-11-24", aceitoEm: null } }) }, atualizarDetalhes: { useMutation: () => ({ mutate: () => undefined, isPending: false }) },
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
       modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },

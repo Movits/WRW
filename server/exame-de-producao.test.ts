@@ -650,7 +650,8 @@ describe("limpeza, direção B: tabela nova com coluna de usuária (owner_id, us
     // celular: dispositivos_de_push.userId.
     // 104: os 101 da main (sala de vídeo e push), mais os 3 da N4b (chaves_de_cruzamento.owner_id,
     // fila_de_cruzamento.owner_id e fila_de_cruzamento.user_id).
-    expect(paresDeUsuariaNoSchema).toHaveLength(104);
+    // 105: mais o aceite do aviso de gravação na conta (recording_notice_acceptances.owner_id).
+    expect(paresDeUsuariaNoSchema).toHaveLength(105);
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "fila_de_cruzamento", coluna: "user_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_rooms", coluna: "owner_id" });
     expect(paresDeUsuariaNoSchema).toContainEqual({ tabela: "meeting_room_presences", coluna: "owner_id" });

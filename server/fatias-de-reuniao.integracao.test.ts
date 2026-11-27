@@ -19,12 +19,13 @@ vi.mock("./storage", async (original) => ({
 }));
 
 const { getDb } = await import("./db");
-const { meetingAudioSlices, meetings, users } = await import("../drizzle/schema");
+const { meetingAudioSlices, meetings, recordingNoticeAcceptances, users } = await import("../drizzle/schema");
 const {
   encerrarGravacaoEmPartes, iniciarReuniaoEmPartes, RecusaDaParte, receberParte, FalhaPassageiraDaParte,
   DURACAO_MAXIMA_DA_PARTE_SEGUNDOS, FOLGA_DA_SOMA_DAS_PARTES_SEGUNDOS, PARTES_NO_MAXIMO,
 } = await import("./fatias-de-reuniao");
 const { GRAVACAO_EM_PARTES_SEGUNDOS_MAX } = await import("@shared/const");
+const { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } = await import("@shared/aviso-de-gravacao");
 const { deletePrivateMeeting, getPrivateMeeting, limparGravacoesVencidas, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA } = await import("./meeting-service");
 const { appRouter } = await import("./routers");
 const { TRPCError } = await import("@trpc/server");
@@ -73,6 +74,7 @@ describe.skipIf(!temBanco)("Reunião gravada em partes no banco (integração)",
     for (const dona of [DONA, OUTRA]) {
       await apagarPelaChave(db, meetingAudioSlices, eq(meetingAudioSlices.ownerId, dona));
       await apagarPelaChave(db, meetings, eq(meetings.ownerId, dona));
+      await db.delete(recordingNoticeAcceptances).where(eq(recordingNoticeAcceptances.ownerId, dona));
       await db.delete(users).where(eq(users.openId, dona));
     }
   });
@@ -376,10 +378,15 @@ describe.skipIf(!temBanco)("Reunião gravada em partes no banco (integração)",
       req: { headers: {}, ip: "203.0.113.9", socket: { remoteAddress: "203.0.113.9" } },
       res: { status: () => undefined, cookie: () => undefined, clearCookie: () => undefined },
     } as never);
-    const { id } = await caller.meetings.iniciarGravacao({ title: "Pelo tRPC", consentGranted: true, language: "en-US", consentNoticeVersion: "2026-11-14" });
+    const codigo = (e: unknown) => (e instanceof TRPCError ? e.code : String(e));
+    // Gravar com um toque: sem o aviso aceito na conta, a reunião não nasce.
+    expect(codigo(await caller.meetings.iniciarGravacao({ title: "Sem o aceite", consentGranted: true, language: "en-US", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO }).catch(e => e))).toBe("PRECONDITION_FAILED");
+    expect(await caller.meetings.avisoDeGravacao()).toEqual({ versaoVigente: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO, aceitoEm: null });
+    const aceite = await caller.meetings.aceitarAvisoDeGravacao({ versao: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO, idioma: "en" });
+    expect((await caller.meetings.avisoDeGravacao()).aceitoEm).toBe(aceite.aceitoEm);
+    const { id } = await caller.meetings.iniciarGravacao({ title: "Pelo tRPC", consentGranted: true, language: "en-US", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
     const [linha] = await (await getDb())!.select().from(meetings).where(eq(meetings.id, id));
     expect(linha).toMatchObject({ audioPipeline: "slices", status: "recording", origem: "gravacao", language: "en" });
-    const codigo = (e: unknown) => (e instanceof TRPCError ? e.code : String(e));
     expect(codigo(await caller.meetings.encerrarGravacao({ meetingId: crypto.randomUUID(), partes: 1 }).catch(e => e))).toBe("NOT_FOUND");
     // O procedimento tem o mesmo teto de partes do serviço (G13a: 200).
     expect(codigo(await caller.meetings.encerrarGravacao({ meetingId: id, partes: PARTES_NO_MAXIMO + 1 }).catch(e => e))).toBe("BAD_REQUEST");

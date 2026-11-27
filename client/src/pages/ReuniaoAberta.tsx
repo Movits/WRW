@@ -287,7 +287,7 @@ export function LeituraDaReuniao({ token, cabecalhoDaParticipante, naoEncontrada
         <h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
         {gravacao ? <>
           {/* O player fica no rodapé (BarraDoPlayer), como no detalhe da dona. */}
-          <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {mmss(gravacao.durationSeconds)} {t("meetings.availableUntil")} {new Date(gravacao.expiresAt).toLocaleDateString(i18n.language)}</p>
+          <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {mmss(gravacao.durationSeconds)}</p>
         </> : <p className="text-sm text-white/50 mt-3">{semAudio ? t("meetings.openLink.audioNotIncluded") : gravacaoExpirada
           ? (transcricao ? t("meetings.recordingExpiredNotice") : t("meetings.recordingExpiredNoTranscript"))
           : gravacaoSaindo ? t("meetings.recordingDeletionPending") : t("meetings.noRecordingStored")}</p>}

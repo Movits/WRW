@@ -136,7 +136,7 @@ function ReuniaoNaConsulta({ reuniao, aoVoltar }: { reuniao: ReuniaoAberta; aoVo
           ))}
         </div>
       ) : (
-        <p className="text-sm text-white/50">{reuniao.gravacaoExpirada ? "O áudio já foi apagado pelo prazo de 30 dias." : reuniao.gravacaoSaindo ? "O áudio venceu e está saindo do armazenamento." : "Sem áudio guardado."}</p>
+        <p className="text-sm text-white/50">{reuniao.gravacaoExpirada ? "O áudio já foi apagado (pela regra dos 30 dias de antes de 26/11/2026)." : reuniao.gravacaoSaindo ? "O áudio está saindo do armazenamento." : "Sem áudio guardado."}</p>
       )}
       <div role="tablist" className="flex gap-1 border-b border-white/10">
         {(["resumo", "transcricao"] as const).map(id => (

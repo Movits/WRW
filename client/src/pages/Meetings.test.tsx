@@ -57,7 +57,7 @@ const duble = vi.hoisted(() => {
     buscaNaRede: vi.fn(),
     painelDoEmail: vi.fn(),
     utils: {
-      meetings: {
+      meetings: { avisoDeGravacao: { invalidate: async () => undefined },
         list: { invalidate: vi.fn() }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() },
         resumoPorEmail: { invalidate: vi.fn(), setData: vi.fn() },
       },
@@ -68,7 +68,7 @@ const duble = vi.hoisted(() => {
       // teste: o mockReset do projeto client zera o vi.fn a cada teste, e sem
       // resposta combinada vale uma reunião sem nenhuma parte pronta.
       // O "Desfazer" do aviso da lixeira (H7d) restaura pelo cliente do tRPC.
-      client: { meetings: {
+      client: { meetings: { aceitarAvisoDeGravacao: { mutate: async () => ({ versao: "2026-11-24", aceitoEm: 1 }) },
         transcricaoDaGravacao: { query: async (entrada: unknown) => (await transcricaoDaGravacao(entrada)) ?? { status: "uploading", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} } },
         restaurarDaLixeira: { mutate: vi.fn() },
       } },
@@ -105,6 +105,8 @@ vi.mock("@/lib/trpc", () => ({
     equipes: { minhas: { useQuery: () => ({ data: { equipes: [], convites: [] } }) }, responderConvite: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     useUtils: () => duble.utils,
     meetings: {
+      // Gravar com um toque: o aviso de gravação ainda não aceito na conta (a caixa aparece).
+      avisoDeGravacao: { useQuery: () => ({ data: { versaoVigente: "2026-11-24", aceitoEm: null } }) }, atualizarDetalhes: { useMutation: () => ({ mutate: () => undefined, isPending: false }) },
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
       modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
@@ -435,7 +437,7 @@ describe("Detalhe da reunião — baixar o PDF (H8)", () => {
 });
 
 // H8c: o "Baixar o áudio" fica na seção Gravação, só com a gravação encerrada e
-// no prazo dos 30 dias. O aviso, o pedido e o link de salvar estão em
+// com o áudio guardado (desde 26/11/2026, até a dona excluir a reunião). O aviso, o pedido e o link de salvar estão em
 // components/BaixarAudioDaReuniao.test.tsx.
 describe("Detalhe da reunião — baixar o áudio (H8c)", () => {
   const botaoDoAudio = () => screen.queryByRole("button", { name: "Baixar o áudio" });
@@ -461,10 +463,9 @@ describe("Detalhe da reunião — baixar o áudio (H8c)", () => {
   });
 
   it.each([
-    ["venceu e saiu do bucket", { recording: null, recordingExpired: true }],
-    ["venceu e ainda está saindo do bucket", { recording: null, recordingDeletionPending: true }],
-    ["a página aberta desde antes do prazo", { recording: { ...GRAVACAO, expiresAt: Date.now() - 1 }, audioParaBaixar: { ...PARA_BAIXAR, expiresAt: Date.now() - 1 } }],
-  ])("depois dos 30 dias o botão some: %s", (_caso, detalhe) => {
+    ["saiu do bucket", { recording: null, recordingExpired: true }],
+    ["ainda está saindo do bucket", { recording: null, recordingDeletionPending: true }],
+  ])("sem o áudio guardado o botão some: %s", (_caso, detalhe) => {
     abrirDetalhe({ status: "ready" }, detalhe);
     expect(screen.getByRole("heading", { name: "Gravação" })).toBeInTheDocument();
     expect(botaoDoAudio()).not.toBeInTheDocument();
@@ -601,9 +602,9 @@ const botaoReprocessar = () => screen.queryByRole("button", { name: /Reprocessar
 const sugestaoPendente = { id: "s1", fullName: "Ana Souza", jobTitle: null, company: null, email: null, status: "pending" };
 
 describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
-  it("com áudio guardado: a dica diz até quando ele fica e que o resultado anterior é substituído, e o botão pede o reprocessamento com o id", () => {
+  it("com áudio guardado: a dica diz que ele continua guardado e que o resultado anterior é substituído, e o botão pede o reprocessamento com o id", () => {
     const meeting = abrirDetalhe({ status: "failed", processingError: "Não foi possível transcrever o áudio." }, { recording: gravacao(Date.now() + 20 * DIA) });
-    expect(screen.getByText(/continua guardado até .*substitui a transcrição/)).toBeInTheDocument();
+    expect(screen.getByText(/continua guardado\. Reprocessar.*substitui a transcrição/)).toBeInTheDocument();
     fireEvent.click(botaoReprocessar()!);
     expect(duble.mutacoes.reprocess.mutate).toHaveBeenCalledWith({ meetingId: meeting.id });
   });
@@ -612,33 +613,6 @@ describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
     abrirDetalhe({ status: "failed", processingError: "Arquivo de áudio inválido." });
     expect(botaoReprocessar()).not.toBeInTheDocument();
     expect(screen.getByText(/não está guardado, então não há o que reprocessar/)).toBeInTheDocument();
-  });
-
-  it("áudio que vence em menos de 15 minutos: nenhum botão, e o texto não finge que o áudio sumiu", () => {
-    abrirDetalhe({ status: "failed" }, { recording: gravacao(Date.now() + 10 * 60 * 1000) });
-    expect(botaoReprocessar()).not.toBeInTheDocument();
-    expect(screen.getByText(/Não é possível reprocessar esta reunião/)).toBeInTheDocument();
-    expect(screen.queryByText(/não está guardado/)).not.toBeInTheDocument();
-  });
-
-  // A gravação em partes com as `partes` transcritas (a montagem falhou), todas vencendo em `expiraEm`.
-  const gravacaoEmPartes = (partes: number, expiraEm: number) => {
-    const lista = Array.from({ length: partes }, (_, seq) => ({
-      seq, url: `/manus-storage/meetings/dona/r/partes/${String(seq).padStart(4, "0")}.m4a`, mimeType: "audio/mp4",
-      inicioSegundos: seq * 600, duracaoSegundos: 600, expiresAt: expiraEm,
-    }));
-    return { url: lista[0].url, mimeType: "audio/mp4", durationSeconds: partes * 600, sizeBytes: 0, expiresAt: expiraEm, partes: lista };
-  };
-
-  it("gravação em partes de 12 h com o áudio vencendo em 20 min: nenhum botão, porque o reprocesso das 72 partes passaria do prazo", () => {
-    abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 72 }, { recording: gravacaoEmPartes(72, Date.now() + 20 * 60 * 1000) });
-    expect(botaoReprocessar()).not.toBeInTheDocument();
-    expect(screen.getByText(/Não é possível reprocessar esta reunião/)).toBeInTheDocument();
-  });
-
-  it("…e a de uma parte só, com os mesmos 20 min, ainda oferece o botão: a margem cresce com as partes", () => {
-    abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 1 }, { recording: gravacaoEmPartes(1, Date.now() + 20 * 60 * 1000) });
-    expect(botaoReprocessar()).toBeInTheDocument();
   });
 
   // Conferência de tela do pacote 4b (capturas 36 e 32): na reunião em partes que
@@ -650,19 +624,11 @@ describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
     const meeting = abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 3, processingError: MENSAGEM_PARTES_SEM_TRANSCRICAO },
       { recording: null, audioParaBaixar: { duracaoSegundos: 1500, expiresAt: Date.now() + 20 * DIA } });
     expect(screen.queryByText(/não está guardado, então não há o que reprocessar/)).not.toBeInTheDocument();
-    expect(screen.getByText(/continua guardado até .*substitui a transcrição/)).toBeInTheDocument();
+    expect(screen.getByText(/continua guardado\. Reprocessar.*substitui a transcrição/)).toBeInTheDocument();
     // A seção Gravação, logo abaixo, diz o mesmo: o áudio está guardado.
     expect(screen.getByText(/O áudio desta reunião está guardado, mas não toca aqui/)).toBeInTheDocument();
     fireEvent.click(botaoReprocessar()!);
     expect(duble.mutacoes.reprocess.mutate).toHaveBeenCalledWith({ meetingId: meeting.id });
-  });
-
-  it("…e com esse áudio perto de vencer: sem o botão, e o texto não diz que o áudio não está guardado", () => {
-    abrirDetalhe({ status: "failed", audioPipeline: "slices", expectedSlices: 3 },
-      { recording: null, audioParaBaixar: { duracaoSegundos: 1500, expiresAt: Date.now() + 10 * 60 * 1000 } });
-    expect(botaoReprocessar()).not.toBeInTheDocument();
-    expect(screen.getByText(/Não é possível reprocessar esta reunião/)).toBeInTheDocument();
-    expect(screen.queryByText(/não está guardado/)).not.toBeInTheDocument();
   });
 
   it.each(["ready", "processing"])("reunião %s não oferece reprocessar", status => {
@@ -696,7 +662,7 @@ describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
   it("o áudio sumiu do bucket: o motivo sai traduzido, sem a dica de 'continua guardado' e sem o botão", () => {
     abrirDetalhe({ status: "failed", processingError: "O áudio guardado desta reunião não foi encontrado." }, { recording: gravacao(Date.now() + 20 * DIA) });
     expect(botaoReprocessar()).not.toBeInTheDocument();
-    expect(screen.queryByText(/continua guardado até/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/continua guardado/)).not.toBeInTheDocument();
     expect(screen.getByText(/Não é possível reprocessar esta reunião/)).toBeInTheDocument();
   });
 
@@ -722,12 +688,12 @@ describe("Detalhe da reunião — reprocessar a reunião que falhou", () => {
     abrirDetalhe({ status: "failed" }, { recordingExpired: true });
     expect(screen.queryByText(/A transcrição continua aqui/)).not.toBeInTheDocument();
     expect(screen.queryByText(/foi apagada/)).not.toBeInTheDocument();
-    expect(screen.getByText(/O áudio fica guardado por no máximo 30 dias/)).toBeInTheDocument();
+    expect(screen.getByText("Não há áudio guardado desta reunião.")).toBeInTheDocument();
   });
 
   it("áudio vencido que ainda não saiu do bucket: a tela diz que está saindo, e não que 'foi apagada' nem que não há áudio guardado", () => {
     abrirDetalhe({}, { transcript: { id: "t1", transcript: "Oi.", language: "pt-BR" }, recordingDeletionPending: true });
-    expect(screen.getByText(/passou dos 30 dias e já não pode ser ouvida\. O app ainda está apagando o áudio do armazenamento/)).toBeInTheDocument();
+    expect(screen.getByText("Esta gravação já não pode ser ouvida. O app ainda está apagando o áudio do armazenamento.")).toBeInTheDocument();
     expect(screen.queryByText(/foi apagada/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Nenhum áudio guardado/)).not.toBeInTheDocument();
   });
@@ -962,7 +928,8 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
       render(<Meetings />);
       const seletor = screen.getByLabelText("Idioma da reunião") as HTMLSelectElement;
       if (idioma) fireEvent.change(seletor, { target: { value: idioma } });
-      fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: titulo } });
+      // Gravar com um toque: sem título digitado, ele vem da reunião da agenda ou do padrão.
+      if (titulo) throw new Error("o gravador não pede título antes de gravar");
       fireEvent.click(screen.getByRole("checkbox"));
       await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
       await waitFor(() => expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledTimes(1));
@@ -979,8 +946,8 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
     const { unmount } = render(<Meetings />);
     expect((screen.getByLabelText("Idioma da reunião") as HTMLSelectElement).value).toBe("pt-BR");
     unmount();
-    await iniciarNoIdioma("en", "Call with Ana");
-    expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith({ title: "Call with Ana", language: "en", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
+    await iniciarNoIdioma("en", "");
+    expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith({ title: expect.stringMatching(/^Reunião de /), language: "en", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
     // Nada pelo envio único, que saiu do gravador na G14.
   });
 
@@ -1039,14 +1006,14 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
     fireEvent.change(seletor, { target: { value: "auto" } });
     expect(screen.getByText(/A IA reconhece o idioma de cada fala/)).toBeInTheDocument();
     unmount();
-    await iniciarNoIdioma("auto", "Call with Ana");
+    await iniciarNoIdioma("auto", "");
     expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith(expect.objectContaining({ language: "auto" }));
   });
 
   it("G16: um idioma fora dos 10 da tela (italiano) está na lista e vai ao servidor", async () => {
-    await iniciarNoIdioma("it", "Riunione");
+    await iniciarNoIdioma("it", "");
     expect((screen.getByLabelText("Idioma da reunião") as HTMLSelectElement).value).toBe("it");
-    expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith(expect.objectContaining({ title: "Riunione", language: "it" }));
+    expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith(expect.objectContaining({ language: "it" }));
   });
 
   it("G16: reunião em italiano com a tela em pt-BR: o pt-BR é TRADUZIDO, e a lista ganha \"Italiano (original)\", que volta ao original", () => {

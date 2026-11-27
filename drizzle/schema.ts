@@ -1421,9 +1421,10 @@ export const meetingAudioSlices = mysqlTable("meeting_audio_slices", {
 // gravador, origem 'pdf' ou 'foto'): sempre um PDF, porque as fotos de um texto
 // viram um PDF no aparelho, uma página por foto. Uma linha por reunião. O texto
 // que a IA lê dele vira a transcrição (meeting_transcripts), e o arquivo segue
-// a regra do áudio: 30 dias contados do envio (MEETING_AUDIO_TTL_MS), a
-// varredura e a leitura vencida o tiram do bucket com todas as versões, e a
-// exclusão da reunião e a da conta também. A linha é o ponteiro para o objeto:
+// a regra do áudio: fica até a dona excluir a reunião ou encerrar a conta
+// (expires_at nasce com ARQUIVO_SEM_PRAZO, em server/meeting-service.ts, e é a
+// marca de saída; até 26/11/2026 eram 30 dias), e a exclusão o tira do bucket
+// com todas as versões. A linha é o ponteiro para o objeto:
 // só sai depois dele, e fica (vencida) quando o bucket recusa. Nomes em inglês,
 // como as irmãs meeting_*.
 export const meetingDocuments = mysqlTable("meeting_documents", {
@@ -1451,9 +1452,10 @@ export const meetingDocuments = mysqlTable("meeting_documents", {
 // As fotos e os desenhos à mão que a dona anexa ao resumo da reunião (H4g e
 // H4h do plano do gravador; HN-32 e HN-33 no app de referência da cliente).
 // A imagem chega já reduzida no aparelho (client/src/lib/reduzir-imagem.ts, a
-// régua da #149) e segue a regra dos arquivos da reunião: 30 dias contados do
-// envio (MEETING_AUDIO_TTL_MS), a varredura tira a vencida do bucket com todas
-// as versões, e a exclusão da reunião e a da conta também. A linha é o
+// régua da #149) e segue a regra dos arquivos da reunião: fica até a dona a
+// tirar, excluir a reunião ou encerrar a conta (expires_at nasce com
+// ARQUIVO_SEM_PRAZO e é a marca de saída; até 26/11/2026 eram 30 dias), que a
+// tiram do bucket com todas as versões. A linha é o
 // ponteiro para o objeto: só sai depois dele, e fica (vencida) quando o bucket
 // recusa. O link aberto mostra a imagem só pela rota dele, que confere a senha
 // (H23). Nomes em inglês, como as irmãs meeting_*.
@@ -2746,6 +2748,27 @@ export const voiceProfileConsents = mysqlTable("voice_profile_consents", {
   createdAt: bigint("created_at", { mode: "number" }).notNull(),
 }, (table) => ({
   ownerCreatedIdx: index("voice_profile_consents_owner_created_idx").on(table.ownerId, table.createdAt),
+}));
+
+// O aceite do aviso de gravação na CONTA (gravar com um toque, decisão do
+// Roberto de 26/11/2026; server/aviso-de-gravacao-aceito.ts): o aviso
+// (meetings.consentNotice, versão em shared/aviso-de-gravacao.ts) aparece só na
+// primeira gravação, e de novo uma vez quando a versão vigente muda. Uma linha
+// por (dona, versão), com a data, o idioma da tela e quem pediu (IP e
+// navegador), para valer em todo aparelho. Cada reunião continua gravando o
+// próprio registro (consent_granted, consent_at e consent_notice_version), e o
+// início da gravação só aceita a versão que a dona aceitou aqui. Sai com a conta,
+// como o aceite dos Termos (consents).
+export const recordingNoticeAcceptances = mysqlTable("recording_notice_acceptances", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  versaoDoAviso: varchar("versao_do_aviso", { length: 32 }).notNull(),
+  idioma: varchar("idioma", { length: 12 }),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: varchar("user_agent", { length: 500 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerVersaoUnique: uniqueIndex("recording_notice_acceptances_owner_versao_unique").on(table.ownerId, table.versaoDoAviso),
 }));
 
 // A sala de vídeo da reunião (V1 do estudo docs/arquitetura/sala-de-video.md;

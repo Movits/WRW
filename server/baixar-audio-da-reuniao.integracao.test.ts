@@ -6,7 +6,7 @@ import { apagarPelaChave } from "./test/apagar-pela-chave";
 import { auditLogs, meetingAudioSlices, meetingRecordings, meetings, users } from "../drizzle/schema";
 import { prepararAudioDaReuniao } from "./baixar-audio-da-reuniao";
 import { ACAO_AUDIO_BAIXADO, RECUSAS_DO_AUDIO } from "@shared/baixar-audio";
-import { MEETING_AUDIO_TTL_MS } from "./meeting-service";
+import { PRAZO_DOS_ARQUIVOS_ATE_26_11_MS } from "./meeting-service";
 
 /**
  * Baixar o áudio da reunião (H8c) contra um banco real DE TESTE. No CI é o
@@ -69,7 +69,7 @@ describe.skipIf(!temBanco)("Baixar o áudio da reunião no banco (integração)"
       reuniao(GRAVANDO, { audioPipeline: "slices", status: "recording" }),
       reuniao(VENCIDA, { audioPipeline: "slices", createdAt: AGORA - 40 * DIA }),
       reuniao(EXCLUIDA, { audioPipeline: "slices", status: "deleted" }),
-      reuniao(SEM_AUDIO_ANTIGA, { createdAt: AGORA - MEETING_AUDIO_TTL_MS - DIA }),
+      reuniao(SEM_AUDIO_ANTIGA, { createdAt: AGORA - PRAZO_DOS_ARQUIVOS_ATE_26_11_MS - DIA }),
     ]);
     await db.insert(meetingAudioSlices).values([
       // Fora da ordem de inserção, com formatos misturados, uma que a IA recusou

@@ -279,7 +279,7 @@ describe("Reunião aberta pelo link", () => {
     duble.ver.mockReturnValue(pronta({ ...VISTA, gravacao: null, gravacaoExpirada: true }));
     const { container } = abrir();
     expect(container.querySelector("audio")).toBeNull();
-    expect(screen.getByText(/passou dos 30 dias/)).toBeInTheDocument();
+    expect(screen.getByText(/foi apagada pela regra de antes, que apagava o áudio 30 dias depois do envio/)).toBeInTheDocument();
   });
 
   it("gravação vencida que ainda não saiu do bucket: diz que está saindo, não que 'foi apagada'", () => {
@@ -936,7 +936,7 @@ describe("o link com senha e o link sem o áudio (H23)", () => {
     expect(screen.getByText(/Leia a transcrição ou peça à IA um resumo/)).toBeInTheDocument();
     expect(screen.queryByText(/Ouça a gravação/)).not.toBeInTheDocument();
     // E não os avisos da gravação que não existe ou venceu: o áudio existe, só não veio pelo link.
-    expect(screen.queryByText(/Nenhum áudio guardado|passou dos 30 dias/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Nenhum áudio guardado|foi apagada pela regra de antes/)).not.toBeInTheDocument();
     expect(container.querySelector("audio")).toBeNull();
     // Sem áudio, nada leva o player a um ponto: o resumo e a pergunta não recebem o "ir para".
     expect(duble.propsDoResumo?.aoIrPara).toBeUndefined();

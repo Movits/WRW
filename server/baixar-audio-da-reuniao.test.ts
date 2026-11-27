@@ -24,7 +24,7 @@ vi.mock("./db", () => ({
 
 const { prepararAudioDaReuniao, partesParaBaixar, criarBalcaoDoAudio, criarConferenciaDoFfmpeg, esperarVagaDeConversao, FORMATO_DA_FICHA } = await import("./baixar-audio-da-reuniao");
 const { ACAO_AUDIO_BAIXADO, RECUSAS_DO_AUDIO, nomeDoArquivoDoAudio, tamanhoEstimadoDoAudio } = await import("@shared/baixar-audio");
-const { MEETING_AUDIO_TTL_MS } = await import("./meeting-service");
+const { PRAZO_DOS_ARQUIVOS_ATE_26_11_MS } = await import("./meeting-service");
 
 const AGORA = 1_763_400_000_000;
 const DIA = 24 * 60 * 60 * 1000;
@@ -181,7 +181,7 @@ describe("preparar: as recusas não gravam nada", () => {
   });
 
   it("sem linha nenhuma: a reunião mais velha que o prazo venceu; a recente não tem áudio", async () => {
-    const velha = await prepararCom({ reuniao: { ...REUNIAO_EM_PARTES, createdAt: AGORA - MEETING_AUDIO_TTL_MS }, partes: [] });
+    const velha = await prepararCom({ reuniao: { ...REUNIAO_EM_PARTES, createdAt: AGORA - PRAZO_DOS_ARQUIVOS_ATE_26_11_MS }, partes: [] });
     expect(erroDe(velha)).toMatchObject({ code: "PRECONDITION_FAILED", message: RECUSAS_DO_AUDIO.vencido });
     const recente = await prepararCom({ reuniao: REUNIAO_EM_PARTES, partes: [] });
     expect(erroDe(recente)).toMatchObject({ code: "PRECONDITION_FAILED", message: RECUSAS_DO_AUDIO.ausente });

@@ -4,7 +4,7 @@ import { ehAcessoNegadoNoBucket, storageApagarTodasAsVersoes, storageListarChave
 
 /**
  * storageApagarTodasAsVersoes: o áudio de reunião sai do bucket de verdade
- * depois dos 30 dias, e quando a dona exclui a reunião ou a conta.
+ * quando a dona exclui a reunião ou a conta (e na varredura do que ficou marcado).
  *
  * O B2 guarda versões: o DeleteObject sem VersionId só põe um marcador por
  * cima, o GET passa a dar 404 e a versão com a voz das participantes continua

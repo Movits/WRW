@@ -10,7 +10,7 @@ import { criarTeto } from "./assistente-de-texto";
 import { descreverErroDeBanco, ehErroDeBancoIndisponivel, MENSAGEM_BANCO_INDISPONIVEL } from "./banco-indisponivel";
 import { exigirDb } from "./db";
 import { exigirReuniaoDoLink, LinkAbertoRecusado } from "./link-aberto-da-reuniao";
-import { MEETING_AUDIO_TTL_MS } from "./meeting-service";
+import { ARQUIVO_SEM_PRAZO } from "./meeting-service";
 import { reuniaoVisivel } from "./reuniao-visivel";
 import { comCookiesDoPedido, type LeitoraDoLink } from "./senha-do-link-aberto";
 import { leitoraDaRota } from "./leitora-do-link";
@@ -35,12 +35,13 @@ import { CACHE_DE_ARQUIVO_PRIVADO, storageApagarTodasAsVersoes, storageGetSigned
  * objeto sobe com a chave exata, e a linha entra numa transação com a reunião
  * travada; se a transação não grava, o objeto sai. A linha é o ponteiro: a
  * exclusão da reunião (apagarDerivadosDaReuniao), a da conta
- * (server/exclusao-de-conta.ts) e a varredura dos 30 dias
- * (limparGravacoesVencidas) tiram o objeto com todas as versões e só então a
- * linha. O prazo é o do áudio (MEETING_AUDIO_TTL_MS, 30 dias contados do envio).
+ * (server/exclusao-de-conta.ts) e a varredura (limparGravacoesVencidas, para o
+ * que o bucket recusou na hora) tiram o objeto com todas as versões e só então
+ * a linha. Como o áudio, o anexo fica até a dona o tirar, excluir a reunião ou
+ * encerrar a conta (ARQUIVO_SEM_PRAZO; até 26/11/2026 eram 30 dias).
  *
  * A reunião na lixeira (H7d) não aceita nem mostra anexo (reuniaoVisivel); os
- * anexos dela ficam com ela e voltam ao restaurar, e seguem vencendo no prazo.
+ * anexos dela ficam com ela e voltam ao restaurar.
  * O reprocesso não toca nos anexos: eles são da dona, não da IA. A junção
  * (H17) os leva para a reunião que fica.
  *
@@ -258,7 +259,7 @@ export async function anexarAoResumo(
 
   const linha = {
     id, meetingId, ownerId, kind: entrada.tipo, storageKey: chave, storageUrl: `/manus-storage/${chave}`, mimeType: formato,
-    sizeBytes: bytes.length, expiresAt: agora + MEETING_AUDIO_TTL_MS, createdAt: agora,
+    sizeBytes: bytes.length, expiresAt: ARQUIVO_SEM_PRAZO, createdAt: agora,
   };
   try {
     await db.transaction(async tx => {
