@@ -4640,5 +4640,18 @@
     "lembreteDaAcao": "Reminder: a next step is due today",
     "lembreteDaReuniao": "Reminder: meeting at {{hora}}",
     "corpo": "Tap to open in Marquesa Global Match."
+  },
+  "local": {
+    "estado": "State / province",
+    "paisPlaceholder": "Search for the country",
+    "estadoPlaceholder": "Search for the state",
+    "cidadePlaceholder": "Search or type the city",
+    "escolhaOPais": "Choose the country first.",
+    "escolhaOEstado": "Choose the state first.",
+    "carregando": "Loading cities…",
+    "semLista": "No list for this country: type the city name.",
+    "semResultado": "Nothing found. You can type the name and continue.",
+    "creditoPaises": "Country data:",
+    "creditoCidades": "City data:"
   }
 }

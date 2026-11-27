@@ -21,6 +21,7 @@ os fluxos valem para qualquer linguagem.
 |---|---|
 | [modelo-de-dados.md](./modelo-de-dados.md) | As entidades, o DDL e as notas de modelagem |
 | [fluxos.md](./fluxos.md) | Assistente de Reuniões, Smart Match e o funil do corretor |
+| [cidades.md](./cidades.md) | País, estado e cidade em cascata: fonte, formato gerado e crédito |
 | [privacidade.md](./privacidade.md) | Os três níveis de acesso como regra de banco, não de tela |
 | [decisoes-em-aberto.md](./decisoes-em-aberto.md) | O que trava implementação e precisa de decisão |
 
