@@ -24,6 +24,8 @@ import { EditorDoQuePreciso } from "@/components/OQuePreciso";
 import { categoriasPendentes, demandasParaGravar, type DemandaDetalhada } from "@shared/o-que-preciso";
 import { PREFIXO_DO_RASCUNHO_DO_CADASTRO } from "@/_core/hooks/useAuth";
 import { MENSAGEM_MAIORIDADE_NAO_DECLARADA } from "@shared/maioridade";
+import PaisEstadoCidade from "@/components/PaisEstadoCidade";
+import { rotuloDoPais } from "@/lib/cascata-de-local";
 
 // Tetos do servidor (routers/profile.ts) para os campos livres: o ditado pode
 // passar deles, e sem contador o erro só aparecia no último passo.
@@ -599,8 +601,6 @@ export default function Onboarding() {
   // menos CAMPOS_FORA_DO_RASCUNHO, e uma declaração não pode voltar marcada de
   // um rascunho — recarregou, marca de novo.
   const [declarouMaioridade, setDeclarouMaioridade] = useState(false);
-  const [cityOptions, setCityOptions] = useState<string[]>([]);
-  const municipiosRef = useRef<string[] | null>(null);
   const prefilled = useRef(false);
   // Chave do rascunho em localStorage: existe só depois de saber quem é a
   // usuária e de restaurar o que ela já tinha (ver "Rascunho do cadastro").
@@ -855,25 +855,6 @@ export default function Onboarding() {
     }
   }, [step]);
 
-  // Sugestoes de cidade (IBGE) so quando o pais e o Brasil: filtra em memoria
-  // a partir de 2 letras, ignorando acento, e mostra no maximo 50 opcoes para
-  // o datalist nao travar em mobile.
-  const norm = (v: string) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  useEffect(() => {
-    if (form.country !== "BR" || form.city.trim().length < 2) { setCityOptions([]); return; }
-    let alive = true;
-    const filtrar = (lista: string[]) => {
-      const q = norm(form.city.trim());
-      if (alive) setCityOptions(lista.filter(m => norm(m).startsWith(q)).slice(0, 50));
-    };
-    if (municipiosRef.current) filtrar(municipiosRef.current);
-    else import("@/data/municipios-br.json").then(mod => {
-      municipiosRef.current = mod.default as string[];
-      filtrar(municipiosRef.current);
-    }).catch(() => {});
-    return () => { alive = false; };
-  }, [form.city, form.country]);
-
   // O banco guarda a CHAVE (estavel entre idiomas); o rotulo e so exibicao.
   // Antes era gravado o texto traduzido, e usuarias de idiomas diferentes
   // nunca davam match entre si.
@@ -946,26 +927,6 @@ export default function Onboarding() {
     { value: "master", label: t("onboarding.education.master") },
     { value: "phd", label: t("onboarding.education.phd") },
     { value: "mba", label: t("onboarding.education.mba") },
-  ];
-
-  const COUNTRIES = [
-    { value: "BR", label: t("onboarding.countries.brazil") },
-    { value: "PT", label: t("onboarding.countries.portugal") },
-    { value: "US", label: t("onboarding.countries.usa") },
-    { value: "AR", label: t("onboarding.countries.argentina") },
-    { value: "CL", label: t("onboarding.countries.chile") },
-    { value: "MX", label: t("onboarding.countries.mexico") },
-    { value: "CO", label: t("onboarding.countries.colombia") },
-    { value: "DE", label: t("onboarding.countries.germany") },
-    { value: "FR", label: t("onboarding.countries.france") },
-    { value: "GB", label: t("onboarding.countries.uk") },
-    { value: "ES", label: t("onboarding.countries.spain") },
-    { value: "IT", label: t("onboarding.countries.italy") },
-    { value: "JP", label: t("onboarding.countries.japan") },
-    { value: "CN", label: t("onboarding.countries.china") },
-    { value: "IN", label: t("onboarding.countries.india") },
-    { value: "AE", label: t("onboarding.countries.uae") },
-    { value: "XX", label: t("onboarding.countries.other") },
   ];
 
   // "Seus valores" saiu da lista junto com o campo (21:08): a etapa de revisão
@@ -1301,20 +1262,13 @@ export default function Onboarding() {
                         limite={LIMITE_DA_BIO_GRAVADA} assistente/>
                     </div>
                     <div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <TextInput label={t("onboarding.fields.city")} value={form.city} list={form.country === "BR" ? "cidades-br" : undefined}
-                            onChange={v => set("city", v.replace(/\s\([A-Z]{2}\)$/, ""))}
-                            placeholder={t("onboarding.fields.cityPlaceholder")}/>
-                          {form.country === "BR" && (
-                            <datalist id="cidades-br">
-                              {cityOptions.map(m => <option key={m} value={m}/>)}
-                            </datalist>
-                          )}
-                        </div>
-                        <SelectInput label={t("onboarding.fields.country")} value={form.country} onChange={v => set("country", v)}
-                          options={sortOptionsAlphabetically(COUNTRIES, i18n.language)} placeholder={t("onboarding.fields.selectPlaceholder")}/>
-                      </div>
+                      {/* País → estado → cidade em cascata (decisão de 26/11): o
+                          país primeiro, o estado quando o país tem, e a cidade
+                          daquele estado. Ver PaisEstadoCidade. */}
+                      <PaisEstadoCidade pais={form.country} cidade={form.city}
+                        onChange={local => setForm(prev => ({ ...prev, country: local.pais, city: local.cidade }))}
+                        rotuloDoPais={t("onboarding.fields.country")} rotuloDaCidade={t("onboarding.fields.city")}
+                        placeholderDaCidade={t("onboarding.fields.cityPlaceholder")}/>
                     </div>
                     <div>
                       <SelectInput label={t("profile.gender.label")} value={form.gender} onChange={v => set("gender", v as FormData["gender"])}
@@ -1629,7 +1583,7 @@ export default function Onboarding() {
                 <div className="grid grid-cols-2 gap-4">
                   {[
                     { label: t("onboarding.review.name"), value: form.displayName, icon: "👤" },
-                    { label: t("onboarding.review.location"), value: `${form.city}, ${form.country}`, icon: "📍" },
+                    { label: t("onboarding.review.location"), value: [form.city, rotuloDoPais(form.country, i18n.language, t("onboarding.countries.other"))].filter(Boolean).join(", "), icon: "📍" },
                     ...(form.gender ? [{ label: t("profile.gender.label"), value: t(`profile.gender.${form.gender === "prefer_not_to_say" ? "preferNotToSay" : form.gender}`), icon: "⚥" }] : []),
                     { label: t("onboarding.review.specialty"), value: normalizePrimarySpecialties(form.primarySpecialties, form.customSpecialty).map(k => t("onboarding.specialties." + k, { defaultValue: k })).join(", "), icon: "⚡" },
                     { label: t("onboarding.misc.company"), value: form.company || "-", icon: "🏢" },

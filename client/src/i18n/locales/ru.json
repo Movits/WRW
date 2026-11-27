@@ -4634,5 +4634,18 @@
     "lembreteDaAcao": "Напоминание: срок следующего шага — сегодня",
     "lembreteDaReuniao": "Напоминание: встреча в {{hora}}",
     "corpo": "Нажмите, чтобы открыть в Marquesa Global Match."
+  },
+  "local": {
+    "estado": "Штат / регион",
+    "paisPlaceholder": "Найдите страну",
+    "estadoPlaceholder": "Найдите регион",
+    "cidadePlaceholder": "Найдите или введите город",
+    "escolhaOPais": "Сначала выберите страну.",
+    "escolhaOEstado": "Сначала выберите регион.",
+    "carregando": "Загрузка городов…",
+    "semLista": "Для этой страны нет списка: введите название города.",
+    "semResultado": "Ничего не найдено. Можно ввести название и продолжить.",
+    "creditoPaises": "Данные о странах:",
+    "creditoCidades": "Данные о городах:"
   }
 }

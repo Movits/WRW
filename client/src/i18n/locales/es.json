@@ -4634,5 +4634,18 @@
     "lembreteDaAcao": "Recordatorio: una próxima acción vence hoy",
     "lembreteDaReuniao": "Recordatorio: reunión a las {{hora}}",
     "corpo": "Toca para abrir en Marquesa Global Match."
+  },
+  "local": {
+    "estado": "Estado / provincia",
+    "paisPlaceholder": "Busca el país",
+    "estadoPlaceholder": "Busca el estado",
+    "cidadePlaceholder": "Busca o escribe la ciudad",
+    "escolhaOPais": "Elige primero el país.",
+    "escolhaOEstado": "Elige primero el estado.",
+    "carregando": "Cargando ciudades…",
+    "semLista": "No hay lista para este país: escribe el nombre de la ciudad.",
+    "semResultado": "No se encontró nada. Puedes escribir el nombre y seguir.",
+    "creditoPaises": "Datos de países:",
+    "creditoCidades": "Datos de ciudades:"
   }
 }

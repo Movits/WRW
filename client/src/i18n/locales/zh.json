@@ -4634,5 +4634,18 @@
     "lembreteDaAcao": "提醒：一项后续行动今天到期",
     "lembreteDaReuniao": "提醒：{{hora}} 的会议",
     "corpo": "点按以在 Marquesa Global Match 中打开。"
+  },
+  "local": {
+    "estado": "州 / 省",
+    "paisPlaceholder": "搜索国家",
+    "estadoPlaceholder": "搜索州或省",
+    "cidadePlaceholder": "搜索或输入城市",
+    "escolhaOPais": "请先选择国家。",
+    "escolhaOEstado": "请先选择州或省。",
+    "carregando": "正在加载城市…",
+    "semLista": "该国家没有列表：请输入城市名称。",
+    "semResultado": "未找到结果。可以直接输入名称并继续。",
+    "creditoPaises": "国家数据：",
+    "creditoCidades": "城市数据："
   }
 }

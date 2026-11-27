@@ -4634,5 +4634,18 @@
     "lembreteDaAcao": "Erinnerung: Ein nächster Schritt ist heute fällig",
     "lembreteDaReuniao": "Erinnerung: Meeting um {{hora}}",
     "corpo": "Tippen, um es in Marquesa Global Match zu öffnen."
+  },
+  "local": {
+    "estado": "Bundesland / Provinz",
+    "paisPlaceholder": "Land suchen",
+    "estadoPlaceholder": "Bundesland suchen",
+    "cidadePlaceholder": "Stadt suchen oder eingeben",
+    "escolhaOPais": "Wählen Sie zuerst das Land.",
+    "escolhaOEstado": "Wählen Sie zuerst das Bundesland.",
+    "carregando": "Städte werden geladen…",
+    "semLista": "Keine Liste für dieses Land: Geben Sie den Namen der Stadt ein.",
+    "semResultado": "Nichts gefunden. Sie können den Namen eingeben und fortfahren.",
+    "creditoPaises": "Länderdaten:",
+    "creditoCidades": "Städtedaten:"
   }
 }
