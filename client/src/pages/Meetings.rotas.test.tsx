@@ -51,7 +51,7 @@ const duble = vi.hoisted(() => {
       // A gravação em partes, o padrão desde a G13b: ao montar, a página retoma
       // o que ficou no aparelho, e para isso lê a conta e fala com o servidor.
       auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
-      client: { meetings: { aceitarAvisoDeGravacao: { mutate: async () => ({ versao: "2026-11-24", aceitoEm: 1 }) }, iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() },
+      client: { meetings: { aceitarAvisoDeGravacao: { mutate: async () => ({ versao: "2026-11-26", aceitoEm: 1 }) }, iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() },
         // O restaurar do detalhe da reunião que está na lixeira (H7d).
         restaurarDaLixeira: { mutate: vi.fn() },
         // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
@@ -85,7 +85,7 @@ vi.mock("@/lib/trpc", () => ({
     useUtils: () => duble.utils,
     meetings: {
       // Gravar com um toque: o aviso de gravação ainda não aceito na conta (a caixa aparece).
-      avisoDeGravacao: { useQuery: () => ({ data: { versaoVigente: "2026-11-24", aceitoEm: aviso.aceitoEm } }) }, atualizarDetalhes: duble.registrar("atualizarDetalhes"),
+      avisoDeGravacao: { useQuery: () => ({ data: { versaoVigente: "2026-11-26", aceitoEm: aviso.aceitoEm } }) }, atualizarDetalhes: duble.registrar("atualizarDetalhes"),
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
       modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
@@ -589,7 +589,7 @@ describe("Reuniões — gravação em curso", () => {
     expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
     expect(aceitar).not.toHaveBeenCalled();
     // A reunião continua levando a versão do aviso que a dona aceitou.
-    expect(iniciarGravacao.mutate).toHaveBeenCalledWith(expect.objectContaining({ consentGranted: true, consentNoticeVersion: "2026-11-24" }));
+    expect(iniciarGravacao.mutate).toHaveBeenCalledWith(expect.objectContaining({ consentGranted: true, consentNoticeVersion: "2026-11-26" }));
   });
 
   it("primeira gravação: a caixa do aviso é obrigatória, e o aceite vai à conta antes de a reunião nascer", async () => {
@@ -603,7 +603,7 @@ describe("Reuniões — gravação em curso", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /Li o aviso acima/ }));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
-    expect(aceitar).toHaveBeenCalledWith({ versao: "2026-11-24", idioma: "pt-BR" });
+    expect(aceitar).toHaveBeenCalledWith({ versao: "2026-11-26", idioma: "pt-BR" });
     expect(aceitar.mock.invocationCallOrder[0]).toBeLessThan(iniciarGravacao.mutate.mock.invocationCallOrder[0]);
   });
 
