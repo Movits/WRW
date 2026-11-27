@@ -11,6 +11,11 @@ build/
 *.tsbuildinfo
 coverage/
 
+# Dados gerados por script, nao codigo: o prettier os quebraria em dezenas de
+# milhares de linhas e cada regeracao viraria um diff ilegivel.
+client/src/data/cidades/
+client/src/data/municipios-br.json
+
 # Package files
 package-lock.json
 pnpm-lock.yaml

@@ -4640,5 +4640,18 @@
     "lembreteDaAcao": "रिमाइंडर: एक अगला कदम आज देय है",
     "lembreteDaReuniao": "रिमाइंडर: मीटिंग {{hora}} बजे",
     "corpo": "Marquesa Global Match में खोलने के लिए टैप करें।"
+  },
+  "local": {
+    "estado": "राज्य / प्रांत",
+    "paisPlaceholder": "देश खोजें",
+    "estadoPlaceholder": "राज्य खोजें",
+    "cidadePlaceholder": "शहर खोजें या लिखें",
+    "escolhaOPais": "पहले देश चुनें।",
+    "escolhaOEstado": "पहले राज्य चुनें।",
+    "carregando": "शहर लोड हो रहे हैं…",
+    "semLista": "इस देश की सूची नहीं है: शहर का नाम लिखें।",
+    "semResultado": "कुछ नहीं मिला। आप नाम लिखकर आगे बढ़ सकती हैं।",
+    "creditoPaises": "देशों का डेटा:",
+    "creditoCidades": "शहरों का डेटा:"
   }
 }

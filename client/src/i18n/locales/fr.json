@@ -4640,5 +4640,18 @@
     "lembreteDaAcao": "Rappel : une prochaine action arrive à échéance aujourd’hui",
     "lembreteDaReuniao": "Rappel : réunion à {{hora}}",
     "corpo": "Touchez pour ouvrir dans Marquesa Global Match."
+  },
+  "local": {
+    "estado": "État / province",
+    "paisPlaceholder": "Recherchez le pays",
+    "estadoPlaceholder": "Recherchez l’État",
+    "cidadePlaceholder": "Recherchez ou saisissez la ville",
+    "escolhaOPais": "Choisissez d’abord le pays.",
+    "escolhaOEstado": "Choisissez d’abord l’État.",
+    "carregando": "Chargement des villes…",
+    "semLista": "Pas de liste pour ce pays : saisissez le nom de la ville.",
+    "semResultado": "Aucun résultat. Vous pouvez saisir le nom et continuer.",
+    "creditoPaises": "Données des pays :",
+    "creditoCidades": "Données des villes :"
   }
 }
