@@ -428,7 +428,7 @@ describe("em árabe e a 375 px", () => {
     // O nome e o e-mail separados por um espaço de verdade: com margem, em árabe
     // os dois se colavam ("ana@exemplo.invalidAna").
     expect(screen.getByRole("checkbox", { name: `Ana ${ANA}` })).toBeInTheDocument();
-    const previa = screen.getByText("شاركت Glenda معك ملخص اجتماع").closest("[lang]")!;
+    const previa = screen.getByText("شارك Glenda معك ملخص اجتماع").closest("[lang]")!;
     expect(previa).toHaveAttribute("lang", "ar");
     expect(previa).toHaveAttribute("dir", "rtl");
     // A tela em árabe com a reunião em português: a prévia segue o idioma do e-mail.

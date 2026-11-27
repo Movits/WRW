@@ -41,8 +41,8 @@ describe("equipes comigo", () => {
       equipes: [{ pastaId: PASTA, nome: "Jurídico", icone: "livro", cor: "azul", papel: "reader", nomeDaDona: "Dona Clara" }],
     };
     render(<EquipesComigo/>);
-    expect(screen.getByText("Equipe de Dona Clara · Membra")).toBeInTheDocument();
-    expect(screen.getByText("Equipe de Dona Clara · Leitora")).toBeInTheDocument();
+    expect(screen.getByText("Equipe de Dona Clara · Membro")).toBeInTheDocument();
+    expect(screen.getByText("Equipe de Dona Clara · Leitor")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Recusar" }));
     fireEvent.click(screen.getByRole("button", { name: "Aceitar" }));
     expect(duble.responder.mutate.mock.calls.map(([pedido]) => pedido)).toEqual([{ membraId: MEMBRA, aceitar: false }, { membraId: MEMBRA, aceitar: true }]);

@@ -39,8 +39,8 @@ describe("a página do convite da equipe", () => {
     abrir();
     expect(screen.getByRole("heading", { name: "Vendas Sul" })).toBeInTheDocument();
     expect(screen.getByText("Equipe de Dona Clara")).toBeInTheDocument();
-    expect(screen.getByText("Seu papel: Leitora")).toBeInTheDocument();
-    expect(screen.getByText(/você aparece para a dona e para as membras desta equipe/)).toBeInTheDocument();
+    expect(screen.getByText("Seu papel: Leitor")).toBeInTheDocument();
+    expect(screen.getByText(/você aparece para o dono e para os membros desta equipe/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Entrar na equipe" }));
     expect(duble.aceitar.mutate).toHaveBeenCalledWith({ token: TOKEN });
     await act(async () => { await duble.opcoes?.onSuccess?.({ pastaId: PASTA }); });

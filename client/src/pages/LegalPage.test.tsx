@@ -196,7 +196,7 @@ describe("página pública de Privacidade", () => {
 
     const texto = document.body.textContent ?? "";
     expect(texto).toMatch(/participantes que\s+voc[êe] convida/);
-    expect(texto).toMatch(/membras da equipe/);
+    expect(texto).toMatch(/membros da equipe/);
     expect(texto).not.toMatch(/A reuni[ãa]o [ée] sua: s[óo] voc[êe] acessa/);
   });
 

@@ -177,7 +177,7 @@ describe("Resumir um vídeo do YouTube: a 375 px e em árabe", () => {
     expect(link).toHaveAttribute("dir", "ltr");
     expect(within(janela).getByLabelText("اللغة المحكية في الفيديو")).toHaveValue("ar");
     fireEvent.click(within(janela).getByRole("button", { name: "تلخيص الفيديو" }));
-    expect(within(janela).getByText("الصقي رابط الفيديو.")).toBeInTheDocument();
+    expect(within(janela).getByText("الصق رابط الفيديو.")).toBeInTheDocument();
     expect(duble.pedido.mutate).not.toHaveBeenCalled();
   });
 });

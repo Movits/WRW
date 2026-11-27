@@ -271,7 +271,7 @@ describe("Perguntar a várias reuniões — a resposta", () => {
     await act(async () => { await i18n.changeLanguage("ar"); });
     rede.respostas["perguntasEntreReunioes.perguntar"] = RESPOSTA;
     abrir();
-    expect(await screen.findByRole("heading", { name: "اسألي عدة اجتماعات" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "اسأل عدة اجتماعات" })).toBeInTheDocument();
     fireEvent.click(within(await screen.findByRole("list", { name: "وسوم اجتماعاتك" })).getByRole("button", { name: "Clientes" }));
     fireEvent.change(screen.getByRole("textbox", { name: "سؤالك عن الاجتماعات المختارة" }), { target: { value: "ما الذي تقرر؟" } });
     fireEvent.click(screen.getByRole("button", { name: /^اسأل$/ }));

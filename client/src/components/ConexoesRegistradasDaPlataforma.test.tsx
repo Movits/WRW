@@ -88,8 +88,8 @@ describe("Conexões registradas — a lista", () => {
     expect(within(primeira).getByText("NW-AAAAAA")).toBeInTheDocument();
     expect(within(segunda).getByText("Negócio fechado")).toBeInTheDocument();
     expect(within(segunda).getByText("Comissão da plataforma: a apurar")).toBeInTheDocument();
-    expect(within(terceira).getByText("Entre membras da plataforma")).toBeInTheDocument();
-    expect(within(terceira).getAllByText(/Membra da plataforma · conta/)).toHaveLength(2);
+    expect(within(terceira).getByText("Entre membros da plataforma")).toBeInTheDocument();
+    expect(within(terceira).getAllByText(/Membro da plataforma · conta/)).toHaveLength(2);
   });
 
   it("os filtros de origem e etapa vão na consulta", () => {
@@ -169,7 +169,7 @@ describe("Conexões registradas — a apuração da comissão", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Comissão não devida" })[0]);
     const dialogo = screen.getByRole("dialog");
-    expect(within(dialogo).getByText("da originadora NW-CCCCCC")).toBeInTheDocument();
+    expect(within(dialogo).getByText("do originador NW-CCCCCC")).toBeInTheDocument();
     fireEvent.click(within(dialogo).getByRole("button", { name: "Confirmar" }));
     expect(duble.mutate).toHaveBeenCalledWith({ conexaoId: "c-fechada", status: "nao_devida", participanteId: 7 });
   });

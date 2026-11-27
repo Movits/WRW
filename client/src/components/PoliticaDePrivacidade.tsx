@@ -119,7 +119,7 @@ export function PoliticaDePrivacidade() {
           </Item>
           <Item titulo="Perfil.">
             Informações profissionais, o que você tem e o que você procura, foto e apresentação.
-            Para quê: cruzar o seu perfil com o de outras membras e gerar oportunidades. No
+            Para quê: cruzar o seu perfil com o de outros membros e gerar oportunidades. No
             cruzamento de perfis, o seu nome só aparece para a outra pessoa depois do interesse
             mútuo; antes disso, uma pessoa da equipe (o distribuidor) pode ler os dois perfis para
             conferir se o encontro faz sentido, e essa leitura fica registrada.
@@ -147,9 +147,9 @@ export function PoliticaDePrivacidade() {
             desenhos que você anexa ao resumo ficam até você tirá-los ou excluir a reunião. Para quê: transcrever, resumir e
             ligar o que foi dito à sua rede. A reunião é sua e nasce visível só para você. Ela
             passa a ser lida também por quem você escolhe: quem abre o link de compartilhamento,
-            se você o ligar; quem recebe o resumo por e-mail que você envia; as participantes que
-            você convida para a reunião; e as membras da equipe da pasta onde a reunião está.
-            Participantes e membras leem a reunião pronta (transcrição, resumo e áudio) e não
+            se você o ligar; quem recebe o resumo por e-mail que você envia; os participantes que
+            você convida para a reunião; e os membros da equipe da pasta onde a reunião está.
+            Participantes e membros leem a reunião pronta (transcrição, resumo e áudio) e não
             podem mudá-la; tirar a reunião da pasta, remover a pessoa ou mandar a reunião para a
             lixeira corta esse acesso.
           </Item>
@@ -161,7 +161,7 @@ export function PoliticaDePrivacidade() {
             a reunião ou a conta.
           </Item>
           <Item titulo="Mensagens, sala de negociação e oportunidades.">
-            As mensagens que você troca com outras membras, as oportunidades e os documentos que
+            As mensagens que você troca com outros membros, as oportunidades e os documentos que
             você cadastra nelas, os grupos estratégicos e, na sala de negociação, as mensagens, os
             documentos e o aceite do acordo de confidencialidade. Para quê: aproximar as partes e
             registrar a negociação. Na sala de negociação, as outras partes da sala veem o que você
@@ -246,8 +246,8 @@ export function PoliticaDePrivacidade() {
           de cada consulta.
         </Citacao>
         <p>
-          Além do link de compartilhamento, também leem a reunião pronta as participantes que
-          você convida e as membras da equipe da pasta (seção 3).
+          Além do link de compartilhamento, também leem a reunião pronta os participantes que
+          você convida e os membros da equipe da pasta (seção 3).
         </p>
         <Citacao>
           Para gerar o áudio, o texto do resumo vai ao Gemini, da Google, que o lê com uma voz
@@ -278,7 +278,7 @@ export function PoliticaDePrivacidade() {
             ar. Hoje ele ainda não existe.</Item>
         </Lista>
         <p>
-          Dentro da plataforma, outras membras só veem o que está descrito na seção 3. Também
+          Dentro da plataforma, outros membros só veem o que está descrito na seção 3. Também
           podemos fornecer dados a autoridades quando a lei ou uma ordem judicial exigir.
         </p>
       </Secao>
@@ -296,7 +296,7 @@ export function PoliticaDePrivacidade() {
         <p>
           A administração da plataforma (administradoras e presidência,
           nunca uma conta Ouro sem cargo) só consulta uma reunião gravada por motivo justificado:
-          apuração de denúncia, segurança, suporte pedido pela própria usuária, obrigação legal ou
+          apuração de denúncia, segurança, suporte pedido pelo próprio usuário, obrigação legal ou
           ordem judicial. O motivo é registrado antes de qualquer leitura, e você vê, no detalhe da
           reunião, a data de cada consulta. A administração nunca vê a sua rede particular de
           contatos por esse caminho, nem a amostra do seu perfil de voz. A reunião gravada antes
@@ -378,7 +378,7 @@ export function PoliticaDePrivacidade() {
           <li>quatro tipos de registro de auditoria: a leitura dos contatos Ouro, a tentativa de
             usar uma sessão já encerrada e a lista e a consulta de reuniões pela administração;</li>
           <li>as referências à sua conta em registros de outras pessoas (por exemplo, quem
-            aprovou a oportunidade de outra membra), só com um número interno, sem nome nem e-mail.</li>
+            aprovou a oportunidade de outro membro), só com um número interno, sem nome nem e-mail.</li>
         </Lista>
         <p>
           Duas exceções técnicas: o arquivo da foto de perfil e os arquivos dos documentos de

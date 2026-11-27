@@ -76,7 +76,7 @@ function ModalDoMotivo({ reuniao, aoFechar, aoAbrir }: {
         <DialogHeader>
           <DialogTitle>Consultar “{reuniao.titulo}”</DialogTitle>
           <DialogDescription className="text-white/60">
-            Esta consulta fica registrada com o seu nome, a data e o motivo. A dona da reunião vê a data da consulta.
+            Esta consulta fica registrada com o seu nome, a data e o motivo. O dono da reunião vê a data da consulta.
           </DialogDescription>
         </DialogHeader>
         <form id="motivo-da-consulta" className="space-y-3" onSubmit={evento => {
@@ -195,7 +195,7 @@ export function ConsultaDeReunioesDaPlataforma() {
         <p>Só a administração da plataforma (admin e presidência) consulta reuniões gravadas, e cada consulta pede o motivo antes de abrir. Reuniões gravadas antes de 23/11/2026 não podem ser consultadas.</p>
       </div>
       <form className="flex flex-wrap gap-2 items-center" onSubmit={evento => { evento.preventDefault(); setPaginas([undefined]); setBuscaAplicada(busca.trim()); }}>
-        <input value={busca} onChange={evento => setBusca(evento.target.value)} maxLength={120} placeholder="Título, nome ou e-mail da dona"
+        <input value={busca} onChange={evento => setBusca(evento.target.value)} maxLength={120} placeholder="Título, nome ou e-mail do dono"
           aria-label="Buscar reuniões" className="min-w-0 basis-full sm:basis-auto flex-1 rounded-lg bg-[#151312] border border-white/15 px-3 py-2 text-sm" />
         <Button type="submit" variant="outline" className="border-white/15">Buscar</Button>
         <label className="flex items-center gap-2 text-sm text-white/60">
