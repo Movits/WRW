@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pause, Play, Square, Volume2 } from "lucide-react";
+import { Pause, Play, SkipBack, SkipForward, Square, Volume2 } from "lucide-react";
 import { escolherVoz, falasCurtas, PRAZO_DAS_VOZES } from "@/lib/leitura-em-voz-alta";
 import type { IdiomaFalado } from "@shared/idioma-da-reuniao";
 
@@ -32,6 +32,12 @@ import type { IdiomaFalado } from "@shared/idioma-da-reuniao";
  * seguiria lendo atrás de uma tela que diz "pausada". Com uma fala só, a
  * interrupção vira pausa de verdade sem que esta tela chame o cancel(), que
  * no Chrome calaria também a voz de quem interrompeu.
+ *
+ * A barra da leitura (pedido do Roberto de 26/11/2026): a speechSynthesis não
+ * tem tempo, então a barra anda por trecho (a fala curta da vez): mostra
+ * "Trecho N de M", arrastar ou tocar nela pula para outro trecho, e os botões
+ * voltam ou avançam um trecho. Lendo, o pulo cala a fala da vez desta tela e
+ * lê a escolhida; pausada, só muda de onde o Continuar começa.
  *
  * Um som por vez: começar a ler pausa a gravação que estiver tocando, e a
  * gravação que começa a tocar (o "▶ mm:ss", o player do rodapé) pausa a
@@ -74,6 +80,11 @@ function pausarAsGravacoes() {
 function useLeituraEmVozAlta(antesDeParar: () => void) {
   const [estado, setEstado] = useState<EstadoDaLeitura>("parada");
   const [falhou, setFalhou] = useState(false);
+  // A posição da leitura, para a barra: o trecho da vez e quantos são.
+  const [posicao, setPosicao] = useState({ indice: 0, total: 0 });
+  // O estado de agora, para o pulo, que é chamado fora da renderização.
+  const estadoAgora = useRef<EstadoDaLeitura>("parada");
+  estadoAgora.current = estado;
   const leitura = useRef<{ falas: string[]; voz: SpeechSynthesisVoice; indice: number } | null>(null);
   // Cada começar, pausar e parar abre uma vez nova. O fim ou o erro que chega
   // de uma fala de vez velha (o cancel() dispara um ou outro, conforme o
@@ -115,6 +126,7 @@ function useLeituraEmVozAlta(antesDeParar: () => void) {
     };
     const falar = () => {
       const n = atual.indice;
+      setPosicao({ indice: n, total: atual.falas.length });
       const fala = new SpeechSynthesisUtterance(atual.falas[n]);
       fala.voice = atual.voz;
       fala.lang = atual.voz.lang;
@@ -154,6 +166,7 @@ function useLeituraEmVozAlta(antesDeParar: () => void) {
     encerrar();
     if (!falas.length) return;
     leitura.current = { falas, voz, indice: 0 };
+    setPosicao({ indice: 0, total: falas.length });
     setFalhou(false);
     setEstado("lendo");
     pausarAsGravacoes();
@@ -176,6 +189,22 @@ function useLeituraEmVozAlta(antesDeParar: () => void) {
     encerrar();
     ficarParada();
   };
+  // Pula para o trecho `alvo` (a barra e os botões de voltar e avançar).
+  const irPara = (alvo: number) => {
+    const atual = leitura.current;
+    if (!atual) return;
+    const n = Math.max(0, Math.min(atual.falas.length - 1, alvo));
+    if (n === atual.indice) return;
+    atual.indice = n;
+    setPosicao({ indice: n, total: atual.falas.length });
+    if (estadoAgora.current !== "lendo") return;
+    // A fala da vez é desta tela: calá-la não cala a voz de mais ninguém. A
+    // vez nova faz o fim ou o erro que o cancel() dispara não mexer em nada.
+    vez.current += 1;
+    naVez.current = null;
+    sintese()?.cancel();
+    enfileirar();
+  };
 
   // Sair da tela (ou da aba Resumo) cala a leitura; recarregar ou fechar a
   // página também, porque o Chrome segue falando depois de recarregar. A
@@ -196,7 +225,7 @@ function useLeituraEmVozAlta(antesDeParar: () => void) {
     return () => document.removeEventListener("play", pausar, true);
   }, [estado]);
 
-  return { estado, falhou, comecar, pausar, continuar, parar };
+  return { estado, falhou, posicao, comecar, pausar, continuar, parar, irPara };
 }
 
 // O nome do idioma no idioma da tela ("inglês", "English"). Só a base: a voz
@@ -261,7 +290,33 @@ export function OuvirOResumo({ falas, idioma }: { falas: readonly string[]; idio
         <Square size={13} aria-hidden/> {t("meetings.summary.listenStop")}
       </button>}
     </div>
+    {leitura.estado !== "parada" && leitura.posicao.total > 1 && <BarraDaLeitura posicao={leitura.posicao} irPara={leitura.irPara}/>}
     {aviso && <p id={idDoAviso} className="max-w-xs text-xs text-white/50 sm:text-end">{aviso}</p>}
     {leitura.falhou && <p role="alert" className="max-w-xs text-xs text-red-200 sm:text-end">{t("meetings.summary.listenError")}</p>}
+  </div>;
+}
+
+/**
+ * A barra da leitura por trecho: o controle deslizante nativo (role slider,
+ * com as setas, o Home e o End do teclado), com o "Trecho N de M" no
+ * aria-valuetext e na tela, e os botões de voltar e avançar um trecho.
+ */
+function BarraDaLeitura({ posicao, irPara }: { posicao: { indice: number; total: number }; irPara: (indice: number) => void }) {
+  const { t } = useTranslation();
+  const { indice, total } = posicao;
+  const texto = t("meetings.summary.listenPosition", { n: indice + 1, total });
+  const botao = "inline-flex items-center justify-center rounded-lg border border-white/15 p-1.5 text-white/70 hover:bg-white/5 disabled:opacity-40";
+  return <div className="flex w-full max-w-xs items-center gap-2">
+    <button type="button" onClick={() => irPara(indice - 1)} disabled={indice === 0} aria-label={t("meetings.summary.listenPrevious")} className={botao}>
+      <SkipBack size={13} aria-hidden className="rtl:-scale-x-100"/>
+    </button>
+    <input type="range" min={1} max={total} step={1} value={indice + 1}
+      onChange={evento => irPara(Number(evento.target.value) - 1)}
+      aria-label={t("meetings.summary.listenSeek")} aria-valuetext={texto}
+      className="min-w-0 flex-1 accent-amber-300"/>
+    <button type="button" onClick={() => irPara(indice + 1)} disabled={indice >= total - 1} aria-label={t("meetings.summary.listenNext")} className={botao}>
+      <SkipForward size={13} aria-hidden className="rtl:-scale-x-100"/>
+    </button>
+    <span aria-hidden className="shrink-0 text-xs tabular-nums text-white/50">{texto}</span>
   </div>;
 }

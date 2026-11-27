@@ -1399,7 +1399,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
       {/* O vídeo não fica guardado aqui: tentar de novo lê o vídeo outra vez
           pela URL, e gasta uma vaga do teto de vídeos por dia. A falha que se
           repete com o mesmo vídeo (fala demais, nenhuma fala) não tem botão: o
-          motivo já diz o que fazer, e o servidor também recusa. */}
+          motivo já diz o que fazer, e o servidor também recusa. Sem o botão,
+          a tela diz por que ele não está ali (T44, 26/11/2026: o teste no
+          iPhone procurou o "Tentar de novo" e não soube que faltava de
+          propósito). */}
+      {erroDoYoutubeSeRepete(meeting.processingError) && <p className="mt-2 text-sm text-red-100/75">{t("meetings.youtube.retryNotOffered")}</p>}
       {!erroDoYoutubeSeRepete(meeting.processingError) && <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-red-100/75">{t("meetings.youtube.retryHint", { n: VIDEOS_DO_YOUTUBE_POR_DIA })}</p>
         <button type="button" onClick={() => refazerVideo.mutate({ meetingId })} disabled={refazerVideo.isPending}
