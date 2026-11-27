@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 import { protectedProcedure, router } from "../_core/trpc";
 import { exigirDb } from "../db";
+import { ehErroDeBancoIndisponivel } from "../banco-indisponivel";
 import { exigirTextoSemContato } from "../bloqueio-de-contato";
 import { createNotification } from "../db";
 import { storagePut } from "../storage";
@@ -19,6 +20,19 @@ import {
   users,
 } from "../../drizzle/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
+
+/**
+ * A sala com negócio registrado fica fechada. Conserta a sala que ficou aberta
+ * com o registro já gravado (a corrida com a outra parte, ou linha de antes da
+ * transação), sem mexer na que já está fechada.
+ */
+async function garantirSalaFechada(
+  db: Awaited<ReturnType<typeof exigirDb>>,
+  room: { id: number; status: string },
+) {
+  if (room.status === "closed") return;
+  await db.update(dealRooms).set({ status: "closed" }).where(eq(dealRooms.id, room.id));
+}
 
 // Helper: verifica se o usuário é Ouro ou superior
 const isGoldOrAbove = (role?: string | null) =>
@@ -437,44 +451,64 @@ export const dealRoomRouter = router({
       }
 
       const [jaFechado] = await db.select().from(dealClosures).where(eq(dealClosures.roomId, input.roomId)).limit(1);
-      if (jaFechado) return { success: true, closure: jaFechado, jaEstavaFechado: true };
+      if (jaFechado) {
+        await garantirSalaFechada(db, room);
+        return { success: true, closure: jaFechado, jaEstavaFechado: true };
+      }
 
       // Duas casas, arredondadas uma vez só: o valor gravado é o que a fatura vai
       // cobrar, então não pode depender de quem recalcula depois.
       const comissao = Math.round(input.intermediationFee * input.commissionPercent) / 100;
 
+      // O registro e a sala fechada andam juntos: numa transação, para não sobrar
+      // negócio registrado com a sala ainda aberta (ou o contrário).
       try {
-        await db.insert(dealClosures).values({
-          roomId: input.roomId,
-          opportunityId: room.opportunityId,
-          closedByUserId: ctx.user.id,
-          currency: input.currency,
-          dealValue: input.dealValue.toFixed(2),
-          intermediationFee: input.intermediationFee.toFixed(2),
-          commissionPercent: input.commissionPercent.toFixed(2),
-          commissionAmount: comissao.toFixed(2),
-          notes: input.notes ?? null,
+        await db.transaction(async tx => {
+          await tx.insert(dealClosures).values({
+            roomId: input.roomId,
+            opportunityId: room.opportunityId,
+            closedByUserId: ctx.user.id,
+            currency: input.currency,
+            dealValue: input.dealValue.toFixed(2),
+            intermediationFee: input.intermediationFee.toFixed(2),
+            commissionPercent: input.commissionPercent.toFixed(2),
+            commissionAmount: comissao.toFixed(2),
+            notes: input.notes ?? null,
+          });
+          await tx.update(dealRooms).set({ status: "closed" }).where(eq(dealRooms.id, input.roomId));
         });
       } catch (erro) {
-        // Corrida perdida: a outra parte encerrou no mesmo instante. O resultado
-        // que esta chamada pediu já aconteceu.
+        // Banco fora do ar é erro, nunca "já estava fechado".
+        if (ehErroDeBancoIndisponivel(erro)) throw erro;
+        // Corrida perdida: a outra parte encerrou no mesmo instante e o índice
+        // único recusou esta linha. O resultado que esta chamada pediu já aconteceu.
         const [agora] = await db.select().from(dealClosures).where(eq(dealClosures.roomId, input.roomId)).limit(1);
         if (!agora) throw erro;
+        await garantirSalaFechada(db, room);
         return { success: true, closure: agora, jaEstavaFechado: true };
       }
 
-      await db.update(dealRooms).set({ status: "closed" }).where(eq(dealRooms.id, input.roomId));
-
       // A outra parte precisa saber que o negócio foi registrado, e com que
-      // números — é ela quem vai conferir se bate com o que combinaram.
+      // números — é ela quem vai conferir se bate com o que combinaram. O negócio
+      // já está gravado: falhar o aviso não pode virar erro para quem encerrou.
       const outraParte = room.ownerId === ctx.user.id ? room.interestedId : room.ownerId;
-      await createNotification({
-        userId: outraParte,
-        type: "deal_closed",
-        title: "Negociação encerrada e registrada",
-        body: `Valor ${input.currency} ${input.dealValue.toFixed(2)}, honorários da intermediação ${input.intermediationFee.toFixed(2)}, comissão de ${input.commissionPercent.toFixed(2)}% sobre eles = ${input.currency} ${comissao.toFixed(2)}.`,
-        actionUrl: `/deal-room/${input.roomId}`,
-      });
+      try {
+        await createNotification({
+          userId: outraParte,
+          type: "deal_closed",
+          title: "Negociação encerrada e registrada",
+          body: `Valor ${input.currency} ${input.dealValue.toFixed(2)}, honorários da intermediação ${input.intermediationFee.toFixed(2)}, comissão de ${input.commissionPercent.toFixed(2)}% sobre eles = ${input.currency} ${comissao.toFixed(2)}.`,
+          actionUrl: `/deal-room/${input.roomId}`,
+        });
+      } catch (erro) {
+        // Só a sala e o tipo do erro no log: nem valores nem quem são as partes.
+        const codigo = (erro as { code?: unknown })?.code;
+        console.error(
+          `[DealRoom] o aviso do encerramento da sala ${input.roomId} não foi gravado; o negócio está registrado.`,
+          erro instanceof Error ? erro.name : typeof erro,
+          typeof codigo === "string" ? codigo : "",
+        );
+      }
 
       const [closure] = await db.select().from(dealClosures).where(eq(dealClosures.roomId, input.roomId)).limit(1);
       return { success: true, closure, jaEstavaFechado: false };
