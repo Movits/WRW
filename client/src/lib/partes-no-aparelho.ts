@@ -127,6 +127,17 @@ export async function contarPartesDa(dona: string, pular: (meetingId: string) =>
 }
 
 /**
+ * Quantas partes de QUALQUER conta estão no aparelho, pelas chaves, sem trazer
+ * o áudio. É a pergunta do Sair da conta (components/SairDaConta.tsx): ele
+ * apaga todas (apagarTodasAsPartes), de toda conta, então conta todas.
+ * `pular` tira as reuniões que não contam (a gravação descartada).
+ */
+export async function contarTodasAsPartes(pular: (meetingId: string) => boolean = () => false): Promise<number> {
+  const chaves = await comTabela<IDBValidKey[]>("readonly", tabela => tabela.getAllKeys());
+  return chaves.filter(chave => Array.isArray(chave) && typeof chave[0] === "string" && !pular(chave[0])).length;
+}
+
+/**
  * A gravação descartada (G13b): as cópias dela saem do aparelho, para a
  * retomada não reenviá-las nem contá-las como áudio por enviar. Sem IndexedDB
  * neste navegador nada foi guardado, e não há o que apagar; as outras falhas
