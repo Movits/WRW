@@ -15,7 +15,7 @@ gravação.
   e até 10 e-mails digitados. A WRW manda um e-mail a cada pessoa, sem cópia para as
   outras, com o **link aberto** da reunião (o mesmo do "Compartilhar por link").
 - Quem recebe abre, sem conta na WRW, o que o link aberto já abria: o resumo, a
-  transcrição, a gravação enquanto ela existir (30 dias) e o Pergunte à IA, com os nomes
+  transcrição, a gravação enquanto ela existir (até a dona excluir a reunião ou encerrar a conta, desde 26/11/2026) e o Pergunte à IA, com os nomes
   que a dona deu às vozes.
 - **Com a senha e o áudio do link (H23, no Pacote 4d):** a dona pode tirar o áudio do
   link e pôr nele uma senha de 6 dígitos. O e-mail segue o link como ele está na hora do

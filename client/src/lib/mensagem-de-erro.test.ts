@@ -331,7 +331,7 @@ describe("mensagemDaRecusaDoAudio — o código do servidor vira o aviso no idio
   const recusa = (code: string, message: string) =>
     TRPCClientError.from({ error: { code: -32000, message, data: { code, httpStatus: 400 } } });
   const CASOS: Array<[string, string, string, string]> = [
-    ["PRECONDITION_FAILED", RECUSAS_DO_AUDIO.vencido, "meetings.audioDownload.expired", "This meeting's audio is more than 30 days old and can no longer be downloaded. The transcript is still here."],
+    ["PRECONDITION_FAILED", RECUSAS_DO_AUDIO.vencido, "meetings.audioDownload.expired", "This meeting's audio is no longer stored and cannot be downloaded. The transcript is still here."],
     ["PRECONDITION_FAILED", RECUSAS_DO_AUDIO.ausente, "meetings.audioDownload.noAudio", "This meeting has no stored audio to download."],
     ["PRECONDITION_FAILED", RECUSAS_DO_AUDIO.aindaGravando, "meetings.audioDownload.stillRecording", "The recording is still coming in. Wait for it to finish to download the audio."],
     ["TOO_MANY_REQUESTS", RECUSAS_DO_AUDIO.demais, "meetings.audioDownload.tooMany", "Too many audio files downloaded in the last hour. Wait a little and try again."],

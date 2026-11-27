@@ -68,9 +68,9 @@ import { RECUSAS_DA_JUNCAO, REUNIOES_POR_JUNCAO_MAX, type CodigoDaRecusaDaJuncao
  *    prazo ficam. O teto de anexos por reunião vale para anexar, não aqui: a
  *    junção nunca apaga o que a dona anexou.
  *
- * O prazo de cada áudio não muda (30 dias desde o envio dele): a junção nunca
- * guarda áudio além do prazo, e o áudio mais novo não vence antes por ter sido
- * juntado ao mais velho (decisão vetável, anotada no relatório da H17).
+ * O expires_at de cada áudio vai como estava. Desde 26/11/2026 o áudio não vence
+ * (ARQUIVO_SEM_PRAZO, em meeting-service.ts); a conferência abaixo, que vinha
+ * dos 30 dias, só recusa o áudio marcado para sair.
  */
 
 type CodigoTrpc = "BAD_REQUEST" | "NOT_FOUND" | "CONFLICT" | "PRECONDITION_FAILED";
@@ -322,10 +322,9 @@ export function planejarJuncao(ownerId: string, reunioes: readonly ReuniaoParaJu
   if (seqBase > PARTES_POR_REUNIAO_MAX || tempoMs / 1000 > GRAVACAO_EM_PARTES_SEGUNDOS_MAX + FOLGA_DA_SOMA_DAS_PARTES_SEGUNDOS || rotulosUsados > MAIOR_ROTULO) {
     throw new RecusaDaJuncao("PRECONDITION_FAILED", RECUSAS_DA_JUNCAO.longaDemais);
   }
-  // O áudio tem de durar a junção inteira: a montagem (e a transcrição das
-  // partes marcadas) segura o áudio vencido sem servi-lo, e o que vence antes
-  // do fim seria lido ou relido depois do prazo. Na retranscrição vale a margem
-  // do reprocesso, que cresce com as partes; sem ela, a do processamento.
+  // O áudio marcado para sair (expires_at no passado) não entra na junção. A
+  // margem vinha do prazo dos 30 dias de antes de 26/11/2026: com
+  // ARQUIVO_SEM_PRAZO, só a marca de saída a alcança.
   const margem = retranscrever ? margemDoReprocesso(seqBase) : LIMITE_PROCESSAMENTO_MS;
   if (prazos.some(prazo => prazo <= agora + margem)) throw new RecusaDaJuncao("PRECONDITION_FAILED", RECUSAS_DA_JUNCAO.semAudio);
 

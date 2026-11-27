@@ -11,9 +11,9 @@ vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; 
  *
  * - o PDF (e as fotos, que chegam juntas num PDF) vira a transcrição, com as
  *   páginas, e a reunião segue o caminho de sempre até o resumo guardado;
- * - o arquivo fica 30 dias, como o áudio, e sai pela varredura, pela leitura
- *   vencida, pela exclusão da reunião e, quando o bucket recusa, fica como
- *   ponteiro vencido;
+ * - o arquivo fica, como o áudio, até a dona excluir a reunião (desde
+ *   26/11/2026; antes eram 30 dias) e sai pela exclusão; quando o bucket recusa,
+ *   fica como ponteiro marcado, que a varredura e a leitura tiram;
  * - a falha grava o código, e o reprocesso relê o PDF guardado;
  * - o link aberto mostra o texto, nunca o arquivo.
  */
@@ -49,7 +49,7 @@ const { getDb } = await import("./db");
 const { consumoDeMinutos, meetingDocuments, meetings, meetingSummaries, meetingSummaryItems, meetingTranscripts, users } = await import("../drizzle/schema");
 const { iniciarDocumento, lerDocumentoGuardado, processarDocumento, receberDocumento, RecusaDoDocumento } = await import("./documento-da-reuniao");
 const {
-  deletePrivateMeeting, getPrivateMeeting, iniciarReprocessamento, limparGravacoesVencidas, marcarReunioesInterrompidas, MEETING_AUDIO_TTL_MS,
+  deletePrivateMeeting, getPrivateMeeting, iniciarReprocessamento, limparGravacoesVencidas, marcarReunioesInterrompidas, ARQUIVO_SEM_PRAZO,
   ReprocessamentoRecusado,
 } = await import("./meeting-service");
 const { GeminiIndisponivelError, GeminiRecusouChamadaError, GeminiRespostaCortadaError } = await import("./gemini");
@@ -134,7 +134,7 @@ describe.skipIf(!temBanco)("Reunião de documento no banco (integração)", () =
     const { id } = await iniciarDocumento(DONA, { title: "Contrato", language: "pt-BR", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DO_DOCUMENTO, origem: "pdf" });
     const reuniao = await reuniaoDe(id);
     expect(reuniao).toMatchObject({
-      status: "uploading", consentGranted: true, consentNoticeVersion: "documento-2026-11-19", origem: "pdf", audioPipeline: "single", language: "pt-BR",
+      status: "uploading", consentGranted: true, consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DO_DOCUMENTO, origem: "pdf", audioPipeline: "single", language: "pt-BR",
     });
     expect(reuniao.consentAt).toBeGreaterThan(0);
   });
@@ -164,15 +164,13 @@ describe.skipIf(!temBanco)("Reunião de documento no banco (integração)", () =
     expect(resumo.itens.map(item => item.text)).toEqual(["Mandar a proposta a Lisboa"]);
   });
 
-  it("o arquivo fica guardado como o áudio: chave exata da dona, 30 dias, e a tela da dona recebe só a url do proxy", async () => {
-    const antes = Date.now();
+  it("o arquivo fica guardado como o áudio: chave exata da dona, sem prazo (até a exclusão), e a tela da dona recebe só a url do proxy", async () => {
     const id = await documentoPronto();
     const documento = await documentoDe(id);
     expect(documento.storageKey).toMatch(new RegExp(`^meetings/${DONA}/${id}/documento-[0-9a-f]{8}\\.pdf$`));
     expect(documento.storageUrl).toBe(`/manus-storage/${documento.storageKey}`);
     expect(documento.mimeType).toBe("application/pdf");
-    expect(documento.expiresAt).toBeGreaterThanOrEqual(antes + MEETING_AUDIO_TTL_MS);
-    expect(documento.expiresAt).toBeLessThanOrEqual(Date.now() + MEETING_AUDIO_TTL_MS);
+    expect(documento.expiresAt).toBe(ARQUIVO_SEM_PRAZO);
     expect(storagePut).toHaveBeenCalledWith(documento.storageKey, expect.any(Buffer), "application/pdf", { chaveExata: true });
 
     const tela = await getPrivateMeeting(DONA, id);
@@ -250,7 +248,7 @@ describe.skipIf(!temBanco)("Reunião de documento no banco (integração)", () =
     await trabalho;
     expect(storageGetBytes).toHaveBeenCalledWith(documento.storageKey, 15_000_000);
     expect(await reuniaoDe(id)).toMatchObject({ status: "ready", processingError: null });
-    // Reprocessar não grava arquivo novo nem renova os 30 dias.
+    // Reprocessar não grava arquivo novo nem mexe no expires_at.
     expect(storagePut).toHaveBeenCalledTimes(1);
     expect((await documentoDe(id)).expiresAt).toBe(documento.expiresAt);
   });

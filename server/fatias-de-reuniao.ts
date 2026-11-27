@@ -1,12 +1,12 @@
 import crypto from "crypto";
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { meetingAudioSlices, meetings } from "../drizzle/schema";
 import { exigirDb } from "./db";
 import { storageApagarTodasAsVersoes, storagePut } from "./storage";
 import { analisarAudio, medirDuracaoDoAudio } from "./duracao-do-audio";
 import { converterParteEmMp3 } from "./conversao-do-audio";
 import { esperarVagaDeConversao } from "./baixar-audio-da-reuniao";
-import { ALLOWED_MEETING_AUDIO_TYPES, MEETING_AUDIO_TTL_MS, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA } from "./meeting-service";
+import { ALLOWED_MEETING_AUDIO_TYPES, ARQUIVO_SEM_PRAZO, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA } from "./meeting-service";
 import { GRAVACAO_EM_PARTES_SEGUNDOS_MAX, PARTE_NO_SERVIDOR_BYTES_MAX, PARTE_NO_SERVIDOR_SEGUNDOS_MAX, PARTES_POR_REUNIAO_MAX, type CodigoDaRecusaDaParte } from "@shared/const";
 
 /**
@@ -137,12 +137,6 @@ export async function receberParte(
   const db = await exigirDb();
   const sha256 = crypto.createHash("sha256").update(recebidos).digest("hex");
   const agora = Date.now();
-  // O prazo do áudio da reunião em partes: 30 dias depois da chegada da ÚLTIMA
-  // parte, a mesma regra do envio único (30 dias contados do envio, que lá manda
-  // o áudio inteiro de uma vez no fim). Todas as partes da reunião ficam com o
-  // prazo da que chegou por último, para vencerem e saírem juntas: a gravação é
-  // uma só para quem a ouve, e não pode perder o começo antes do fim.
-  const prazo = agora + MEETING_AUDIO_TTL_MS;
 
   // A decisão (a reunião aceita esta parte? cabe no teto? a posição é nova?) e o
   // INSERT correm numa transação com a linha da reunião TRAVADA (FOR UPDATE):
@@ -165,8 +159,8 @@ export async function receberParte(
     // depois). Recusar aqui fazia a tela apagar a única cópia daquele trecho
     // (o 404 é recusa definitiva para ela), e a reunião restaurada era montada
     // com lacuna. Na lixeira, a fila não a transcreve (foraDaLixeira, em
-    // server/fila-de-transcricao.ts); apagar de vez, e o fim dos 30 dias,
-    // levam a parte com a reunião (deletePrivateMeeting).
+    // server/fila-de-transcricao.ts); apagar de vez, e o fim dos 30 dias na
+    // lixeira, levam a parte com a reunião (deletePrivateMeeting).
     if (!reuniao) throw new RecusaDaParte("SEM_REUNIAO", "Reunião não encontrada.");
     if (reuniao.pipeline !== "slices" || !reuniao.consentimento || !["recording", "uploading"].includes(reuniao.status)) {
       throw new RecusaDaParte("FORA_DO_ESTADO", "Esta reunião não está recebendo áudio.");
@@ -176,11 +170,7 @@ export async function receberParte(
 
     const existente = await lerParte(tx, meetingId, seq);
     if (existente && existente.sha256 !== sha256) throw new RecusaDaParte("CONTEUDO_DIFERENTE", "Esta parte da gravação já chegou com outro conteúdo.");
-    if (existente?.status === "uploading") {
-      // O reenvio da parte que não subiu é uma chegada também: renova o prazo.
-      await renovarPrazoDasPartes(tx, ownerId, meetingId, prazo);
-      return { linha: existente };
-    }
+    if (existente?.status === "uploading") return { linha: existente };
     if (existente) return { repetida: true as const };
 
     // O teto da reunião em partes é técnico, contra gasto (G13a): 12 h, com a
@@ -198,12 +188,11 @@ export async function receberParte(
     const nova = {
       id, meetingId, ownerId, seq, status: "uploading" as const,
       storageKey: chave, storageUrl: `/manus-storage/${chave}`, mimeType, sizeBytes: bytes.length, sha256,
-      durationMs: Math.round(duracao * 1000), expiresAt: prazo, createdAt: agora, updatedAt: agora,
+      durationMs: Math.round(duracao * 1000), expiresAt: ARQUIVO_SEM_PRAZO, createdAt: agora, updatedAt: agora,
     };
     // Com a reunião travada, dois envios da mesma parte se enfileiram aqui: o
     // segundo já acha a linha acima. O UNIQUE (reunião, posição) segue de guarda.
     await tx.insert(meetingAudioSlices).values(nova);
-    await renovarPrazoDasPartes(tx, ownerId, meetingId, prazo);
     return { linha: nova };
   });
   if ("repetida" in decisao) return { seq, repetida: true };
@@ -239,7 +228,6 @@ export async function receberParte(
 }
 
 type LeitorDoBanco = Pick<Awaited<ReturnType<typeof exigirDb>>, "select">;
-type EscritorDoBanco = Pick<Awaited<ReturnType<typeof exigirDb>>, "update">;
 
 /** O que a linha de uma parte guarda sobre o objeto: o bastante para refazê-la como ponteiro. */
 type LinhaDaParte = {
@@ -294,16 +282,6 @@ async function deixarSoOPonteiroDaParte(db: Awaited<ReturnType<typeof exigirDb>>
   if (!linhasAlcancadas(atualizada)) {
     await db.insert(meetingAudioSlices).values({ ...linha, ...ponteiro, createdAt: agora });
   }
-}
-
-/**
- * Leva o prazo de todas as partes da reunião ao da parte que acabou de chegar
- * (ver o prazo em receberParte). Nunca encurta: só toca a parte com prazo
- * menor. Corre na transação de receberParte, com a reunião travada.
- */
-async function renovarPrazoDasPartes(db: EscritorDoBanco, ownerId: string, meetingId: string, prazo: number) {
-  await db.update(meetingAudioSlices).set({ expiresAt: prazo })
-    .where(and(eq(meetingAudioSlices.meetingId, meetingId), eq(meetingAudioSlices.ownerId, ownerId), lt(meetingAudioSlices.expiresAt, prazo)));
 }
 
 async function lerParte(db: LeitorDoBanco, meetingId: string, seq: number) {

@@ -17,6 +17,26 @@ anteriores a 14/11/2026 ficam com a versão nula.
 O português é o texto de referência. Os outros 9 idiomas são tradução e precisam de
 revisão de tradução.
 
+## Versão 2026-11-26 (o áudio fica até a exclusão)
+
+Decisão do Roberto de 26/11/2026, seguindo a Política de Privacidade revisada pela Cris: as
+gravações, as transcrições e os resumos ficam até a organizadora apagar a reunião ou
+encerrar a conta. O áudio deixou de ser apagado sozinho aos 30 dias. A única mudança no
+aviso curto é a frase da retenção; o resto é o da versão 2026-11-24, abaixo, que segue
+aceita (como as anteriores) para a aba aberta antes do deploy.
+
+> Somente grave com o consentimento de todas as pessoas. O áudio é transcrito pela IA do
+> Google (Gemini), que pode processá-lo fora do Brasil e separar as falas por pessoa. O
+> áudio e a transcrição ficam na sua conta até você excluir a reunião ou encerrar a conta.
+> Só você acessa, a menos que ligue o link de compartilhamento da reunião (o que pede nova
+> autorização de quem falou). A administração da Marquesa Global Match só acessa gravações
+> por motivo justificado, registrado antes do acesso, e a organizadora é informada da data
+> de cada consulta.
+
+As reuniões gravadas antes, com as versões anteriores, também deixam de perder o áudio aos
+30 dias: o servidor tira o prazo das linhas antigas no boot. O áudio que já tinha saído
+antes de 26/11/2026 não volta.
+
 ## Versão 2026-11-24 (nome Marquesa Global Match)
 
 A Cris escreveu em 24/11/2026 que, em todos os lugares da plataforma em que constar o nome

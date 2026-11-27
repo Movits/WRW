@@ -323,15 +323,16 @@ async function startServer() {
   });
 
   // ============================================================
-  // JOB PERIÓDICO: gravações de reunião que passaram dos 30 dias
+  // JOB PERIÓDICO: arquivos de reunião marcados para sair
   // Endpoint: POST /api/scheduled/cleanup-recordings
   // Mesma sessão de cron da limpeza de sessões.
   //
-  // A tela promete que o áudio "expira automaticamente após 30 dias", e essa
-  // promessa é sobre a voz de TODAS as participantes, que não têm login e nunca
-  // vão abrir a página. O laço da varredura (server/varredura-de-gravacoes.ts,
-  // ligado lá embaixo, depois do listen) já faz esta limpeza no boot e a cada
-  // 5 min; o endpoint fica para o dia em que houver um agendador externo.
+  // Desde 26/11/2026 o áudio e os arquivos das reuniões não vencem: ficam até a
+  // dona excluir a reunião ou encerrar a conta. Esta limpeza tira do bucket o
+  // que a exclusão mandou sair e o bucket recusou na hora. O laço da varredura
+  // (server/varredura-de-gravacoes.ts, ligado lá embaixo, depois do listen) já
+  // a faz no boot e a cada 5 min; o endpoint fica para o dia em que houver um
+  // agendador externo.
   // ============================================================
   app.post("/api/scheduled/cleanup-recordings", async (req: Request, res: Response) => {
     const user = await autenticarCron(req, res);

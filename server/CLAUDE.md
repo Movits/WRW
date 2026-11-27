@@ -480,8 +480,8 @@ sem ele).
   As fotos e os desenhos do resumo (H4g e H4h, `server/anexos-do-resumo.ts`, tabela
   `meeting_attachments`) saem pelo link do mesmo jeito, por
   `/reuniao-aberta/{token}/anexo/{id}`, com a senha do link; tirar o áudio do link não os
-  tira. Seguem a regra do PDF da reunião: 30 dias, a varredura, a exclusão da reunião e
-  da conta; o servidor confere o conteúdo e tira os metadados (o GPS do EXIF).
+  tira. Seguem a regra do PDF da reunião: ficam até a dona tirá-las, excluir a reunião ou
+  encerrar a conta; o servidor confere o conteúdo e tira os metadados (o GPS do EXIF).
   Desde a H23 a dona tira o áudio do link (a consulta deixa de servi-lo) e põe uma senha
   de 6 dígitos: o link com senha só abre com o cookie HttpOnly de quem a acertou
   (`reuniaoAberta.entrar`), conferido em `reuniaoDoLink` pelos cookies que
@@ -494,6 +494,16 @@ sem ele).
   sem as variáveis do servidor e, com o Node como root, como o usuário nobody (se o sistema
   recusar a troca, o ffmpeg não sobe e o download fica indisponível: como root, ele leria o
   ambiente do servidor em `/proc/1/environ`).
+- **Retenção dos arquivos de reunião** (decisão do Roberto de 26/11/2026, com a Política
+  revisada pela Cris): o áudio (partes e gravação inteira), o PDF da reunião de documento
+  e as fotos e os desenhos do resumo NÃO vencem pelo tempo; ficam até a dona excluir a
+  reunião (a lixeira tem os 30 dias dela) ou encerrar a conta. A coluna `expires_at` das
+  quatro tabelas é a marca de saída: nasce com `ARQUIVO_SEM_PRAZO` e só vai ao passado
+  quando a exclusão manda o arquivo sair e o bucket recusa; a varredura
+  (`server/varredura-de-gravacoes.ts`) tira esses. Linha nova nessas tabelas nasce com
+  `ARQUIVO_SEM_PRAZO`. Até 26/11 eram 30 dias desde o envio
+  (`PRAZO_DOS_ARQUIVOS_ATE_26_11_MS`, que só lê o passado), e a passada do boot tira esse
+  prazo das linhas antigas (`tirarOPrazoDosArquivosDeAntes`).
 - **Segredos:** `JWT_SECRET` é obrigatória — o servidor se recusa a iniciar sem ela
   (`requireSecret()` em `server/_core/env.ts`, chamado ao carregar `server/sessao.ts`).
   `VAULT_ENCRYPTION_KEY` deve existir em produção, mas o código não a exige: sem ela,
@@ -507,8 +517,7 @@ sem ele).
 `processMeetingRecording` (o envio único de antes, sem rota desde a G14, parte 2) guardava o
 áudio no bucket antes da IA; `meetings.reprocess`
 (`iniciarReprocessamento` em `server/meeting-service.ts`) lê esses bytes de volta
-(`storageGetBytes`) e roda de novo transcrição e extração, sem gravar áudio nem renovar os
-30 dias. Cada execução tem uma FICHA: o `updated_at` que ela grava ao tomar a reunião para
+(`storageGetBytes`) e roda de novo transcrição e extração, sem gravar áudio. Cada execução tem uma FICHA: o `updated_at` que ela grava ao tomar a reunião para
 `processing` (UPDATE condicional a partir de `recording` no envio e de `failed` no
 reprocesso). Releitura, `ready` e `failed` exigem `status = 'processing' AND updated_at =
 ficha`: quem tomou a reunião por último (reprocesso novo, ou a varredura de interrompidas,
@@ -518,8 +527,8 @@ rejeita, porque rejeição solta derruba o processo. Os derivados da tentativa a
 saem depois de a IA dar certo, e decidir sobre sugestão ou entidade com a reunião em
 `processing` dá CONFLICT. Teto brando de 3 reprocessos aceitos por dona a cada 10 min.
 A reunião que nasceu de um documento (origem `pdf` ou `foto`, `server/documento-da-reuniao.ts`)
-se reprocessa pelo PDF guardado em `meeting_documents`, que segue a regra do áudio: 30 dias,
-a varredura, a exclusão da reunião e da conta, e a falha grava um CÓDIGO em
+se reprocessa pelo PDF guardado em `meeting_documents`, que segue a regra do áudio (fica até a
+exclusão da reunião ou da conta), e a falha grava um CÓDIGO em
 `processing_error` (`shared/documento-da-reuniao.ts`), que a tela traduz.
 
 ## Organizar as reuniões: detalhes, busca, junção, pastas e lixeira (H7c, H7b, H17 e H7d)
@@ -567,8 +576,8 @@ a varredura, a exclusão da reunião e da conta, e a falha grava um CÓDIGO em
   cópia no 404): a fila não a transcreve enquanto ela está lá, e restaurar devolve a reunião
   inteira. Consulta nova de reunião filtra por ali. Restaurar vale por 30 dias e devolve a reunião à pasta, com o
   link desligado; apagar de vez, esvaziar e o fim dos 30 dias (a varredura das gravações,
-  `esvaziarLixeiraVencida`) passam por `deletePrivateMeeting`. A lixeira não muda o prazo
-  do áudio.
+  `esvaziarLixeiraVencida`) passam por `deletePrivateMeeting`. O áudio fica com a reunião
+  na lixeira e sai com ela.
 
 ## As participantes da reunião e as vozes ligadas às contas (R1b e H3c)
 

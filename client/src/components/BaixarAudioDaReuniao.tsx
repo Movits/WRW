@@ -11,7 +11,7 @@ import { FORMATOS_DO_AUDIO, tamanhoEstimadoDoAudio, type FormatoDoAudio } from "
  * HiNoter): a dona baixa a gravação inteira num arquivo só, em MP3 ou M4A
  * (shared/baixar-audio.ts). Só a dona tem o botão: a página do link aberto não
  * o monta, e o servidor não tem procedimento nem rota de baixar áudio pelo
- * link. O detalhe só o mostra com a gravação encerrada e no prazo dos 30 dias;
+ * link. O detalhe só o mostra com a gravação encerrada e com o áudio guardado;
  * nos outros casos, o servidor recusa com um código que a tela traduz.
  *
  * Em dois toques, de propósito:

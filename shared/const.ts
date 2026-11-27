@@ -42,10 +42,8 @@ export const CODIGO_ERRO_INTERROMPIDO = "ERRO_INTERROMPIDO";
 /**
  * Quanto tempo uma reunião pode ficar em "processing" antes de a varredura
  * dá-la como interrompida. Mora em shared/ porque os dois lados o usam: o
- * servidor na varredura e para recusar reprocessar um áudio prestes a vencer
- * (a retenção não apaga o áudio da reunião em processamento, e o reprocesso o
- * seguraria além dos 30 dias; ver margemDoReprocesso, logo abaixo), e a tela
- * para nem oferecer o botão nesse caso.
+ * servidor na varredura e na margem do reprocesso (margemDoReprocesso, logo
+ * abaixo), e a tela para nem oferecer o botão nesse caso.
  */
 export const LIMITE_PROCESSAMENTO_MS = 15 * 60 * 1000;
 
@@ -56,9 +54,7 @@ export const LIMITE_PROCESSAMENTO_MS = 15 * 60 * 1000;
  * isso a reunião fica em 'uploading' ou 'processing', e o áudio vencido não sai
  * (STATUS_QUE_SEGURAM_AS_PARTES, em server/meeting-service.ts). É estimativa,
  * não garantia (a chamada da IA de uma parte pode levar até 5 min e se repetir,
- * em server/gemini.ts): o reprocesso que passar da conta segura o áudio além
- * dos 30 dias pelo tempo que passar, e ele sai na primeira varredura depois de
- * a reunião deixar esses estados.
+ * em server/gemini.ts).
  */
 export const TEMPO_POR_PARTE_DO_REPROCESSO_MS = 2 * 60 * 1000;
 
@@ -67,7 +63,9 @@ export const TEMPO_POR_PARTE_DO_REPROCESSO_MS = 2 * 60 * 1000;
  * processamento inteiro (LIMITE_PROCESSAMENTO_MS) e mais
  * TEMPO_POR_PARTE_DO_REPROCESSO_MS por parte da gravação. Antes eram 15 min
  * para qualquer tamanho, e o reprocesso de uma gravação de 12 h (72 partes)
- * aceito a 20 min do prazo passava dele no meio.
+ * aceito a 20 min do prazo passava dele no meio. Desde 26/11/2026 o áudio não
+ * vence (ARQUIVO_SEM_PRAZO, em server/meeting-service.ts): a margem só alcança o
+ * áudio marcado para sair, que a exclusão deixa com expires_at no passado.
  *
  * `partes` é o número de partes da gravação, a coluna expected_slices da
  * reunião, que a tela recebe; no envio único ela é nula e conta zero. O

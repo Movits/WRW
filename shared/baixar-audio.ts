@@ -8,7 +8,7 @@
  * O servidor junta e converte com o ffmpeg, em streaming, sem guardar o
  * resultado (server/conversao-do-audio.ts). Em dois passos:
  *
- * 1. `meetings.baixarAudio` (tRPC) confere a dona, o prazo dos 30 dias e o
+ * 1. `meetings.baixarAudio` (tRPC) confere a dona, que o áudio segue guardado e o
  *    teto, lê as partes e grava a auditoria na MESMA transação (o padrão do
  *    MEETING_EXPORTED da H8), e devolve um endereço de uso único, que vale
  *    poucos minutos e só para a sessão da dona;
@@ -17,8 +17,9 @@
  *    converte. A chave e a URL do bucket nunca chegam ao navegador.
  *
  * Regras que o servidor e a tela leem daqui: só a dona baixa (o link aberto não
- * ganha o botão nem rota); depois dos 30 dias o botão some, e o servidor recusa
- * com um código que a tela traduz.
+ * ganha o botão nem rota); sem áudio guardado o botão some, e o servidor recusa
+ * com um código que a tela traduz. Desde 26/11/2026 o áudio fica até a dona
+ * excluir a reunião ou encerrar a conta.
  */
 
 /** Os formatos do arquivo. O MP3 toca em qualquer aparelho; o M4A (AAC) soa melhor no mesmo tamanho. */
@@ -73,7 +74,7 @@ export function tamanhoEstimadoDoAudio(duracaoSegundos: number): number {
  * outra conta, excluída ou que não existe sai como NOT_FOUND, igual à H8.
  */
 export const RECUSAS_DO_AUDIO = {
-  /** O áudio passou dos 30 dias e saiu (ou está saindo) do bucket. */
+  /** O áudio saiu (ou está saindo) do bucket: pela regra dos 30 dias de antes de 26/11/2026, ou marcado para sair. */
   vencido: "AUDIO_VENCIDO",
   /** Não há áudio guardado: nunca houve, ou as partes não chegaram ao bucket. */
   ausente: "AUDIO_AUSENTE",

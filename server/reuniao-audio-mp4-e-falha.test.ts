@@ -325,10 +325,10 @@ describe("processMeetingRecording — áudio recusado vira reunião com falha, n
     expect(escopos).toEqual([REUNIAO_DA_DONA_ESPERANDO_AUDIO]);
   });
 
-  it("a gravação nasce com o prazo de 30 dias contado da tomada", async () => {
+  it("a gravação nasce sem prazo (fica até a dona excluir a reunião, desde 26/11/2026)", async () => {
     await processMeetingRecording(entradaValida);
     const [gravacao] = insercoes.find(operacao => operacao.tabela === schema.meetingRecordings)!.valores;
-    expect(gravacao.expiresAt).toBe(Number(fichaGravada()) + 30 * 24 * 60 * 60 * 1000);
+    expect(gravacao.expiresAt).toBe(Number.MAX_SAFE_INTEGER);
   });
 });
 

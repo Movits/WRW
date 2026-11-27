@@ -14,8 +14,9 @@ import { abrirPdf, type DocumentoAberto } from "@/lib/leitor-de-pdf";
  * Os bytes vêm da rota da dona (GET /api/reunioes/{id}/documento) e ficam no
  * cache do React Query enquanto a reunião está aberta: trocar de aba e voltar
  * não baixa o arquivo de novo. O desenho é do pdf.js (lib/leitor-de-pdf.ts),
- * carregado só aqui. O arquivo dura 30 dias, como o áudio: depois, a aba diz
- * que ele saiu, e o texto lido continua na aba do texto.
+ * carregado só aqui. O arquivo fica, como o áudio, até a dona excluir a
+ * reunião (desde 26/11/2026). Sem ele (o de antes, que saiu aos 30 dias), a aba
+ * diz que ele saiu, e o texto lido continua na aba do texto.
  */
 
 export type DocumentoNaTela = { url: string; mimeType: string; sizeBytes: number; expiresAt: number };
@@ -145,7 +146,7 @@ export function PaginasDoDocumento({ meetingId, documento, documentoExpirado, do
       <canvas ref={canvas} aria-label={posicao} role="img" className="block h-auto w-full"/>
     </div>
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <p className="text-xs text-white/45">{t("meetings.document.availableUntil", { date: new Date(documento.expiresAt).toLocaleDateString(i18n.language) })}</p>
+      <p className="text-xs text-white/45">{t("meetings.document.fileStored")}</p>
       {abrirNoNavegador}
     </div>
   </div>;

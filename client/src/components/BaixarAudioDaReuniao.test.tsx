@@ -133,7 +133,7 @@ describe("Baixar o áudio — o aviso vem antes", () => {
   it("o botão abre o aviso, com os dois formatos (MP3 marcado) e o tamanho aproximado; nada é pedido ainda", () => {
     abrir();
     fireEvent.click(botaoDaPagina());
-    expect(dialogo()).toHaveAccessibleDescription(/O arquivo leva a gravação inteira desta reunião, com a voz de todas as pessoas que falaram\. Depois de baixado, ele fica fora da Marquesa Global Match e não é apagado aos 30 dias/);
+    expect(dialogo()).toHaveAccessibleDescription(/O arquivo leva a gravação inteira desta reunião, com a voz de todas as pessoas que falaram\. Depois de baixado, ele fica fora da Marquesa Global Match e não é apagado quando você exclui a reunião ou a conta/);
     expect(within(dialogo()).getByRole("radio", { name: "MP3: toca em qualquer aparelho" })).toBeChecked();
     expect(within(dialogo()).getByRole("radio", { name: "M4A: o mesmo tamanho, com som um pouco melhor" })).not.toBeChecked();
     // Uma hora a 64 kbps: 28,8 MB.
@@ -298,7 +298,7 @@ describe("Baixar o áudio — preparar e salvar", () => {
 
 describe("Baixar o áudio — as recusas, no idioma da tela, sem link", () => {
   it.each([
-    ["o áudio que passou dos 30 dias", "PRECONDITION_FAILED", RECUSAS_DO_AUDIO.vencido, "O áudio desta reunião passou dos 30 dias e não pode mais ser baixado. A transcrição continua aqui."],
+    ["o áudio que não está mais guardado", "PRECONDITION_FAILED", RECUSAS_DO_AUDIO.vencido, "O áudio desta reunião não está mais guardado e não pode ser baixado. A transcrição continua aqui."],
     ["a reunião sem áudio guardado", "PRECONDITION_FAILED", RECUSAS_DO_AUDIO.ausente, "Esta reunião não tem áudio guardado para baixar."],
     ["a gravação que ainda chega", "PRECONDITION_FAILED", RECUSAS_DO_AUDIO.aindaGravando, "A gravação ainda está chegando. Espere ela terminar para baixar o áudio."],
     ["o teto da dona", "TOO_MANY_REQUESTS", RECUSAS_DO_AUDIO.demais, "Muitos áudios baixados na última hora. Aguarde um pouco e tente de novo."],
@@ -334,7 +334,7 @@ describe("Baixar o áudio — as recusas, no idioma da tela, sem link", () => {
     const aviso = screen.getByRole("dialog", { name: "Download the meeting audio" });
     expect(aviso).toHaveTextContent("Approximate size: 29 MB.");
     fireEvent.click(within(aviso).getByRole("button", { name: "Prepare the file" }));
-    expect(await within(aviso).findByRole("alert")).toHaveTextContent("This meeting's audio is more than 30 days old and can no longer be downloaded.");
+    expect(await within(aviso).findByRole("alert")).toHaveTextContent("This meeting's audio is no longer stored and cannot be downloaded.");
   });
 });
 

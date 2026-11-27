@@ -625,7 +625,7 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `meeting_summaries.template`. Os modelos da própria dona (H4e) vieram depois, em
   `server/modelos-proprios.ts` e `MeusModelosDeResumo.tsx`.
 
-## 16/11/2026 — o áudio da reunião fica 30 dias, e a #134 fecha
+## 16/11/2026 — o áudio da reunião fica 30 dias, e a #134 fecha (substituída em 26/11)
 
 - **Quem:** Roberto, 16/11.
 - **O quê:** o áudio das reuniões fica 30 dias, e não 24 h. Com 24 h, não dá tempo de
@@ -921,6 +921,24 @@ gravado não se renomeia" no CLAUDE.md da raiz).
   `contarConexoesDaSolicitante`), `server/routers/networkInteligente.ts`, migração
   `0034_indice-de-cruzamento`, `client/src/components/ConexoesRegistradas.tsx`
   (`PaginasDasConexoes`).
+
+## 26/11/2026 — o áudio e os arquivos das reuniões ficam até a dona excluir
+
+- **Quem:** Roberto, 26/11, seguindo a Política de Privacidade revisada pela Cris (as
+  gravações, as transcrições e os resumos ficam "até a organizadora apagar ou encerrar a
+  conta").
+- **O quê:** o áudio das reuniões, o arquivo da reunião de documento (o PDF ou as fotos do
+  texto) e as fotos e os desenhos do resumo deixam de ser apagados sozinhos 30 dias depois do
+  envio. Ficam até a dona excluir a reunião (a lixeira, com restaurar e apagar de vez, segue
+  como estava, com os 30 dias dela) ou encerrar a conta. Substitui a decisão de 16/11.
+- **Como:** a coluna `expires_at` das quatro tabelas vira a marca de saída: toda linha nasce
+  com `ARQUIVO_SEM_PRAZO` (`server/meeting-service.ts`) e só vai ao passado quando a
+  exclusão manda o arquivo sair e o bucket recusa; a varredura das gravações continua, para
+  esses casos. A passada do boot tira o prazo das linhas de antes
+  (`tirarOPrazoDosArquivosDeAntes`), sem migração. Os avisos de gravação e do documento
+  ganharam versão nova (`2026-11-26` e `documento-2026-11-26`).
+- **Custo aceito:** o bucket do Backblaze B2 passa a crescer sem limite (63,9 MB e 79
+  arquivos em 26/11; o plano grátis vai até 10 GB).
 
 ---
 

@@ -10,7 +10,7 @@ import { partesParaBaixar } from "./audio-guardado-das-partes";
 import { ambienteDoFfmpeg, ehTrocaDeUsuarioRecusada, usuarioDoFfmpeg, type ParteDoAudio } from "./conversao-do-audio";
 import { exigirDb } from "./db";
 import { reuniaoVisivel } from "./reuniao-visivel";
-import { MEETING_AUDIO_TTL_MS, MENSAGEM_REUNIAO_NAO_ENCONTRADA } from "./meeting-service";
+import { MENSAGEM_REUNIAO_NAO_ENCONTRADA, PRAZO_DOS_ARQUIVOS_ATE_26_11_MS } from "./meeting-service";
 import { storageGetBytes } from "./storage";
 
 /**
@@ -36,9 +36,9 @@ import { storageGetBytes } from "./storage";
  *   recebidas, as transcritas e as que falharam na IA (que o reprocesso também
  *   relê; regra em audio-guardado-das-partes.ts). O player toca só as duas
  *   primeiras, então a tela decide o botão pelo `audioParaBaixar` do detalhe, e
- *   não pela gravação que toca. Sem nenhuma, a recusa diz se o áudio passou dos
- *   30 dias (a mesma conta de gravacaoParaOuvir, em meeting-service.ts) ou se
- *   não há áudio guardado.
+ *   não pela gravação que toca. Sem nenhuma, a recusa diz se o áudio saiu (a
+ *   regra dos 30 dias de antes de 26/11/2026 ou a marca de saída, a mesma conta
+ *   de gravacaoParaOuvir, em meeting-service.ts) ou se não há áudio guardado.
  * - A auditoria guarda o formato, as contagens, a duração e os formatos de
  *   origem; nunca a chave do bucket, o título ou o conteúdo.
  */
@@ -76,8 +76,8 @@ export async function prepararAudioDaReuniao(ownerId: string, meetingId: string,
     // Lançar aqui desfaz a transação: nada foi gravado ainda.
     if (!reuniao) throw new TRPCError({ code: "NOT_FOUND", message: MENSAGEM_REUNIAO_NAO_ENCONTRADA });
     if (reuniao.status === "recording" || reuniao.status === "uploading") throw recusa("PRECONDITION_FAILED", RECUSAS_DO_AUDIO.aindaGravando);
-    // Sem linha de áudio, a data da reunião distingue "já venceu e saiu" de "nunca houve".
-    const vencidaPelaData = Number(reuniao.createdAt) + MEETING_AUDIO_TTL_MS <= agora;
+    // Sem linha de áudio, a data da reunião distingue "saiu pela regra dos 30 dias de antes de 26/11/2026" de "nunca houve".
+    const vencidaPelaData = Number(reuniao.createdAt) + PRAZO_DOS_ARQUIVOS_ATE_26_11_MS <= agora;
 
     const emPartes = reuniao.audioPipeline === "slices";
     let partes: ParteDoAudio[];

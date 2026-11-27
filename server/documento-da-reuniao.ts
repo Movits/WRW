@@ -16,7 +16,7 @@ import {
   GeminiSemTextoError, gerarComArquivoNoGemini, prazoEsgotadoNoGemini,
 } from "./gemini";
 import {
-  extrairDadosDaReuniao, gravarResultadoDaReuniao, MEETING_AUDIO_TTL_MS, MENSAGEM_REPROCESSO_EM_CONFLITO,
+  ARQUIVO_SEM_PRAZO, extrairDadosDaReuniao, gravarResultadoDaReuniao, MENSAGEM_REPROCESSO_EM_CONFLITO,
   MENSAGEM_REUNIAO_NAO_ENCONTRADA, ReprocessamentoRecusado, ReuniaoExcluidaDuranteProcessamento, ReuniaoTomadaPorOutraExecucao,
 } from "./meeting-service";
 import { chaveDoStorageDaDona, ObjetoAusenteNoStorageError, storageApagarTodasAsVersoes, storageGetBytes, storagePut } from "./storage";
@@ -38,9 +38,9 @@ import { chaveDoStorageDaDona, ObjetoAusenteNoStorageError, storageApagarTodasAs
  *    extração, sugestões pendentes, pedido do resumo guardado, que a fila do
  *    resumo gera, com o mapa mental logo depois).
  *
- * O arquivo segue a regra do áudio: 30 dias contados do envio
- * (MEETING_AUDIO_TTL_MS), a varredura e a leitura vencida o tiram do bucket com
- * todas as versões, e a exclusão da reunião e a da conta também. A falha grava
+ * O arquivo segue a regra do áudio: fica até a dona excluir a reunião ou
+ * encerrar a conta (ARQUIVO_SEM_PRAZO; até 26/11/2026 eram 30 dias), que o tiram
+ * do bucket com todas as versões (a varredura, se o bucket recusar na hora). A falha grava
  * um CÓDIGO em processing_error (shared/documento-da-reuniao.ts), que a tela
  * traduz; e a reunião que falhou se reprocessa pelo arquivo guardado.
  *
@@ -434,7 +434,7 @@ export async function receberDocumento(entrada: { ownerId: string; meetingId: st
       const agora = Date.now();
       await tx.insert(meetingDocuments).values({
         id, meetingId, ownerId, storageKey: chave, storageUrl: `/manus-storage/${chave}`, mimeType: "application/pdf",
-        sizeBytes: bytes.length, sha256, expiresAt: agora + MEETING_AUDIO_TTL_MS, createdAt: agora,
+        sizeBytes: bytes.length, sha256, expiresAt: ARQUIVO_SEM_PRAZO, createdAt: agora,
       });
       const ficha = fichaDaExecucao(reuniao.updatedAt);
       await tx.update(meetings).set({ status: "processing", processingError: null, updatedAt: ficha })
@@ -551,9 +551,9 @@ export async function processarDocumento(db: Banco, execucao: {
  * leitor de PDF da tela lê o arquivo por fetch, e o proxy do storage responde
  * 307 para o bucket, que não manda CORS: por isso os bytes saem por aqui, na
  * mesma origem. A regra é a de documentoParaVer (meeting-service.ts): só a
- * dona, só reunião que não está sendo excluída e só antes do prazo dos 30 dias.
+ * dona, só reunião que não está sendo excluída e só o arquivo sem a marca de saída.
  * O link aberto nunca chega aqui (a rota exige a sessão da dona). null quando
- * não há o que mostrar: sem linha, vencido, chave fora do espaço da reunião ou
+ * não há o que mostrar: sem linha, marcado para sair, chave fora do espaço da reunião ou
  * objeto que já saiu do bucket. Outra falha do bucket lança.
  */
 export async function lerDocumentoGuardado(ownerId: string, meetingId: string): Promise<Buffer | null> {
@@ -594,7 +594,7 @@ function chaveReprocessavel(documento: { storageKey: string; sizeBytes: number; 
 /**
  * O reprocesso da reunião de documento com falha (meetings.reprocess passa por
  * iniciarReprocessamento, em meeting-service.ts, que chama este): lê o PDF
- * guardado e refaz a leitura, sem gravar arquivo nem renovar os 30 dias. Toma a
+ * guardado e refaz a leitura, sem gravar arquivo. Toma a
  * reunião ('failed' → 'processing', com a ficha) e devolve logo; o trabalho
  * nunca rejeita. A falha que se repete com o mesmo arquivo
  * (falhaDoDocumentoSeRepete: o texto que não cabe numa resposta) é recusada

@@ -85,7 +85,7 @@ describe("JuntarReunioes", () => {
   it("cada recusa do servidor sai traduzida pelo código; a reunião de outra conta, como não encontrada", async () => {
     const casos: Array<[Error, string]> = [
       [erroDoServidor("CONFLICT", RECUSAS_DA_JUNCAO.foraDoEstado), "Alguma das reuniões não está pronta (ainda gravando, processando ou com falha)."],
-      [erroDoServidor("PRECONDITION_FAILED", RECUSAS_DA_JUNCAO.semAudio), "O áudio de alguma das reuniões não está mais guardado (passou dos 30 dias)."],
+      [erroDoServidor("PRECONDITION_FAILED", RECUSAS_DA_JUNCAO.semAudio), "O áudio de alguma das reuniões não está mais guardado."],
       [erroDoServidor("PRECONDITION_FAILED", RECUSAS_DA_JUNCAO.longaDemais), "A reunião juntada passaria dos limites de uma reunião (12 horas de gravação, 200 trechos ou 99 vozes). Junte menos reuniões."],
       [erroDoServidor("TOO_MANY_REQUESTS", RECUSAS_DA_JUNCAO.demais), "Muitas junções em sequência. Aguarde alguns minutos e tente de novo."],
       [erroDoServidor("NOT_FOUND", "REUNIAO_NAO_ENCONTRADA"), i18n.t("meetings.meetingNotFound")],

@@ -1421,9 +1421,10 @@ export const meetingAudioSlices = mysqlTable("meeting_audio_slices", {
 // gravador, origem 'pdf' ou 'foto'): sempre um PDF, porque as fotos de um texto
 // viram um PDF no aparelho, uma página por foto. Uma linha por reunião. O texto
 // que a IA lê dele vira a transcrição (meeting_transcripts), e o arquivo segue
-// a regra do áudio: 30 dias contados do envio (MEETING_AUDIO_TTL_MS), a
-// varredura e a leitura vencida o tiram do bucket com todas as versões, e a
-// exclusão da reunião e a da conta também. A linha é o ponteiro para o objeto:
+// a regra do áudio: fica até a dona excluir a reunião ou encerrar a conta
+// (expires_at nasce com ARQUIVO_SEM_PRAZO, em server/meeting-service.ts, e é a
+// marca de saída; até 26/11/2026 eram 30 dias), e a exclusão o tira do bucket
+// com todas as versões. A linha é o ponteiro para o objeto:
 // só sai depois dele, e fica (vencida) quando o bucket recusa. Nomes em inglês,
 // como as irmãs meeting_*.
 export const meetingDocuments = mysqlTable("meeting_documents", {
@@ -1451,9 +1452,10 @@ export const meetingDocuments = mysqlTable("meeting_documents", {
 // As fotos e os desenhos à mão que a dona anexa ao resumo da reunião (H4g e
 // H4h do plano do gravador; HN-32 e HN-33 no app de referência da cliente).
 // A imagem chega já reduzida no aparelho (client/src/lib/reduzir-imagem.ts, a
-// régua da #149) e segue a regra dos arquivos da reunião: 30 dias contados do
-// envio (MEETING_AUDIO_TTL_MS), a varredura tira a vencida do bucket com todas
-// as versões, e a exclusão da reunião e a da conta também. A linha é o
+// régua da #149) e segue a regra dos arquivos da reunião: fica até a dona a
+// tirar, excluir a reunião ou encerrar a conta (expires_at nasce com
+// ARQUIVO_SEM_PRAZO e é a marca de saída; até 26/11/2026 eram 30 dias), que a
+// tiram do bucket com todas as versões. A linha é o
 // ponteiro para o objeto: só sai depois dele, e fica (vencida) quando o bucket
 // recusa. O link aberto mostra a imagem só pela rota dele, que confere a senha
 // (H23). Nomes em inglês, como as irmãs meeting_*.
