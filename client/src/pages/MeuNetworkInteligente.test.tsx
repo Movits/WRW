@@ -285,7 +285,7 @@ describe("Meu Network Inteligente — conexões registradas e rede global", () =
     expect(screen.queryByRole("button", { name: "Registrar apresentação" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Registrar negociação" }));
     expect(duble.avancar).toHaveBeenCalledWith({ conexaoId: "c-2", etapa: "negociacao" });
-    expect(screen.getByText(/Sua participação como originadora: sem negócio/)).toBeInTheDocument();
+    expect(screen.getByText(/Sua participação como originador: sem negócio/)).toBeInTheDocument();
   });
 
   it("fechamento já confirmado pela dona: sem o botão de fechar de novo, com o aviso de que falta o outro lado", () => {

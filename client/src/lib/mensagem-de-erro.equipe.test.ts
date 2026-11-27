@@ -30,6 +30,6 @@ describe("as recusas da equipe viram frase traduzida", () => {
   }
 
   it("a leitora que tenta escrever lê a frase do papel", () => {
-    expect(mensagemDeErroParaTela(doServidor(RECUSAS_DA_EQUIPE.soLeitura), t)).toBe("Como leitora, você não muda as tarefas.");
+    expect(mensagemDeErroParaTela(doServidor(RECUSAS_DA_EQUIPE.soLeitura), t)).toBe("Como leitor, você não muda as tarefas.");
   });
 });

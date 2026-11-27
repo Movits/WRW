@@ -100,7 +100,7 @@ describe("PLATFORM_MATCH — a conexão entre membras", () => {
 
   it("o motivo não carrega dado de ninguém: só a origem e a nota", () => {
     expect(motivoEntreMembras(71.6)).toBe(
-      "Conexão sugerida pelo motor de perfis entre duas membras da plataforma, com o termo do Smart Match aceito pelas duas: compatibilidade de 72%.",
+      "Conexão sugerida pelo motor de perfis entre dois membros da plataforma, com o termo do Smart Match aceito pelos dois: compatibilidade de 72%.",
     );
   });
 

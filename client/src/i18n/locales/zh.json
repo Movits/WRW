@@ -1074,7 +1074,7 @@
     "ouroFalhaToast": "无法记录授权。",
     "ouroRevogarBotao": "撤销授权",
     "ouroRevogarTitulo": "要撤销金卡藏库的授权吗？",
-    "ouroRevogarTexto": "藏库将不再对金卡账户可见：从下一次查询起，您的联系人都不会再显示给她们，包括您标记为共享的联系人。您的联系人在您的人脉中保持不变，您随时可以重新授权。",
+    "ouroRevogarTexto": "藏库将不再对金卡账户可见：从下一次查询起，您的联系人都不会再显示给他们，包括您标记为共享的联系人。您的联系人在您的人脉中保持不变，您随时可以重新授权。",
     "ouroRevogarConfirmar": "是的，撤销",
     "ouroRevogarCancelar": "取消",
     "ouroRevogando": "正在撤销…",

@@ -248,7 +248,7 @@ describe("Mapa mental — os estados", () => {
 
     preparar("pedirMapaPeloLink", { isError: true, error: { data: { code: "TOO_MANY_REQUESTS" } } });
     doLink(doRefazer);
-    expect(screen.getByRole("status")).toHaveTextContent("A dona da reunião pediu uma nova versão do resumo, que ainda não está pronta. O mapa mental aparece aqui quando ela ficar pronta.");
+    expect(screen.getByRole("status")).toHaveTextContent("O dono da reunião pediu uma nova versão do resumo, que ainda não está pronta. O mapa mental aparece aqui quando ela ficar pronta.");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(mutacao("pedirMapaPeloLink").mutate).not.toHaveBeenCalled();

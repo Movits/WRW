@@ -61,7 +61,7 @@ describe("a reunião compartilhada com a participante", () => {
     abrir();
     fireEvent.click(screen.getByRole("button", { name: "Sair desta reunião" }));
     expect(duble.sair.mutate).not.toHaveBeenCalled();
-    expect(screen.getByRole("alertdialog")).toHaveTextContent("a dona precisa convidar você de novo");
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("o dono precisa convidar você de novo");
     fireEvent.click(screen.getByRole("button", { name: "Sair desta reunião" }));
     expect(duble.sair.mutate).toHaveBeenCalledWith({ meetingId: ID });
     await act(async () => { await duble.opcoesDoSair?.onSuccess?.(); });

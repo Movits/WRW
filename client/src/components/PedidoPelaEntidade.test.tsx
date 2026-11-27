@@ -95,6 +95,6 @@ describe("PedidoPelaEntidade", () => {
     await i18n.changeLanguage("ar");
     render(<ConexaoRegistrada conexao={base()} />);
     expect(screen.getByText(/عضو في جهة شريكة/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "اطلبي التواصل عبر الجهة" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "اطلب التواصل عبر الجهة" })).toBeInTheDocument();
   });
 });

@@ -190,7 +190,7 @@ describe("entre membras, o que identifica a conexão antes do descarte", () => {
     renderizar(entreMembras({ id: PAR_A }));
 
     expect(screen.getByText("Seu lado")).toBeInTheDocument();
-    expect(screen.getByText("Membra da plataforma")).toBeInTheDocument();
+    expect(screen.getByText("Membro da plataforma")).toBeInTheDocument();
   });
 
   it("dois pares da mesma rodada, com a mesma nota e o mesmo minuto, se separam pela referência", () => {
@@ -221,7 +221,7 @@ describe("entre membras, o que identifica a conexão antes do descarte", () => {
     fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
 
     const dialogo = screen.getByRole("dialog");
-    expect(within(dialogo).getByText("Entre membras da plataforma")).toBeInTheDocument();
+    expect(within(dialogo).getByText("Entre membros da plataforma")).toBeInTheDocument();
     expect(within(dialogo).getByText(`Referência ${referenciaDaConexao(PAR_A)}`)).toBeInTheDocument();
     expect(within(dialogo).getByText(/O outro lado continua anônimo/)).toBeInTheDocument();
     expect(within(dialogo).getByRole("button", { name: `Descartar ${referenciaDaConexao(PAR_A)}` })).toBeInTheDocument();

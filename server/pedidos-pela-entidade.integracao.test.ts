@@ -119,7 +119,7 @@ describe.skipIf(!temBanco)("Pedido de contato pela entidade (integração)", () 
       origem: "NETWORK_PLATFORM_MATCH",
       a: { tipo: "contato", ownerId: ENT_A, contactId: contatoUm, codigoAnonimo: um.codigo, originador: true },
       b: { tipo: "membro", userId: ids[MEMBRA] },
-      motivo: `${um.codigo} tem Café torrado, que uma membra da plataforma procura.`,
+      motivo: `${um.codigo} tem Café torrado, que um membro da plataforma procura.`,
       itens: [{ tem: "Café torrado", precisa: "Café para revenda", deCodigo: um.codigo, paraCodigo: null }],
       pontuacao: 100,
     });

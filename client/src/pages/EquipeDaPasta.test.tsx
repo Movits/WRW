@@ -60,7 +60,7 @@ describe("o espaço de equipe", () => {
       { id: "m2", status: "active", origem: "connection", papel: "reader", nome: "Bia", expiraEm: null },
     ] });
     abrir();
-    fireEvent.click(screen.getByRole("button", { name: "Membras" }));
+    fireEvent.click(screen.getByRole("button", { name: "Membros" }));
     const convidar = screen.getByRole("button", { name: "Convidar por link" });
     expect(convidar).toBeDisabled();
     fireEvent.click(screen.getByRole("checkbox"));
@@ -99,8 +99,8 @@ describe("o espaço de equipe", () => {
     expect(screen.queryByRole("textbox", { name: "Nova tarefa" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Apagar tarefa" })).toBeNull();
     expect(screen.getByRole("checkbox", { name: "Feita" })).toBeDisabled();
-    expect(screen.getByText("Como leitora, você vê as tarefas sem mudar nada.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Membras" }));
+    expect(screen.getByText("Como leitor, você vê as tarefas sem mudar nada.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Membros" }));
     expect(screen.getByText("Dona Clara")).toBeInTheDocument();
     expect(screen.getByText("Bia (você)")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Convidar por link" })).toBeNull();

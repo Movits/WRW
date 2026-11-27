@@ -100,7 +100,7 @@ export function TermsPage() {
         <>
           <p>
             O Termo Geral de Uso, Proteção de Dados e Intermediação Digital é o
-            documento que rege a plataforma, e é aceito por toda usuária na
+            documento que rege a plataforma, e é aceito por todo usuário na
             última etapa do cadastro.
           </p>
           <p>

@@ -79,7 +79,7 @@ describe("montarEmailDoResumo", () => {
     const ingles = montarEmailDoResumo({ ...base, idioma: "en", modelo: "participante" });
     expect(ingles.assunto).toBe("Glenda shared a meeting summary with you");
     const arabe = montarEmailDoResumo({ ...base, idioma: "ar", modelo: "participante" });
-    expect(arabe.assunto).toBe("شاركت Glenda معك ملخص اجتماع");
+    expect(arabe.assunto).toBe("شارك Glenda معك ملخص اجتماع");
     expect(arabe.html).toContain('<html lang="ar" dir="rtl">');
     expect(arabe.html).toContain('<body dir="rtl"');
     expect(arabe.html).toContain(`<p dir="ltr" style="margin:0 0 24px;font-size:12px;line-height:1.5;word-break:break-all;text-align:left;"><a href="${ABERTO}"`);

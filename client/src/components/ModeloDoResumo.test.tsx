@@ -251,13 +251,13 @@ describe("Modelos do resumo — o link aberto não escolhe nem refaz", () => {
 
   it.each(["pendente", "gerando"])("pelo link, durante o refazer da dona (%s): a versão anterior, com o aviso de que ela pediu uma nova, só para ler", estado => {
     doLink(doLinkCom(estado, ITENS_DO_LINK, true));
-    expect(screen.getByRole("status")).toHaveTextContent("A dona da reunião pediu uma nova versão deste resumo, que ainda não está pronta. Abaixo está a versão anterior.");
+    expect(screen.getByRole("status")).toHaveTextContent("O dono da reunião pediu uma nova versão deste resumo, que ainda não está pronta. Abaixo está a versão anterior.");
     expect(screen.queryByText(/A IA está escrevendo/)).not.toBeInTheDocument();
     // O link não recebe o modelo: nada de "Refazendo o resumo como Geral".
     expect(screen.queryByText(/Refazendo o resumo como/)).not.toBeInTheDocument();
     expect(screen.getByText("Enviar a proposta revisada")).toBeInTheDocument();
     expect(screen.getByText("Reservar a sala de reunião")).toBeInTheDocument();
-    expect(screen.getAllByText("Gerado pela IA; a dona da reunião ainda não conferiu.")).toHaveLength(2);
+    expect(screen.getAllByText("Gerado pela IA; o dono da reunião ainda não conferiu.")).toHaveLength(2);
     // Nenhum botão de decidir: só o "Ouvir o resumo" (H19), que lê a versão que está na tela.
     expect(screen.getAllByRole("button").map(botao => botao.textContent?.trim())).toEqual(["Ouvir resumo · áudio gerado pela IA da Google"]);
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
@@ -266,7 +266,7 @@ describe("Modelos do resumo — o link aberto não escolhe nem refaz", () => {
   it("pelo link, o refazer que falhou: a versão anterior, com o aviso, e sem 'Tentar de novo' (refazer é da dona)", () => {
     preparar("pedirResumoPeloLink", { isError: true, error: { message: "Muitos pedidos à IA por este link em sequência. Aguarde alguns minutos e tente de novo.", data: { code: "TOO_MANY_REQUESTS" } } });
     const { unmount } = doLink(doLinkCom("falhou", ITENS_DO_LINK, true));
-    expect(screen.getByRole("status")).toHaveTextContent("A dona da reunião pediu uma nova versão deste resumo, que ainda não está pronta. Abaixo está a versão anterior.");
+    expect(screen.getByRole("status")).toHaveTextContent("O dono da reunião pediu uma nova versão deste resumo, que ainda não está pronta. Abaixo está a versão anterior.");
     expect(screen.getByText("Não renovar com a transportadora antiga.")).toBeInTheDocument();
     expect(screen.queryByText(/Não foi possível/)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

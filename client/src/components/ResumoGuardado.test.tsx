@@ -556,7 +556,7 @@ describe("Resumo guardado — pelo link aberto, só leitura", () => {
     expect(screen.getByText("Responsável: Carla")).toBeInTheDocument();
     expect(itemDoTexto(/Falante 1 fecha o contrato com o importador\./)).toHaveTextContent("Responsável: Falante 1");
     expect(screen.queryByText(/\{F\d\}/)).not.toBeInTheDocument();
-    expect(screen.getAllByText("Gerado pela IA; a dona da reunião ainda não conferiu.")).toHaveLength(4);
+    expect(screen.getAllByText("Gerado pela IA; o dono da reunião ainda não conferiu.")).toHaveLength(4);
     expect(within(itemDoTexto("A reunião tratou da exportação de café para a Alemanha.")).queryByText(/a dona da reunião ainda não conferiu/)).not.toBeInTheDocument();
   });
 

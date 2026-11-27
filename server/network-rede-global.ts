@@ -632,7 +632,7 @@ async function cruzarERegistrar(
         pontuacao: resultado.pontuacao, encontros: resultado.encontros.map(paraMim),
       });
     } else {
-      const { motivo, itens } = motivoEItens(meu.codigoAnonimo, "uma membra da plataforma", null, resultado);
+      const { motivo, itens } = motivoEItens(meu.codigoAnonimo, "um membro da plataforma", null, resultado);
       const conexaoId = await registrarConexao(db, {
         origem: "NETWORK_PLATFORM_MATCH",
         a: ladoA,

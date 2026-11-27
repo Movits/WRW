@@ -117,7 +117,7 @@ describe("Home — Hero", () => {
     // Esta frase é montada em três pedaços (o país vem em negrito), por isso
     // se confere o parágrafo inteiro pelo texto corrido.
     const alcance = s.getByText("mais de 30 países").closest("p");
-    expect(alcance).toHaveTextContent(/^Com embaixadoras em mais de 30 países, conectamos você a pessoas, oportunidades e negócios em uma rede global sem fronteiras\.$/);
+    expect(alcance).toHaveTextContent(/^Com embaixadores em mais de 30 países, conectamos você a pessoas, oportunidades e negócios em uma rede global sem fronteiras\.$/);
   });
 
   it("nenhum lugar da página fala em match, fora o nome próprio Business Match (troca por 'conexão', 14/09)", () => {

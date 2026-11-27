@@ -24,7 +24,7 @@ export type MotivoDaConsulta = (typeof MOTIVOS_DA_CONSULTA)[number];
 export const ROTULO_DO_MOTIVO: Record<MotivoDaConsulta, string> = {
   apuracao_de_denuncia: "Apuração de denúncia",
   seguranca: "Segurança",
-  suporte_pedido_pela_usuaria: "Suporte pedido pela usuária",
+  suporte_pedido_pela_usuaria: "Suporte pedido pelo usuário",
   obrigacao_legal: "Obrigação legal",
   ordem_judicial: "Ordem judicial",
 };

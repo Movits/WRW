@@ -108,7 +108,7 @@ describe("'O resumo teve o tamanho certo?' (H4e)", () => {
     expect(mutacao("tamanho").mutate).toHaveBeenLastCalledWith({ meetingId: REUNIAO, resposta: "long" });
     rerender(<PerguntaDoTamanho meetingId={REUNIAO} resposta="long"/>);
     expect(screen.getByRole("button", { name: "Longo demais" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("Obrigada! Os próximos resumos vão levar isso em conta.")).toBeInTheDocument();
+    expect(screen.getByText("Obrigado! Os próximos resumos vão levar isso em conta.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Longo demais" }));
     expect(mutacao("tamanho").mutate).toHaveBeenLastCalledWith({ meetingId: REUNIAO, resposta: null });
   });
