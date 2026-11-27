@@ -59,7 +59,7 @@ const duble = vi.hoisted(() => {
       agenda: { listar: { invalidate: vi.fn(async () => undefined) } },
       auth: { me: { getData: vi.fn(), fetch: vi.fn() } },
       client: {
-        meetings: { aceitarAvisoDeGravacao: { mutate: async () => ({ versao: "2026-11-24", aceitoEm: 1 }) }, iniciarGravacao: { mutate: vi.fn() }, definirPedidoDoResumo: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
+        meetings: { aceitarAvisoDeGravacao: { mutate: async () => ({ versao: "2026-11-26", aceitoEm: 1 }) }, iniciarGravacao: { mutate: vi.fn() }, definirPedidoDoResumo: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
         transcricaoDaGravacao: { query: async () => ({ status: "recording", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} }) } },
         agenda: { ligarGravacao: { mutate: vi.fn() } },
       },
@@ -93,7 +93,7 @@ vi.mock("@/lib/trpc", () => ({
     auth: { logout: duble.registrar("logout") },
     meetings: {
       // Gravar com um toque: o aviso de gravação ainda não aceito na conta (a caixa aparece).
-      avisoDeGravacao: { useQuery: () => ({ data: { versaoVigente: "2026-11-24", aceitoEm: null } }) }, atualizarDetalhes: { useMutation: () => ({ mutate: () => undefined, isPending: false }) },
+      avisoDeGravacao: { useQuery: () => ({ data: { versaoVigente: "2026-11-26", aceitoEm: null } }) }, atualizarDetalhes: { useMutation: () => ({ mutate: () => undefined, isPending: false }) },
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
       modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
@@ -366,7 +366,7 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     expect(aceitar).not.toHaveBeenCalled();
     enviar(arquivoMp3());
     await waitFor(() => expect(iniciarGravacao()).toHaveBeenCalled());
-    expect(aceitar).toHaveBeenCalledWith({ versao: "2026-11-24", idioma: "pt-BR" });
+    expect(aceitar).toHaveBeenCalledWith({ versao: "2026-11-26", idioma: "pt-BR" });
     expect(aceitar.mock.invocationCallOrder[0]).toBeLessThan(iniciarGravacao().mock.invocationCallOrder[0]);
   });
 
