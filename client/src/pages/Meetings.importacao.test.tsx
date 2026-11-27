@@ -53,13 +53,13 @@ const duble = vi.hoisted(() => {
     obterDaAgenda: vi.fn(),
     cortar: vi.fn(),
     utils: {
-      meetings: { list: { invalidate: vi.fn(async () => undefined) }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+      meetings: { avisoDeGravacao: { invalidate: async () => undefined }, list: { invalidate: vi.fn(async () => undefined) }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
       agenda: { listar: { invalidate: vi.fn(async () => undefined) } },
       auth: { me: { getData: vi.fn(), fetch: vi.fn() } },
       client: {
-        meetings: { iniciarGravacao: { mutate: vi.fn() }, definirPedidoDoResumo: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
+        meetings: { aceitarAvisoDeGravacao: { mutate: async () => ({ versao: "2026-11-24", aceitoEm: 1 }) }, iniciarGravacao: { mutate: vi.fn() }, definirPedidoDoResumo: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
         transcricaoDaGravacao: { query: async () => ({ status: "recording", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} }) } },
         agenda: { ligarGravacao: { mutate: vi.fn() } },
       },
@@ -92,6 +92,8 @@ vi.mock("@/lib/trpc", () => ({
     useUtils: () => duble.utils,
     auth: { logout: duble.registrar("logout") },
     meetings: {
+      // Gravar com um toque: o aviso de gravação ainda não aceito na conta (a caixa aparece).
+      avisoDeGravacao: { useQuery: () => ({ data: { versaoVigente: "2026-11-24", aceitoEm: null } }) }, atualizarDetalhes: { useMutation: () => ({ mutate: () => undefined, isPending: false }) },
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
       modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
@@ -194,8 +196,11 @@ function abrir(caminho = "/gravar") {
   return render(<Meetings />);
 }
 
-function enviar(arquivo: File, titulo = "Reunião com a Glenda") {
-  if (titulo) fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: titulo } });
+// Gravar com um toque (26/11/2026): o título não é pedido antes; a reunião do
+// arquivo nasce com o padrão de data e hora (ou o da reunião da agenda).
+const TITULO_PADRAO = expect.stringMatching(/^Reunião de \d{2}\/\d{2}\/\d{4}/);
+
+function enviar(arquivo: File) {
   fireEvent.click(screen.getByRole("checkbox"));
   fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [arquivo] } });
 }
@@ -225,7 +230,7 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     // A sessão fica ocupada do clique ao fim: fechar a aba no meio pergunta.
     expect(sessaoOcupada()).toBe(true);
     await waitFor(() => expect(iniciarGravacao()).toHaveBeenCalledWith({
-      title: "Reunião com a Glenda", language: "pt-BR", consentNoticeVersion: expect.any(String), consentGranted: true, origem: "arquivo",
+      title: TITULO_PADRAO, language: "pt-BR", consentNoticeVersion: expect.any(String), consentGranted: true, origem: "arquivo",
     }));
     expect(await screen.findByText("Enviando o arquivo: parte 1 de 3")).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "Andamento do envio do arquivo" })).toHaveAttribute("aria-valuenow", "0");
@@ -233,7 +238,8 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     expect(screen.getByRole("note")).toHaveTextContent("Mantenha esta tela aberta e o aparelho desbloqueado até o envio terminar");
     // O formulário trava, e os botões do gravador dão lugar ao andamento.
     expect(screen.getByRole("checkbox")).toBeDisabled();
-    expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toBeDisabled();
+    // O título não é pedido antes de gravar (gravar com um toque).
+    expect(screen.queryByPlaceholderText(PLACEHOLDER_DO_TITULO)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Iniciar gravação/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Enviar arquivo de áudio/ })).not.toBeInTheDocument();
     await subir();
@@ -351,36 +357,37 @@ describe("Reuniões — o MP3 enviado em partes (H9a)", () => {
     await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeDisabled());
   });
 
-  it("sem título ou sem a autorização, nada é lido", async () => {
+  it("sem a autorização, nada é lido; o aceite vai à conta antes de a reunião nascer", async () => {
+    const aceitar = vi.spyOn(duble.utils.client.meetings.aceitarAvisoDeGravacao, "mutate");
     abrir();
-    enviar(arquivoMp3(), "");
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Dê um título para a reunião."));
+    fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [arquivoMp3()] } });
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Marque a caixa de autorização antes de enviar o áudio."));
     expect(duble.cortar).not.toHaveBeenCalled();
+    expect(aceitar).not.toHaveBeenCalled();
+    enviar(arquivoMp3());
+    await waitFor(() => expect(iniciarGravacao()).toHaveBeenCalled());
+    expect(aceitar).toHaveBeenCalledWith({ versao: "2026-11-24", idioma: "pt-BR" });
+    expect(aceitar.mock.invocationCallOrder[0]).toBeLessThan(iniciarGravacao().mock.invocationCallOrder[0]);
   });
 
   // Vindos do envio de arquivo do ?envioUnico=1 (Meetings.rotas.test.tsx), que
   // saiu na G14: as mesmas recusas valem antes do corte, sem travar o formulário.
-  it.each([
-    { caso: "com título de uma letra só", titulo: "X", marcar: true, aviso: "O título precisa ter de 2 a 200 caracteres." },
-    { caso: "com título de 201 caracteres", titulo: "a".repeat(201), marcar: true, aviso: "O título precisa ter de 2 a 200 caracteres." },
-    { caso: "sem a autorização marcada", titulo: "Conversa com a Bia", marcar: false, aviso: "Marque a caixa de autorização antes de enviar o áudio." },
-  ])("o arquivo $caso é recusado antes do corte, sem reunião nem formulário travado", async ({ titulo, marcar, aviso }) => {
+  it("o arquivo sem a autorização marcada é recusado antes do corte, sem reunião nem formulário travado", async () => {
     abrir();
-    fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: titulo } });
-    if (marcar) fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [arquivoMp3()] } });
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(aviso));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Marque a caixa de autorização antes de enviar o áudio."));
     expect(duble.cortar).not.toHaveBeenCalled();
     expect(iniciarGravacao()).not.toHaveBeenCalled();
     expect(screen.getByRole("checkbox")).not.toBeDisabled();
-    expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).not.toBeDisabled();
     expect(sessaoOcupada()).toBe(false);
   });
 
   it("a reunião da agenda (Gravar agora) fica ligada à reunião que o MP3 criou", async () => {
     abrir(`/gravar?agendada=${AGENDADA}`);
-    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
-    enviar(arquivoMp3(), "");
+    await act(async () => { await Promise.resolve(); });
+    enviar(arquivoMp3());
+    // O título da reunião da agenda vai com o arquivo (não é pedido antes).
+    await waitFor(() => expect(iniciarGravacao()).toHaveBeenCalledWith(expect.objectContaining({ title: "Conversa com a Bia" })));
     await waitFor(() => expect(duble.utils.client.agenda.ligarGravacao.mutate).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
     await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalled());
   });
@@ -550,8 +557,7 @@ describe("Reuniões — o MP3 em partes quando algo falha no meio (revisão do p
     expect(duble.utils.meetings.list.invalidate).toHaveBeenCalled();
     // De volta ao gravador: o formulário está limpo, e o arquivo não volta a parecer "por enviar".
     act(() => { window.history.pushState(null, "", "/gravar"); window.dispatchEvent(new PopStateEvent("popstate")); });
-    expect(await screen.findByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("");
-    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    expect(await screen.findByRole("checkbox")).not.toBeChecked();
     await waitFor(() => expect(sessaoOcupada()).toBe(false));
   });
 
@@ -700,8 +706,8 @@ describe("Reuniões — o recuo do corte pela rota das partes (G14, parte 2)", (
 
   it("o arquivo inteiro é a parte 0, em audio/mp4, com os bytes do arquivo; a reunião nasce do arquivo e o fim leva ao detalhe", async () => {
     abrir();
-    enviar(alac(), "Conversa com a Bia");
-    await waitFor(() => expect(iniciarGravacao()).toHaveBeenCalledWith(expect.objectContaining({ title: "Conversa com a Bia", consentGranted: true, origem: "arquivo" })));
+    enviar(alac());
+    await waitFor(() => expect(iniciarGravacao()).toHaveBeenCalledWith(expect.objectContaining({ title: TITULO_PADRAO, consentGranted: true, origem: "arquivo" })));
     await waitFor(() => expect(encerrarGravacao()).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
     expect(duble.enviarParte).toHaveBeenCalledTimes(1);
     expect(duble.enviarParte.mock.calls[0][3]).toBe("audio/mp4");
@@ -723,7 +729,6 @@ describe("Reuniões — o recuo do corte pela rota das partes (G14, parte 2)", (
     try {
       iniciarGravacao().mockRejectedValue(new Error(MENSAGEM_BANCO_INDISPONIVEL));
       abrir();
-      fireEvent.change(screen.getByPlaceholderText(i18n.t("meetings.titlePlaceholder")), { target: { value: "Talk with Bia" } });
       fireEvent.click(screen.getByRole("checkbox"));
       fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [alac()] } });
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith(i18n.t("errors.databaseUnavailable")));

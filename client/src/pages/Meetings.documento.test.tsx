@@ -47,11 +47,11 @@ const duble = vi.hoisted(() => {
     mapa: vi.fn(),
     painelDoEmail: vi.fn(),
     utils: {
-      meetings: { list: { invalidate: vi.fn() }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() } },
+      meetings: { avisoDeGravacao: { invalidate: async () => undefined }, list: { invalidate: vi.fn() }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() } },
       auth: { me: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
-      client: { meetings: { delete: { mutate: vi.fn() } } },
+      client: { meetings: { aceitarAvisoDeGravacao: { mutate: async () => ({ versao: "2026-11-24", aceitoEm: 1 }) }, delete: { mutate: vi.fn() } } },
     },
   };
 });
@@ -70,6 +70,8 @@ vi.mock("@/lib/trpc", () => ({
     equipes: { minhas: { useQuery: () => ({ data: { equipes: [], convites: [] } }) }, responderConvite: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     useUtils: () => duble.utils,
     meetings: {
+      // Gravar com um toque: o aviso de gravação ainda não aceito na conta (a caixa aparece).
+      avisoDeGravacao: { useQuery: () => ({ data: { versaoVigente: "2026-11-24", aceitoEm: null } }) }, atualizarDetalhes: { useMutation: () => ({ mutate: () => undefined, isPending: false }) },
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
       modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
@@ -205,10 +207,10 @@ describe("O gravador: resumir um PDF ou fotos de um texto", () => {
 
   it("o botão troca o microfone pelo documento, com o aviso e a autorização dele, e volta", () => {
     abrirGravador();
-    expect(screen.getByText(/Confirmo que todas as pessoas participantes autorizaram a gravação/)).toBeInTheDocument();
+    expect(screen.getByText(/Li o aviso acima. Em cada reunião, só vou gravar/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Resumir um PDF ou fotos de um texto" }));
     // O aviso e a caixa da gravação saem; ficam os do documento.
-    expect(screen.queryByText(/Confirmo que todas as pessoas participantes autorizaram a gravação/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Li o aviso acima. Em cada reunião, só vou gravar/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Iniciar gravação/ })).not.toBeInTheDocument();
     expect(screen.getByText(/O arquivo é lido pela IA do Google \(Gemini\)/)).toBeInTheDocument();
     expect(screen.getByText("Confirmo que posso usar este documento e autorizo o tratamento privado dele pela IA para gerar o resumo.")).toBeInTheDocument();

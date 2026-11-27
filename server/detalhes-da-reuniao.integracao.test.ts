@@ -7,7 +7,7 @@ import { apagarPelaChave } from "./test/apagar-pela-chave";
 vi.hoisted(() => { process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes"; });
 
 const { createContext, createPrivateContact, deleteContext, getDb } = await import("./db");
-const { contexts, meetings, meetingTranscripts, privateContacts, users } = await import("../drizzle/schema");
+const { contexts, meetings, meetingTranscripts, privateContacts, recordingNoticeAcceptances, users } = await import("../drizzle/schema");
 const { appRouter } = await import("./routers");
 const { RECUSAS_DOS_DETALHES } = await import("@shared/detalhes-da-reuniao");
 const { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO } = await import("@shared/aviso-de-gravacao");
@@ -62,6 +62,8 @@ describe.skipIf(!temBanco)("Detalhes da reunião (integração)", () => {
     contextoDaDona = await createContext(DONA, { name: "Feira de Milão", visibility: "private" });
     contextoDaOutra = await createContext(OUTRA, { name: "Contexto da Outra", visibility: "private" });
     await banco.insert(contexts).values({ id: contextoDoCatalogo, ownerId: null, name: "Evento do catálogo", createdAt: Date.now(), updatedAt: Date.now() });
+    // Gravar com um toque: a gravação só nasce com o aviso aceito na conta.
+    await daDona().meetings.aceitarAvisoDeGravacao({ versao: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
   });
 
   afterAll(async () => {
@@ -72,6 +74,7 @@ describe.skipIf(!temBanco)("Detalhes da reunião (integração)", () => {
     await banco.delete(privateContacts).where(inArray(privateContacts.ownerId, [DONA, OUTRA]));
     await banco.delete(contexts).where(inArray(contexts.ownerId, [DONA, OUTRA]));
     await banco.delete(contexts).where(eq(contexts.id, contextoDoCatalogo));
+    await banco.delete(recordingNoticeAcceptances).where(inArray(recordingNoticeAcceptances.ownerId, [DONA, OUTRA]));
     await banco.delete(users).where(inArray(users.openId, [DONA, OUTRA]));
   });
 

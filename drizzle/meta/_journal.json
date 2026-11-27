@@ -253,6 +253,13 @@
       "when": 1795734750432,
       "tag": "0035_encerrar-negociacao",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "5",
+      "when": 1795742590077,
+      "tag": "0036_gravar-com-um-toque",
+      "breakpoints": true
     }
   ]
 }

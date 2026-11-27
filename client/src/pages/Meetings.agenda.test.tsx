@@ -50,13 +50,13 @@ const duble = vi.hoisted(() => {
     obterDaAgenda: vi.fn(),
     listarDaAgenda: vi.fn(),
     utils: {
-      meetings: { list: { invalidate: vi.fn(async () => undefined) }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+      meetings: { avisoDeGravacao: { invalidate: async () => undefined }, list: { invalidate: vi.fn(async () => undefined) }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
       agenda: { listar: { invalidate: vi.fn(async () => undefined) } },
       auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
       client: {
-        meetings: { iniciarGravacao: { mutate: vi.fn() }, definirPedidoDoResumo: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
+        meetings: { aceitarAvisoDeGravacao: { mutate: async () => ({ versao: "2026-11-24", aceitoEm: 1 }) }, iniciarGravacao: { mutate: vi.fn() }, definirPedidoDoResumo: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
         transcricaoDaGravacao: { query: async () => ({ status: "recording", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} }) } },
         agenda: { ligarGravacao: { mutate: vi.fn() } },
       },
@@ -92,6 +92,8 @@ vi.mock("@/lib/trpc", () => ({
     useUtils: () => duble.utils,
     auth: { logout: duble.registrar("logout") },
     meetings: {
+      // Gravar com um toque: o aviso de gravação ainda não aceito na conta (a caixa aparece).
+      avisoDeGravacao: { useQuery: () => ({ data: { versaoVigente: "2026-11-24", aceitoEm: null } }) }, atualizarDetalhes: { useMutation: () => ({ mutate: () => undefined, isPending: false }) },
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
       modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
@@ -242,23 +244,17 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
   it("o título vem da reunião marcada, e o gravador diz de qual se trata", async () => {
     abrir(`/gravar?agendada=${AGENDADA}`);
     expect(duble.obterDaAgenda).toHaveBeenCalledWith({ id: AGENDADA }, expect.any(Object));
-    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
-    expect(screen.getByRole("note")).toHaveTextContent("Da sua agenda:");
-  });
-
-  it("o título que a dona já escreveu não é trocado quando a reunião chega", async () => {
-    duble.obterDaAgenda.mockReturnValue({ data: undefined, isLoading: true, isError: false, error: null });
-    const { rerender } = abrir(`/gravar?agendada=${AGENDADA}`);
-    fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: "Minha reunião" } });
-    duble.obterDaAgenda.mockReturnValue({ data: DA_AGENDA, isLoading: false, isError: false, error: null });
-    rerender(<Meetings />);
     await waitFor(() => expect(screen.getByRole("note")).toHaveTextContent("Da sua agenda:"));
-    expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Minha reunião");
+    // Gravar com um toque: o título não é pedido antes; o da reunião marcada vai com a gravação.
+    expect(screen.queryByPlaceholderText(PLACEHOLDER_DO_TITULO)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
+    await waitFor(() => expect(duble.utils.client.meetings.iniciarGravacao.mutate).toHaveBeenCalledWith(expect.objectContaining({ title: "Conversa com a Bia" })));
   });
 
   it("ir a Reuniões pelo menu no meio da gravação: a URL volta ao gravador com a reunião da agenda, e a faixa com o convite continua", async () => {
     abrir(`/gravar?agendada=${AGENDADA}`);
-    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
@@ -272,7 +268,7 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
 
   it("gravação em partes: liga no Iniciar, com a reunião que nasce ali", async () => {
     abrir(`/gravar?emPartes=1&agendada=${AGENDADA}`);
-    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     await waitFor(() => expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
@@ -281,7 +277,7 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
 
   it("o pedido do resumo antes de gravar (H4e): sem mexer, nada vai; escolhido, vai com a reunião que nasce no Iniciar", async () => {
     abrir(`/gravar?emPartes=1&agendada=${AGENDADA}`);
-    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
     fireEvent.click(screen.getByText("Resumo desta reunião", { exact: false }));
     fireEvent.change(screen.getByRole("combobox", { name: "Modelo do resumo" }), { target: { value: "sales" } });
     fireEvent.click(screen.getByRole("radio", { name: "Conciso" }));
@@ -294,7 +290,7 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
 
   it("sem mexer no pedido do resumo, o Iniciar não o manda: valem os padrões da dona", async () => {
     abrir(`/gravar?emPartes=1&agendada=${AGENDADA}`);
-    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     await waitFor(() => expect(ligar()).toHaveBeenCalled());
@@ -307,7 +303,7 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
       value: { getUserMedia: async () => { throw new DOMException("negado", "NotAllowedError"); } },
     });
     abrir(`/gravar?emPartes=1&agendada=${AGENDADA}`);
-    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     await waitFor(() => expect(duble.utils.client.meetings.delete.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA }));
@@ -317,7 +313,7 @@ describe("Gravar agora: o gravador com a reunião da agenda", () => {
   it("a ligação recusada não trava a gravação: ela segue, a dona é avisada e o Encerrar entrega", async () => {
     ligar().mockRejectedValue(Object.assign(new Error("Gravação não encontrada."), { data: { code: "NOT_FOUND" } }));
     abrir(`/gravar?agendada=${AGENDADA}`);
-    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(AVISO_DA_LIGACAO));
@@ -336,8 +332,7 @@ describe("o lembrete de outra reunião da agenda, tocado no sino com uma gravaç
   const OUTRA = "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f";
   const caminho = () => `${window.location.pathname}${window.location.search}`;
 
-  async function gravar(titulo?: string) {
-    if (titulo) fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: titulo } });
+  async function gravar() {
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
@@ -353,13 +348,13 @@ describe("o lembrete de outra reunião da agenda, tocado no sino com uma gravaç
   // Antes, no envio único do ?envioUnico=1, a reunião só nascia no Transcrever.
   it("no meio da gravação sem agenda: a URL volta ao gravador de antes, sem a faixa, e a gravação não é ligada à reunião do lembrete", async () => {
     abrir("/gravar");
-    await gravar("Reunião A");
+    await gravar();
     act(() => window.history.pushState(null, "", `/gravar?agendada=${AGENDADA}`));
     await waitFor(() => expect(caminho()).toBe("/gravar"));
     expect(toast.info).toHaveBeenCalledWith("Encerre a gravação antes de sair do gravador.", { id: "gravacao-em-curso" });
     expect(screen.queryByText(/Da sua agenda:/)).not.toBeInTheDocument();
     await encerrar();
-    expect(duble.utils.client.meetings.iniciarGravacao.mutate).toHaveBeenCalledWith(expect.objectContaining({ title: "Reunião A" }));
+    expect(duble.utils.client.meetings.iniciarGravacao.mutate).toHaveBeenCalledWith(expect.objectContaining({ title: expect.stringMatching(/^Reunião de /) }));
     expect(ligar()).not.toHaveBeenCalled();
   });
 
@@ -368,7 +363,7 @@ describe("o lembrete de outra reunião da agenda, tocado no sino com uma gravaç
       data: { ...DA_AGENDA, id, titulo: id === OUTRA ? "Conversa com o Rui" : DA_AGENDA.titulo }, isLoading: false, isError: false, error: null,
     }));
     abrir(`/gravar?agendada=${AGENDADA}`);
-    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
     await gravar();
     await waitFor(() => expect(ligar()).toHaveBeenCalledWith({ id: AGENDADA, meetingId: VINICOLA }));
     act(() => window.history.pushState(null, "", `/gravar?agendada=${OUTRA}`));
@@ -398,7 +393,7 @@ describe("Gravar agora pela agenda, montado como no App", () => {
   it("o voltar do navegador no meio da gravação não descarta o áudio: volta ao gravador, com a reunião da agenda, e a gravação fica ligada", async () => {
     abrirAAgenda();
     fireEvent.click(screen.getByRole("button", { name: /Gravar agora/ }));
-    await waitFor(() => expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("Conversa com a Bia"));
+    await waitFor(() => expect(screen.getByText(/Da sua agenda:/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
@@ -427,7 +422,6 @@ describe("sem a reunião da agenda, o gravador de sempre", () => {
   it("sem ?agendada: nada de agenda, nem leitura nem ligação", async () => {
     abrir("/gravar");
     expect(duble.obterDaAgenda).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: "Conversa avulsa" } });
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     fireEvent.click(await screen.findByRole("button", { name: /Encerrar gravação/ }));
@@ -445,8 +439,7 @@ describe("sem a reunião da agenda, o gravador de sempre", () => {
     duble.obterDaAgenda.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: { message: "Reunião agendada não encontrada.", data: { code: "NOT_FOUND" } } });
     abrir(`/gravar?agendada=${AGENDADA}`);
     expect(screen.getByRole("note")).toHaveTextContent("Esta reunião não está mais na sua agenda. A gravação segue sem ligação.");
-    expect(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO)).toHaveValue("");
-    fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: "Conversa avulsa" } });
+    expect(screen.queryByPlaceholderText(PLACEHOLDER_DO_TITULO)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     fireEvent.click(await screen.findByRole("button", { name: /Encerrar gravação/ }));
@@ -475,7 +468,6 @@ describe("a reunião da agenda que carrega depois do Iniciar ou do arquivo", () 
   const respirar = () => act(async () => { await new Promise(resolver => setTimeout(resolver, 50)); });
 
   function escreverEAutorizar() {
-    fireEvent.change(screen.getByPlaceholderText(PLACEHOLDER_DO_TITULO), { target: { value: "Minha reunião" } });
     fireEvent.click(screen.getByRole("checkbox"));
   }
 

@@ -3,7 +3,8 @@ import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { CONTA_DA_DONA, FORMATO_DO_FALANTE, NOME_DO_FALANTE_MAX, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN, VERSAO_DA_AUTORIZACAO_COM_NOMES } from "@shared/const";
-import { VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
+import { VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO, VERSOES_DO_AVISO_DE_GRAVACAO } from "@shared/aviso-de-gravacao";
+import { aceitarAvisoDeGravacao, conferirAvisoAceito, estadoDoAvisoDeGravacao } from "../aviso-de-gravacao-aceito";
 import { VERSOES_DO_AVISO_DO_DOCUMENTO } from "@shared/aviso-do-documento";
 import { ORIGENS_DE_DOCUMENTO } from "@shared/documento-da-reuniao";
 import { iniciarDocumento, tetoDosDocumentos } from "../documento-da-reuniao";
@@ -467,6 +468,18 @@ export const meetingsRouter = router({
     return { id };
   }),
 
+  // O aviso de gravação aceito na conta (gravar com um toque, 26/11/2026): o
+  // gravador pergunta se a versão vigente já foi aceita, e só então mostra o
+  // aviso com a caixa. O aceite vale para a versão vigente e fica no servidor,
+  // com a data, o idioma da tela, o IP e o navegador.
+  avisoDeGravacao: procedimentoDaReuniao.query(({ ctx }) => estadoDoAvisoDeGravacao(ctx.user.openId)),
+  aceitarAvisoDeGravacao: procedimentoDaReuniao
+    .input(z.object({ versao: z.literal(VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO), idioma: z.string().max(12).optional() }))
+    .mutation(({ ctx, input }) => aceitarAvisoDeGravacao(ctx.user.openId, {
+      idioma: input.idioma ?? null,
+      quem: { ipAddress: ipDaCliente(ctx.req), userAgent: ctx.req.headers["user-agent"] },
+    })),
+
   // A reunião gravada em partes (G5): nasce no início da gravação, cada parte
   // chega pela rota binária (server/_core/rota-das-partes.ts) e o fim diz
   // quantas partes houve. A tela que grava em partes é a G9.
@@ -474,6 +487,10 @@ export const meetingsRouter = router({
     origem: z.enum(["gravacao", "arquivo", "aba"]).default("gravacao"),
   })).mutation(async ({ ctx, input }) => {
     await conferirContatoEContexto(ctx.user.openId, input);
+    // Gravar com um toque (26/11/2026): a reunião só nasce com uma versão do
+    // aviso que a dona aceitou na conta (server/aviso-de-gravacao-aceito.ts).
+    // A reunião continua gravando o próprio registro (consent_at e a versão).
+    await conferirAvisoAceito(ctx.user.openId, input.consentNoticeVersion);
     return iniciarReuniaoEmPartes(ctx.user.openId, {
       title: input.title, language: input.language, consentNoticeVersion: input.consentNoticeVersion ?? null,
       origem: input.origem, contactId: input.contactId, contextId: input.contextId,

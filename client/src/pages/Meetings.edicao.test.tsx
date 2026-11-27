@@ -25,7 +25,7 @@ const duble = vi.hoisted(() => {
     resumoGuardado: vi.fn(),
     editarTranscricao: vi.fn(),
     utils: {
-      meetings: {
+      meetings: { avisoDeGravacao: { invalidate: async () => undefined },
         list: { invalidate: vi.fn() }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() },
         resumoGuardado: { invalidate: vi.fn() }, mapaMental: { invalidate: vi.fn() },
       },
@@ -33,7 +33,7 @@ const duble = vi.hoisted(() => {
       networkInteligente: { pendencias: { reset: vi.fn() } },
       auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
       client: {
-        meetings: {
+        meetings: { aceitarAvisoDeGravacao: { mutate: async () => ({ versao: "2026-11-24", aceitoEm: 1 }) },
           iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() },
           editarTranscricao: { mutate: (entrada: unknown) => duble.editarTranscricao(entrada) },
           transcricaoDaGravacao: { query: async () => ({ status: "recording", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} }) },
@@ -53,6 +53,8 @@ vi.mock("@/lib/trpc", () => ({
     equipes: { minhas: { useQuery: () => ({ data: { equipes: [], convites: [] } }) }, responderConvite: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     useUtils: () => duble.utils,
     meetings: {
+      // Gravar com um toque: o aviso de gravação ainda não aceito na conta (a caixa aparece).
+      avisoDeGravacao: { useQuery: () => ({ data: { versaoVigente: "2026-11-24", aceitoEm: null } }) }, atualizarDetalhes: { useMutation: () => ({ mutate: () => undefined, isPending: false }) },
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
       modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
