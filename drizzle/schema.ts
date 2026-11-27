@@ -337,6 +337,10 @@ export const platformNotifications = mysqlTable("platform_notifications", {
     // no MySQL 8. 'lembrete' é o da próxima ação e o da reunião da agenda;
     // 'reuniao_pronta', o de quando a transcrição e o resumo terminam.
     "lembrete", "reuniao_pronta",
+    // A11: a outra parte precisa saber que a negociação foi encerrada e com que
+    // números, porque é ela quem confere se bate com o que foi combinado.
+    // Também no fim, pela mesma razão.
+    "deal_closed",
   ]).notNull(),
   title: varchar("title", { length: 200 }).notNull(),
   body: text("body"),
@@ -2836,3 +2840,55 @@ export const consumoDasSalas = mysqlTable("consumo_das_salas", {
   nomeUnique: uniqueIndex("consumo_das_salas_nome_unique").on(table.nomeNoFornecedor),
   mesIdx: index("consumo_das_salas_mes_idx").on(table.mes),
 }));
+
+/**
+ * A11 / etapa 12 — o negócio fechado e a comissão devida.
+ *
+ * A decisão D2 da cliente é que o dinheiro NÃO passa pela plataforma nesta
+ * versão: o site registra, o pagamento corre fora. Esta tabela é esse registro,
+ * e é o que sustenta a cobrança depois — sem ela, "fechamos negócio pela
+ * plataforma" é palavra contra palavra.
+ *
+ * Uma linha por sala (`roomUnique`): encerrar é um evento único. Quem encerrar
+ * de novo recebe o registro que já existe, não cria um segundo.
+ *
+ * Valores em decimal, nunca em float: `float` arredonda dinheiro de um jeito
+ * que aparece na fatura. A moeda fica ao lado do valor porque a rede é
+ * internacional e "150000" sem moeda não é informação.
+ *
+ * `commissionPercent` tem teto de 50 na validação do router, e o teto incide
+ * sobre os HONORÁRIOS DA INTERMEDIAÇÃO (resposta da Dra. Glenda em 12/09/2026:
+ * "Incide sobre o valor dos honorários da intermediação do negócio"), não sobre
+ * o lucro nem sobre o valor do negócio. Por isso as colunas existem separadas.
+ *
+ * Exclusão de conta: a linha sai com a sala (origem "salas" em
+ * server/exclusao-de-conta.ts); `closedByUserId` é sempre uma das duas pontas.
+ */
+export const dealClosures = mysqlTable("deal_closures", {
+  id:                int("id").autoincrement().primaryKey(),
+  roomId:            int("roomId").notNull(),
+  opportunityId:     int("opportunityId").notNull(),
+  // Quem registrou o encerramento; as duas partes podem.
+  //
+  // A Dra. Glenda respondeu em 12/09/2026 que quem declara é o CONSULTOR DE
+  // NEGÓCIOS, não as partes. O papel de consultor ainda não existe no sistema,
+  // então por ora quem registra é uma das partes e esta coluna guarda quem foi.
+  // Quando o consultor existir, a trava de quem pode registrar muda no router.
+  closedByUserId:    int("closedByUserId").notNull(),
+  currency:          varchar("currency", { length: 3 }).default("BRL").notNull(),
+  dealValue:         decimal("dealValue", { precision: 14, scale: 2 }).notNull(),
+  // Os honorários da intermediação, e não o lucro do negócio: é a base da comissão.
+  intermediationFee: decimal("intermediationFee", { precision: 14, scale: 2 }).notNull(),
+  commissionPercent: decimal("commissionPercent", { precision: 5, scale: 2 }).notNull(),
+  // Guardado, não recalculado na leitura: o percentual combinado pode mudar de
+  // regra no futuro e o que foi acordado naquele dia precisa continuar de pé.
+  commissionAmount:  decimal("commissionAmount", { precision: 14, scale: 2 }).notNull(),
+  notes:             text("notes"),
+  closedAt:          timestamp("closedAt").defaultNow().notNull(),
+}, (table) => ({
+  roomUnique:     uniqueIndex("deal_closure_room_unique").on(table.roomId),
+  opportunityIdx: index("deal_closure_opportunity_idx").on(table.opportunityId),
+  closedByIdx:    index("deal_closure_closed_by_idx").on(table.closedByUserId),
+}));
+
+export type DealClosure = typeof dealClosures.$inferSelect;

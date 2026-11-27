@@ -1480,7 +1480,27 @@
     "sendDocsSecurely": "Envoyez vos documents confidentiels en toute sécurité.",
     "youLabel": "Vous",
     "docsProtectedNotice": "Tous les documents partagés dans cette salle sont protégés par le NDA signé. Tout partage en dehors de cette plateforme viole les termes convenus.",
-    "fileSizeKb": "{{size}} Ko"
+    "fileSizeKb": "{{size}} Ko",
+    "encerrarBotao": "Clôturer et enregistrer l’affaire",
+    "encerrarTitulo": "Enregistrer l’affaire conclue",
+    "encerrarSubtitulo": "Le paiement a lieu hors de la plateforme. Ce qui reste ici est l’enregistrement de ce qui a été convenu.",
+    "campoMoeda": "Devise",
+    "campoValor": "Montant de l’affaire",
+    "campoPercentual": "Commission convenue (%)",
+    "campoComissao": "Commission due",
+    "campoObservacoes": "Remarques",
+    "campoObservacoesPlaceholder": "Ce qui aidera à identifier l’affaire plus tard",
+    "avisoComissaoTitulo": "Commission due à Marquesa Global Match",
+    "avisoComissaoDetalhe": "Calculée sur les honoraires d'intermédiation, plafonnée à 50%.",
+    "erroTetoComissao": "La commission convenue ne peut pas dépasser 50% des honoraires d'intermédiation.",
+    "encerrarConfirmar": "Enregistrer et clôturer",
+    "encerrarCancelar": "Annuler",
+    "encerrarSucesso": "Affaire enregistrée et négociation clôturée.",
+    "encerrarFalha": "Impossible d’enregistrer l’affaire.",
+    "encerradaTitulo": "Négociation clôturée",
+    "encerradaPagamentoFora": "Le paiement a lieu hors de la plateforme ; ceci est l’enregistrement de ce qui a été convenu.",
+    "campoHonorarios": "Honoraires d'intermédiation",
+    "erroHonorariosMaior": "Les honoraires d'intermédiation ne peuvent pas dépasser la valeur de l'affaire."
   },
   "meetings": {
     "participants": {
@@ -4639,5 +4659,18 @@
     "lembreteDaAcao": "Rappel : une prochaine action arrive à échéance aujourd’hui",
     "lembreteDaReuniao": "Rappel : réunion à {{hora}}",
     "corpo": "Touchez pour ouvrir dans Marquesa Global Match."
+  },
+  "local": {
+    "estado": "État / province",
+    "paisPlaceholder": "Recherchez le pays",
+    "estadoPlaceholder": "Recherchez l’État",
+    "cidadePlaceholder": "Recherchez ou saisissez la ville",
+    "escolhaOPais": "Choisissez d’abord le pays.",
+    "escolhaOEstado": "Choisissez d’abord l’État.",
+    "carregando": "Chargement des villes…",
+    "semLista": "Pas de liste pour ce pays : saisissez le nom de la ville.",
+    "semResultado": "Aucun résultat. Vous pouvez saisir le nom et continuer.",
+    "creditoPaises": "Données des pays :",
+    "creditoCidades": "Données des villes :"
   }
 }

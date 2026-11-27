@@ -111,7 +111,11 @@ describe("cadastro de conta importada", () => {
     render(<Onboarding />);
 
     await waitFor(() => {
+      // O país não conta: o cadastro sempre abriu com o Brasil escolhido (era um
+      // <select>; desde a cascata país → estado → cidade é um combobox que mostra
+      // o nome do país no campo). Nada além dele pode vir preenchido.
       const preenchidos = Array.from(document.querySelectorAll("input"))
+        .filter(campo => campo.labels?.[0]?.textContent !== "País")
         .map(campo => (campo as HTMLInputElement).value)
         .filter(valor => valor.trim().length > 0);
       expect(preenchidos).toEqual([]);

@@ -1480,7 +1480,27 @@
     "sendDocsSecurely": "非公開書類を安全に送信できます。",
     "youLabel": "あなた",
     "docsProtectedNotice": "このルームで共有されるすべての書類は、署名済みのNDAにより保護されています。本プラットフォーム外での共有は合意事項への違反となります。",
-    "fileSizeKb": "{{size}} KB"
+    "fileSizeKb": "{{size}} KB",
+    "encerrarBotao": "取引を記録して終了",
+    "encerrarTitulo": "成立した取引を記録",
+    "encerrarSubtitulo": "支払いはプラットフォーム外で行われます。ここに残るのは合意内容の記録です。",
+    "campoMoeda": "通貨",
+    "campoValor": "取引額",
+    "campoPercentual": "合意した手数料率（%）",
+    "campoComissao": "発生する手数料",
+    "campoObservacoes": "備考",
+    "campoObservacoesPlaceholder": "後でこの取引を識別するのに役立つ情報",
+    "avisoComissaoTitulo": "Marquesa Global Match に支払う手数料",
+    "avisoComissaoDetalhe": "仲介手数料に対して算出し、上限は50%です。",
+    "erroTetoComissao": "合意した手数料は仲介手数料の50%を超えることはできません。",
+    "encerrarConfirmar": "記録して終了",
+    "encerrarCancelar": "キャンセル",
+    "encerrarSucesso": "取引を記録し、交渉を終了しました。",
+    "encerrarFalha": "取引を記録できませんでした。",
+    "encerradaTitulo": "交渉終了",
+    "encerradaPagamentoFora": "支払いはプラットフォーム外で行われます。これは合意内容の記録です。",
+    "campoHonorarios": "仲介手数料",
+    "erroHonorariosMaior": "仲介手数料が取引額を超えることはできません。"
   },
   "meetings": {
     "participants": {
@@ -4639,5 +4659,18 @@
     "lembreteDaAcao": "リマインダー：次のアクションの期限は今日です",
     "lembreteDaReuniao": "リマインダー：{{hora}} から会議",
     "corpo": "タップして Marquesa Global Match で開きます。"
+  },
+  "local": {
+    "estado": "州・県",
+    "paisPlaceholder": "国を検索",
+    "estadoPlaceholder": "州・県を検索",
+    "cidadePlaceholder": "都市を検索または入力",
+    "escolhaOPais": "先に国を選んでください。",
+    "escolhaOEstado": "先に州・県を選んでください。",
+    "carregando": "都市を読み込み中…",
+    "semLista": "この国のリストはありません。都市名を入力してください。",
+    "semResultado": "見つかりませんでした。名前を入力してそのまま進めます。",
+    "creditoPaises": "国のデータ:",
+    "creditoCidades": "都市のデータ:"
   }
 }

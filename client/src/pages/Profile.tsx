@@ -16,6 +16,8 @@ import { ContaGoogleNoPerfil } from "@/components/ContaGoogleNoPerfil";
 import { AssistenteDeTexto } from "@/components/AssistenteDeTexto";
 import { QualificacaoDoPerfil } from "@/components/QualificacaoDoPerfil";
 import { SugestoesDasReunioes } from "@/components/SugestoesDasReunioes";
+import PaisEstadoCidade from "@/components/PaisEstadoCidade";
+import { rotuloDoPais } from "@/lib/cascata-de-local";
 import { LIMITE_DA_BIO_GRAVADA } from "@shared/apresentacao";
 import { DemandasDoPerfil, EditorDoQuePreciso } from "@/components/OQuePreciso";
 import { categoriasPendentes, demandasParaGravar, lerDemandas, type DemandaDetalhada } from "@shared/o-que-preciso";
@@ -41,18 +43,6 @@ import {
 const LANGUAGES_LIST = [
   "Português", "English", "Español", "Français", "Deutsch",
   "中文", "日本語", "العربية", "हिन्दी", "Русский",
-];
-
-const COUNTRIES = [
-  { code: "BR", chave: "newOpportunity.countryBrasil" }, { code: "PT", chave: "newOpportunity.countryPortugal" },
-  { code: "US", chave: "newOpportunity.countryEstadosUnidos" }, { code: "AR", chave: "newOpportunity.countryArgentina" },
-  { code: "CL", chave: "newOpportunity.countryChile" }, { code: "CO", chave: "newOpportunity.countryColombia" },
-  { code: "MX", chave: "newOpportunity.countryMexico" }, { code: "ES", chave: "newOpportunity.countryEspanha" },
-  { code: "FR", chave: "newOpportunity.countryFranca" }, { code: "DE", chave: "newOpportunity.countryAlemanha" },
-  { code: "GB", chave: "newOpportunity.countryReinoUnido" }, { code: "IT", chave: "newOpportunity.countryItalia" },
-  { code: "CN", chave: "newOpportunity.countryChina" }, { code: "JP", chave: "newOpportunity.countryJapao" },
-  { code: "IN", chave: "newOpportunity.countryIndia" }, { code: "ZA", chave: "newOpportunity.countryAfricaDoSul" },
-  { code: "NG", chave: "newOpportunity.countryNigeria" }, { code: "AE", chave: "newOpportunity.countryEmiradosArabes" },
 ];
 
 // Tags "O que tenho" — a MESMA lista do Onboarding; as chaves ficam em
@@ -311,10 +301,10 @@ export default function Profile() {
   const profileWhatINeed = Array.isArray((profile as any)?.whatINeed) ? (profile as any).whatINeed as string[] : [];
   const profileInterestSectors = Array.isArray((profile as any)?.interestSectors) ? (profile as any).interestSectors as string[] : [];
 
-  const nomeDoPais = (codigo?: string | null) => {
-    const pais = COUNTRIES.find(c => c.code === codigo);
-    return pais ? t(pais.chave) : codigo ?? "";
-  };
+  // O nome sai do navegador (Intl.DisplayNames) no idioma da tela, para os 250
+  // países; a lista antiga de 18 mostrava o código cru de quem morava fora dela.
+  const nomeDoPais = (codigo?: string | null) =>
+    rotuloDoPais(codigo ?? "", i18n.language, t("onboarding.countries.other"));
 
   return (
     <div className="min-h-screen bg-transparent text-white">
@@ -487,24 +477,15 @@ export default function Profile() {
                     placeholder={t("profile.fields.activityAreaPlaceholder")}
                     className="bg-white/5 border-white/10 text-white placeholder:text-white/25 focus:border-amber-500/50" />
                 </div>
-                <div>
-                  <label className="text-xs text-white/40 uppercase tracking-wider mb-1.5 block">{t("profile.fields.country")}</label>
-                  <Select value={country} onValueChange={setCountry}>
-                    <SelectTrigger className="bg-white/5 border-white/10 text-white focus:border-amber-500/50">
-                      <SelectValue placeholder={t("profile.fields.countryPlaceholder")} />
-                    </SelectTrigger>
-                    <SelectContent className="bg-[#1b1714] border-white/10 text-white">
-                      {sortOptionsAlphabetically(COUNTRIES.map(country => ({ ...country, label: t(country.chave) })), i18n.language).map(c => (
-                        <SelectItem key={c.code} value={c.code} className="text-white hover:bg-white/10 focus:bg-white/10">{c.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <label className="text-xs text-white/40 uppercase tracking-wider mb-1.5 block">{t("profile.fields.city")}</label>
-                  <Input value={city} onChange={e => setCity(e.target.value)}
-                    placeholder={t("profile.fields.cityPlaceholder")}
-                    className="bg-white/5 border-white/10 text-white placeholder:text-white/25 focus:border-amber-500/50" />
+                {/* País → estado → cidade em cascata, o mesmo componente do
+                    cadastro (decisão de 26/11). Ocupa a linha inteira da grade. */}
+                <div className="sm:col-span-2">
+                  <PaisEstadoCidade pais={country} cidade={city}
+                    onChange={local => { setCountry(local.pais); setCity(local.cidade); }}
+                    rotuloDoPais={t("profile.fields.country")} rotuloDaCidade={t("profile.fields.city")}
+                    placeholderDaCidade={t("profile.fields.cityPlaceholder")}
+                    classeDoRotulo="text-xs text-white/40 uppercase tracking-wider mb-1.5 block"
+                    classeDoCampo="bg-white/5 border-white/10 text-white placeholder:text-white/25 focus:border-amber-500/50 disabled:opacity-50" />
                 </div>
                 <div>
                   <label className="text-xs text-white/40 uppercase tracking-wider mb-1.5 block">{t("profile.gender.label")}</label>
