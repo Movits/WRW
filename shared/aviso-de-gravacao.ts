@@ -31,3 +31,10 @@ export const VERSOES_QUE_PREVEEM_O_ACESSO: readonly string[] = ["2026-11-23", "2
 export function avisoPreveOAcesso(versao: string | null | undefined): boolean {
   return typeof versao === "string" && VERSOES_QUE_PREVEEM_O_ACESSO.includes(versao);
 }
+
+/**
+ * A recusa do início da gravação quando a dona ainda não aceitou, na conta, a
+ * versão do aviso que a reunião levaria (server/aviso-de-gravacao-aceito.ts).
+ * A tela a traduz (client/src/lib/mensagem-de-erro.ts) e mostra o aviso de novo.
+ */
+export const MENSAGEM_AVISO_DE_GRAVACAO_NAO_ACEITO = "Aceite o aviso de gravação antes de gravar.";

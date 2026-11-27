@@ -246,6 +246,13 @@
       "when": 1795719908332,
       "tag": "0034_indice-de-cruzamento",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "5",
+      "when": 1795734878229,
+      "tag": "0035_gravar-com-um-toque",
+      "breakpoints": true
     }
   ]
 }

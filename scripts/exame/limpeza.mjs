@@ -69,6 +69,9 @@ export const PLANO_DE_LIMPEZA = [
   // não é gente, e o dela sai.
   { tabela: "voice_profiles", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "voice_profile_consents", coluna: "owner_id", chave: "openId", acao: "apagar" },
+  // O aceite do aviso de gravação na conta (gravar com um toque). O exame não grava
+  // reunião; a conta QA que aceitar sai com o resto.
+  { tabela: "recording_notice_acceptances", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "buscas_do_complemento", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summary_items", coluna: "owner_id", chave: "openId", acao: "apagar" },
   { tabela: "meeting_summaries", coluna: "owner_id", chave: "openId", acao: "apagar" },

@@ -53,12 +53,12 @@ const duble = vi.hoisted(() => {
     duracao: vi.fn(),
     resumoGuardado: vi.fn(),
     utils: {
-      meetings: { list: { invalidate: vi.fn(async () => undefined) }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
+      meetings: { avisoDeGravacao: { invalidate: async () => undefined }, list: { invalidate: vi.fn(async () => undefined) }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() } },
       reuniaoAberta: { resumoGuardado: { invalidate: vi.fn() } },
       networkInteligente: { pendencias: { reset: vi.fn() } },
       // A gravação em partes (G9; o padrão do /gravar desde a G13b) chama o servidor por aqui.
       auth: { me: { getData: () => ({ openId: "dona-1" }), fetch: vi.fn() } },
-      client: { meetings: { iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
+      client: { meetings: { aceitarAvisoDeGravacao: { mutate: async () => ({ versao: "2026-11-24", aceitoEm: 1 }) }, iniciarGravacao: { mutate: vi.fn() }, encerrarGravacao: { mutate: vi.fn() }, delete: { mutate: vi.fn() }, // G15a: a transcrição durante a gravação, sem nenhuma parte pronta (função comum: o mockReset do projeto client zeraria um vi.fn).
         transcricaoDaGravacao: { query: async () => ({ status: "recording", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} }) } } },
     },
     enviarParte: vi.fn(),
@@ -94,6 +94,8 @@ vi.mock("@/lib/trpc", () => ({
     useUtils: () => duble.utils,
     auth: { logout: duble.registrar("logout") },
     meetings: {
+      // Gravar com um toque: o aviso de gravação ainda não aceito na conta (a caixa aparece).
+      avisoDeGravacao: { useQuery: () => ({ data: { versaoVigente: "2026-11-24", aceitoEm: null } }) }, atualizarDetalhes: { useMutation: () => ({ mutate: () => undefined, isPending: false }) },
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
       modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
@@ -226,7 +228,6 @@ function abrirOGravador() {
 
 /** O título, a autorização e o Iniciar: a gravação em partes começa. */
 async function comecarAGravar() {
-  fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
   fireEvent.click(screen.getByRole("checkbox"));
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
   expect(await screen.findByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
@@ -280,9 +281,11 @@ describe("Reuniões — o que ocupa a sessão", () => {
     duble.duracao.mockImplementation(() => new Promise(resolver => { entregarDuracao = resolver; }));
     pendentes.push(() => { entregarCorte({ ok: false, codigo: "DANIFICADO" }); entregarDuracao(null); });
     abrirOGravador();
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [arquivoDoRecuo()] } });
+    expect(motivoDaOcupacao()).toBe("enviando");
+    // O aceite do aviso na conta (gravar com um toque) vem antes do corte, já com a sessão ocupada.
+    await waitFor(() => expect(duble.cortar).toHaveBeenCalled());
     expect(motivoDaOcupacao()).toBe("enviando");
     // O corte não lê o ALAC: o recuo do corte lê a duração, e segue ocupando.
     await act(async () => { entregarCorte({ ok: false, codigo: "SEM_SUPORTE", formato: "mp4", detalhe: "ALAC" }); });
@@ -300,13 +303,11 @@ describe("Reuniões — a validação que recusa o envio não ocupa a sessão", 
   const audio = () => new File(["som"], "reuniao.mp3", { type: "audio/mpeg" });
   // O formato e o tamanho não são mais recusados aqui: desde a H9b todo arquivo
   // vai ao corte, que ocupa a sessão enquanto lê (Meetings.importacao.test.tsx).
+  // Desde o gravar com um toque, o título não é pedido antes: só a autorização recusa.
   it.each([
-    { caso: "sem título", titulo: "", marcar: true, arquivo: audio },
-    { caso: "sem a autorização", titulo: "Conversa com a Bia", marcar: false, arquivo: audio },
-  ])("o arquivo $caso é recusado sem ocupar a sessão", async ({ titulo, marcar, arquivo }) => {
+    { caso: "sem a autorização", arquivo: audio },
+  ])("o arquivo $caso é recusado sem ocupar a sessão", async ({ arquivo }) => {
     abrirOGravador();
-    if (titulo) fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: titulo } });
-    if (marcar) fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.change(document.querySelector<HTMLInputElement>("input[type='file']")!, { target: { files: [arquivo()] } });
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(duble.duracao).not.toHaveBeenCalled();
@@ -371,7 +372,6 @@ describe("Reuniões — gravação em partes (G9; o /gravar de sempre desde a G1
   }
 
   function preencher() {
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
   }
 
@@ -380,7 +380,7 @@ describe("Reuniões — gravação em partes (G9; o /gravar de sempre desde a G1
     preencher();
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     expect(iniciarGravacao.mutate).toHaveBeenCalledWith(expect.objectContaining({
-      title: "Conversa com a Bia", consentGranted: true, origem: "gravacao", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO,
+      title: expect.stringMatching(/^Reunião de /), consentGranted: true, origem: "gravacao", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO,
     }));
     await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /Encerrar gravação/ })); });
     await waitFor(() => expect(encerrarGravacao.mutate).toHaveBeenCalledWith({ meetingId: VINICOLA, partes: 1 }));
@@ -587,7 +587,6 @@ describe("Reuniões — gravação longa no celular (G10)", () => {
   });
 
   async function iniciar() {
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
   }
@@ -633,7 +632,6 @@ describe("Reuniões — gravação longa no celular (G10)", () => {
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)");
     abrirOGravador();
     expect(screen.queryByRole("note")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     expect(await screen.findByRole("note")).toHaveTextContent(/Mantenha esta tela aberta/);
@@ -664,7 +662,6 @@ describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes
   async function iniciar(caminho: string) {
     window.history.replaceState(null, "", caminho);
     render(<Meetings />);
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     expect(screen.getByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
@@ -786,11 +783,10 @@ describe("Reuniões — o aviso de hora e o teto de 12 h da gravação em partes
   it("a gravação nova tira da tela os avisos que ficam até ser fechados (os das 12 h, da hora sem OK, do descarte que não terminou e da gravação encerrada ao sair); o Iniciar recusado, não", async () => {
     window.history.replaceState(null, "", "/gravar");
     render(<Meetings />);
-    // Sem título nada começa: os avisos da gravação anterior seguem na tela.
+    // Sem a autorização nada começa: os avisos da gravação anterior seguem na tela.
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
-    expect(toast.error).toHaveBeenCalledWith("Dê um título para a reunião.");
+    expect(toast.error).toHaveBeenCalledWith("Marque a caixa de autorização antes de iniciar a gravação.");
     expect(toast.dismiss).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
     expect(screen.getByRole("button", { name: /Encerrar gravação/ })).toBeInTheDocument();
@@ -849,7 +845,6 @@ describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", 
   });
 
   function preencher() {
-    fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: "Conversa com a Bia" } });
     fireEvent.click(screen.getByRole("checkbox"));
   }
 
@@ -905,7 +900,7 @@ describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", 
     const iniciar = screen.getByRole("button", { name: /Iniciar gravação/ });
     fireEvent.click(iniciar);
     fireEvent.click(iniciar);
-    expect(iniciarGravacao.mutate).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(iniciarGravacao.mutate).toHaveBeenCalledTimes(1));
     // Enquanto o servidor cria a reunião, o botão e o formulário ficam travados.
     await waitFor(() => expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeDisabled());
     expect(screen.getByRole("checkbox")).toBeDisabled();
@@ -993,10 +988,9 @@ describe("Reuniões — a gravação em partes é o padrão para todas (G13b)", 
       expect(encerrarGravacao.mutate).not.toHaveBeenCalled();
       expect(confirmarDoNavegador).not.toHaveBeenCalled();
       expect(localStorage.getItem(DESCARTES)).toBeNull();
-      // O gravador volta ao começo: o título fica, para gravar de novo, e a
-      // autorização volta desmarcada, como no Encerrar (revisão da G13b).
+      // O gravador volta ao começo, e a autorização volta desmarcada, como no
+      // Encerrar (revisão da G13b).
       expect(screen.getByRole("button", { name: /Iniciar gravação/ })).toBeInTheDocument();
-      expect(screen.getByPlaceholderText("Ex.: Conversa com investidor")).toHaveValue("Conversa com a Bia");
       expect(screen.getByRole("checkbox")).not.toBeChecked();
       await waitFor(() => expect(sessaoOcupada()).toBe(false));
     } finally {

@@ -48,6 +48,7 @@ import {
   MENSAGEM_RESUMO_POR_EMAIL_TETO_DA_REUNIAO,
 } from "@shared/resumo-por-email";
 import { MENSAGEM_SENHA_DO_LINK_PEDIDA } from "@shared/senha-do-link";
+import { MENSAGEM_AVISO_DE_GRAVACAO_NAO_ACEITO } from "@shared/aviso-de-gravacao";
 import {
   DOCUMENTO_BYTES_MAX, DOCUMENTOS_POR_HORA, ehCodigoDaFalhaDoDocumento,
   type CodigoDaFalhaDoDocumento, type CodigoDaRecusaDoDocumento,
@@ -96,6 +97,8 @@ const CHAVE_POR_MENSAGEM_DO_SERVIDOR: Record<string, string> = {
   [UNAUTHED_ERR_MSG]: "errors.notAuthenticated",
   [NOT_ADMIN_ERR_MSG]: "errors.notAuthorized",
   [MENSAGEM_DO_LIMITE]: "errors.tooManyRequests",
+  // O início da gravação sem o aceite do aviso na conta (gravar com um toque).
+  [MENSAGEM_AVISO_DE_GRAVACAO_NAO_ACEITO]: "meetings.consentRequiredRecording",
   // As recusas das decisões do resumo guardado (server/resumo-guardado.ts).
   [MENSAGEM_RESUMO_SENDO_GERADO]: "meetings.summary.errorRegenerating",
   [MENSAGEM_ITEM_NAO_ENCONTRADO]: "meetings.summary.errorItemGone",

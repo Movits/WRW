@@ -57,7 +57,7 @@ const duble = vi.hoisted(() => {
     buscaNaRede: vi.fn(),
     painelDoEmail: vi.fn(),
     utils: {
-      meetings: {
+      meetings: { avisoDeGravacao: { invalidate: async () => undefined },
         list: { invalidate: vi.fn() }, pastas: { invalidate: vi.fn() }, lixeira: { invalidate: vi.fn() }, get: { invalidate: vi.fn(), setData: vi.fn() }, resumoGuardado: { invalidate: vi.fn() }, conexoes: { invalidate: vi.fn() },
         resumoPorEmail: { invalidate: vi.fn(), setData: vi.fn() },
       },
@@ -68,7 +68,7 @@ const duble = vi.hoisted(() => {
       // teste: o mockReset do projeto client zera o vi.fn a cada teste, e sem
       // resposta combinada vale uma reunião sem nenhuma parte pronta.
       // O "Desfazer" do aviso da lixeira (H7d) restaura pelo cliente do tRPC.
-      client: { meetings: {
+      client: { meetings: { aceitarAvisoDeGravacao: { mutate: async () => ({ versao: "2026-11-24", aceitoEm: 1 }) },
         transcricaoDaGravacao: { query: async (entrada: unknown) => (await transcricaoDaGravacao(entrada)) ?? { status: "uploading", emPartes: true, agora: Date.now(), partes: [], falas: [], nomes: {} } },
         restaurarDaLixeira: { mutate: vi.fn() },
       } },
@@ -105,6 +105,8 @@ vi.mock("@/lib/trpc", () => ({
     equipes: { minhas: { useQuery: () => ({ data: { equipes: [], convites: [] } }) }, responderConvite: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     useUtils: () => duble.utils,
     meetings: {
+      // Gravar com um toque: o aviso de gravação ainda não aceito na conta (a caixa aparece).
+      avisoDeGravacao: { useQuery: () => ({ data: { versaoVigente: "2026-11-24", aceitoEm: null } }) }, atualizarDetalhes: { useMutation: () => ({ mutate: () => undefined, isPending: false }) },
       // H4e: os modelos da dona (vazio) e a pergunta do tamanho.
       modelosDeResumo: { useQuery: () => ({ data: undefined, isError: false, error: null }) },
       responderTamanhoDoResumo: { useMutation: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }) },
@@ -962,7 +964,8 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
       render(<Meetings />);
       const seletor = screen.getByLabelText("Idioma da reunião") as HTMLSelectElement;
       if (idioma) fireEvent.change(seletor, { target: { value: idioma } });
-      fireEvent.change(screen.getByPlaceholderText("Ex.: Conversa com investidor"), { target: { value: titulo } });
+      // Gravar com um toque: sem título digitado, ele vem da reunião da agenda ou do padrão.
+      if (titulo) throw new Error("o gravador não pede título antes de gravar");
       fireEvent.click(screen.getByRole("checkbox"));
       await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Iniciar gravação/ })); });
       await waitFor(() => expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledTimes(1));
@@ -979,8 +982,8 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
     const { unmount } = render(<Meetings />);
     expect((screen.getByLabelText("Idioma da reunião") as HTMLSelectElement).value).toBe("pt-BR");
     unmount();
-    await iniciarNoIdioma("en", "Call with Ana");
-    expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith({ title: "Call with Ana", language: "en", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
+    await iniciarNoIdioma("en", "");
+    expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith({ title: expect.stringMatching(/^Reunião de /), language: "en", consentNoticeVersion: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO });
     // Nada pelo envio único, que saiu do gravador na G14.
   });
 
@@ -1039,14 +1042,14 @@ describe("Idioma da reunião (G1b) e versão do aviso (G4)", () => {
     fireEvent.change(seletor, { target: { value: "auto" } });
     expect(screen.getByText(/A IA reconhece o idioma de cada fala/)).toBeInTheDocument();
     unmount();
-    await iniciarNoIdioma("auto", "Call with Ana");
+    await iniciarNoIdioma("auto", "");
     expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith(expect.objectContaining({ language: "auto" }));
   });
 
   it("G16: um idioma fora dos 10 da tela (italiano) está na lista e vai ao servidor", async () => {
-    await iniciarNoIdioma("it", "Riunione");
+    await iniciarNoIdioma("it", "");
     expect((screen.getByLabelText("Idioma da reunião") as HTMLSelectElement).value).toBe("it");
-    expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith(expect.objectContaining({ title: "Riunione", language: "it" }));
+    expect(opcoesDaGravacaoEmPartes.iniciar).toHaveBeenCalledWith(expect.objectContaining({ language: "it" }));
   });
 
   it("G16: reunião em italiano com a tela em pt-BR: o pt-BR é TRADUZIDO, e a lista ganha \"Italiano (original)\", que volta ao original", () => {

@@ -2744,6 +2744,27 @@ export const voiceProfileConsents = mysqlTable("voice_profile_consents", {
   ownerCreatedIdx: index("voice_profile_consents_owner_created_idx").on(table.ownerId, table.createdAt),
 }));
 
+// O aceite do aviso de gravação na CONTA (gravar com um toque, decisão do
+// Roberto de 26/11/2026; server/aviso-de-gravacao-aceito.ts): o aviso
+// (meetings.consentNotice, versão em shared/aviso-de-gravacao.ts) aparece só na
+// primeira gravação, e de novo uma vez quando a versão vigente muda. Uma linha
+// por (dona, versão), com a data, o idioma da tela e quem pediu (IP e
+// navegador), para valer em todo aparelho. Cada reunião continua gravando o
+// próprio registro (consent_granted, consent_at e consent_notice_version), e o
+// início da gravação só aceita a versão que a dona aceitou aqui. Sai com a conta,
+// como o aceite dos Termos (consents).
+export const recordingNoticeAcceptances = mysqlTable("recording_notice_acceptances", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  ownerId: varchar("owner_id", { length: 128 }).notNull(),
+  versaoDoAviso: varchar("versao_do_aviso", { length: 32 }).notNull(),
+  idioma: varchar("idioma", { length: 12 }),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: varchar("user_agent", { length: 500 }),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+}, (table) => ({
+  ownerVersaoUnique: uniqueIndex("recording_notice_acceptances_owner_versao_unique").on(table.ownerId, table.versaoDoAviso),
+}));
+
 // A sala de vídeo da reunião (V1 do estudo docs/arquitetura/sala-de-video.md;
 // decisão do Roberto de 24/11/2026; server/sala-de-video.ts): a dona, Prata ou
 // acima, abre a sala de uma reunião dela, e o servidor cria a sala privada no

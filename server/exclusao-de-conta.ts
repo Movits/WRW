@@ -77,7 +77,7 @@ import {
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
   enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAttachments, meetingAudioSlices, meetingContactSuggestions, meetingDocuments,
   meetingEntities, meetingRecordings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslations, meetingTranscriptTranslations, meetingTranscripts,
-  lembretes, meetingFolders, meetings, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
+  lembretes, meetingFolders, meetings, recordingNoticeAcceptances, memoryDocuments, nationalLeaders, ndaAcceptances, opportunities,
   opportunityDocuments, opportunityInterests, opportunityMatches, passwordResetTokens,
   platformNotifications, presidentValidations, privateContacts, savedOpportunities,
   securityEvents, sessions, sivcChecks, sivcConsents, sivcDocuments, sivcVerifications,
@@ -277,6 +277,10 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   // (nome e e-mail de terceiros) que a dona marcou.
   { tabela: agendaReunioes, coluna: agendaReunioes.ownerId, origem: "openId" },
   { tabela: meetings, coluna: meetings.ownerId, origem: "openId" },
+  // O aceite do aviso de gravação na conta (gravar com um toque): sai com a
+  // conta, como o aceite dos Termos (consents). Cada reunião levava o próprio
+  // registro, e as reuniões saem logo acima.
+  { tabela: recordingNoticeAcceptances, coluna: recordingNoticeAcceptances.ownerId, origem: "openId" },
   // As pastas das reuniões (H7d): o nome, o ícone e a cor que a dona escolheu.
   // Depois das reuniões, que apontam para elas (as da lixeira saem junto, com
   // o resto das reuniões da conta).
