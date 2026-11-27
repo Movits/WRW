@@ -1480,7 +1480,27 @@
     "sendDocsSecurely": "Envie documentos confidenciais com segurança.",
     "youLabel": "Você",
     "docsProtectedNotice": "Todos os documentos compartilhados nesta sala são protegidos pelo NDA assinado. O compartilhamento fora desta plataforma viola os termos acordados.",
-    "fileSizeKb": "{{size}} KB"
+    "fileSizeKb": "{{size}} KB",
+    "encerrarBotao": "Encerrar e registrar o negócio",
+    "encerrarTitulo": "Registrar o negócio fechado",
+    "encerrarSubtitulo": "O pagamento acontece fora da plataforma. O que fica aqui é o registro do que foi combinado.",
+    "campoMoeda": "Moeda",
+    "campoValor": "Valor do negócio",
+    "campoPercentual": "Comissão combinada (%)",
+    "campoComissao": "Comissão devida",
+    "campoObservacoes": "Observações",
+    "campoObservacoesPlaceholder": "O que ajudar a identificar o negócio depois",
+    "avisoComissaoTitulo": "Comissão devida à Marquesa Global Match",
+    "avisoComissaoDetalhe": "Calculada sobre os honorários da intermediação, com teto de 50%.",
+    "erroTetoComissao": "A comissão combinada não pode passar de 50% dos honorários da intermediação.",
+    "encerrarConfirmar": "Registrar e encerrar",
+    "encerrarCancelar": "Cancelar",
+    "encerrarSucesso": "Negócio registrado e negociação encerrada.",
+    "encerrarFalha": "Não foi possível registrar o negócio.",
+    "encerradaTitulo": "Negociação encerrada",
+    "encerradaPagamentoFora": "O pagamento corre fora da plataforma; este é o registro do que foi combinado.",
+    "campoHonorarios": "Honorários da intermediação",
+    "erroHonorariosMaior": "Os honorários da intermediação não podem ser maiores que o valor do negócio."
   },
   "meetings": {
     "participants": {
@@ -4651,5 +4671,18 @@
     "lembreteDaAcao": "Lembrete: uma próxima ação vence hoje",
     "lembreteDaReuniao": "Lembrete: reunião às {{hora}}",
     "corpo": "Toque para abrir na Marquesa Global Match."
+  },
+  "local": {
+    "estado": "Estado / província",
+    "paisPlaceholder": "Busque o país",
+    "estadoPlaceholder": "Busque o estado",
+    "cidadePlaceholder": "Busque ou digite a cidade",
+    "escolhaOPais": "Escolha o país primeiro.",
+    "escolhaOEstado": "Escolha o estado primeiro.",
+    "carregando": "Carregando cidades…",
+    "semLista": "Sem lista para este país: digite o nome da cidade.",
+    "semResultado": "Nada encontrado. Pode digitar o nome e seguir.",
+    "creditoPaises": "Dados de países:",
+    "creditoCidades": "Dados de cidades:"
   }
 }

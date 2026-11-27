@@ -73,7 +73,7 @@ import { comConcorrenciaLimitada } from "./concorrencia-limitada";
 import {
   agendaReunioes, aiMatchSuggestions, entidadeMembros, pedidosPelaEntidade, entidades, importacaoDocumentosVistos, importacoesDeEntidade, auditLogs, chavesDeAcesso, contasGoogle, connections, consents, contactAssets, contactContexts,
   desafiosDeChaveDeAcesso, dispositivosDePush,
-  contactNeeds, chavesDeCruzamento, filaDeCruzamento, contextMedia, contextParticipants, contexts, dealRoomDocuments,
+  contactNeeds, chavesDeCruzamento, filaDeCruzamento, contextMedia, contextParticipants, contexts, dealClosures, dealRoomDocuments,
   dealRoomMessages, dealRooms, directMessages, enrichmentMessages, enrichmentSessions,
   enrichmentSuggestions, goldAccessGrants, loginAttempts, matches, meetingAttachments, meetingAudioSlices, meetingContactSuggestions, meetingDocuments,
   meetingEntities, meetingRecordings, meetingSummaries, meetingSummaryItems, meetingSummaryTranslations, meetingTranscriptTranslations, meetingTranscripts,
@@ -188,6 +188,10 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
   },
   { tabela: dealRoomMessages, coluna: dealRoomMessages.dealRoomId, origem: "salas" },
   { tabela: dealRoomDocuments, coluna: dealRoomDocuments.dealRoomId, origem: "salas" },
+  {
+    tabela: dealClosures, coluna: dealClosures.roomId, origem: "salas",
+    motivo: "registro do negócio fechado (A11): é da sala, e a sala sai inteira",
+  },
   {
     tabela: dealRooms, coluna: dealRooms.id, origem: "salas",
     motivo: "a negociação tem duas pontas e não continua sem uma delas",
@@ -392,6 +396,8 @@ export const PLANO_DE_EXCLUSAO: PassoDeExclusao[] = [
 export const COBERTAS_PELO_PAI = [
   { tabela: "deal_rooms", coluna: "ownerId", passo: "deal_rooms.id (origem salas)" },
   { tabela: "deal_rooms", coluna: "interestedId", passo: "deal_rooms.id (origem salas)" },
+  // Quem registrou o negócio é sempre uma das duas pontas da sala (dealRoom.closeRoom).
+  { tabela: "deal_closures", coluna: "closedByUserId", passo: "deal_closures.roomId (origem salas)" },
 ] as const;
 
 /**

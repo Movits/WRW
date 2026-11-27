@@ -1480,7 +1480,27 @@
     "sendDocsSecurely": "安全发送保密文件。",
     "youLabel": "您",
     "docsProtectedNotice": "此洽谈室中共享的所有文件均受已签署NDA的保护。在本平台之外分享将违反已约定的条款。",
-    "fileSizeKb": "{{size}} KB"
+    "fileSizeKb": "{{size}} KB",
+    "encerrarBotao": "结束并记录交易",
+    "encerrarTitulo": "记录已达成的交易",
+    "encerrarSubtitulo": "付款在平台之外完成。这里保留的是约定内容的记录。",
+    "campoMoeda": "币种",
+    "campoValor": "交易金额",
+    "campoPercentual": "约定佣金（%）",
+    "campoComissao": "应付佣金",
+    "campoObservacoes": "备注",
+    "campoObservacoesPlaceholder": "有助于日后识别该交易的信息",
+    "avisoComissaoTitulo": "应付给 Marquesa Global Match 的佣金",
+    "avisoComissaoDetalhe": "按中介服务费计算，上限为50%。",
+    "erroTetoComissao": "约定佣金不得超过中介服务费的50%。",
+    "encerrarConfirmar": "记录并结束",
+    "encerrarCancelar": "取消",
+    "encerrarSucesso": "交易已记录，洽谈已结束。",
+    "encerrarFalha": "无法记录该交易。",
+    "encerradaTitulo": "洽谈已结束",
+    "encerradaPagamentoFora": "付款在平台之外完成；这是约定内容的记录。",
+    "campoHonorarios": "中介服务费",
+    "erroHonorariosMaior": "中介服务费不得高于交易金额。"
   },
   "meetings": {
     "participants": {
@@ -4651,5 +4671,18 @@
     "lembreteDaAcao": "提醒：一项后续行动今天到期",
     "lembreteDaReuniao": "提醒：{{hora}} 的会议",
     "corpo": "点按以在 Marquesa Global Match 中打开。"
+  },
+  "local": {
+    "estado": "州 / 省",
+    "paisPlaceholder": "搜索国家",
+    "estadoPlaceholder": "搜索州或省",
+    "cidadePlaceholder": "搜索或输入城市",
+    "escolhaOPais": "请先选择国家。",
+    "escolhaOEstado": "请先选择州或省。",
+    "carregando": "正在加载城市…",
+    "semLista": "该国家没有列表：请输入城市名称。",
+    "semResultado": "未找到结果。可以直接输入名称并继续。",
+    "creditoPaises": "国家数据：",
+    "creditoCidades": "城市数据："
   }
 }

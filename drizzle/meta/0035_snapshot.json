@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "985e29b5-176c-486d-a706-49293c22c2a4",
+  "id": "98c5f589-af11-4f84-a376-2558f23da815",
   "prevId": "abca5ea4-d7f9-4955-9f96-b00fd82f47de",
   "tables": {
     "agenda_reunioes": {
@@ -2327,6 +2327,124 @@
       "compositePrimaryKeys": {
         "contexts_id": {
           "name": "contexts_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "deal_closures": {
+      "name": "deal_closures",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "roomId": {
+          "name": "roomId",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "opportunityId": {
+          "name": "opportunityId",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "closedByUserId": {
+          "name": "closedByUserId",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "varchar(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'BRL'"
+        },
+        "dealValue": {
+          "name": "dealValue",
+          "type": "decimal(14,2)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "intermediationFee": {
+          "name": "intermediationFee",
+          "type": "decimal(14,2)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "commissionPercent": {
+          "name": "commissionPercent",
+          "type": "decimal(5,2)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "commissionAmount": {
+          "name": "commissionAmount",
+          "type": "decimal(14,2)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "closedAt": {
+          "name": "closedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(now())"
+        }
+      },
+      "indexes": {
+        "deal_closure_room_unique": {
+          "name": "deal_closure_room_unique",
+          "columns": [
+            "roomId"
+          ],
+          "isUnique": true
+        },
+        "deal_closure_opportunity_idx": {
+          "name": "deal_closure_opportunity_idx",
+          "columns": [
+            "opportunityId"
+          ],
+          "isUnique": false
+        },
+        "deal_closure_closed_by_idx": {
+          "name": "deal_closure_closed_by_idx",
+          "columns": [
+            "closedByUserId"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "deal_closures_id": {
+          "name": "deal_closures_id",
           "columns": [
             "id"
           ]
@@ -8817,7 +8935,7 @@
         },
         "type": {
           "name": "type",
-          "type": "enum('new_match','interest_received','gold_granted','gold_revoked','opportunity_approved','opportunity_rejected','new_message','compliance_update','system','lembrete','reuniao_pronta')",
+          "type": "enum('new_match','interest_received','gold_granted','gold_revoked','opportunity_approved','opportunity_rejected','new_message','compliance_update','system','lembrete','reuniao_pronta','deal_closed')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -9471,81 +9589,6 @@
       "compositePrimaryKeys": {
         "proximas_acoes_id": {
           "name": "proximas_acoes_id",
-          "columns": [
-            "id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "recording_notice_acceptances": {
-      "name": "recording_notice_acceptances",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "versao_do_aviso": {
-          "name": "versao_do_aviso",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "idioma": {
-          "name": "idioma",
-          "type": "varchar(12)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "ip_address": {
-          "name": "ip_address",
-          "type": "varchar(45)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "user_agent": {
-          "name": "user_agent",
-          "type": "varchar(500)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "recording_notice_acceptances_owner_versao_unique": {
-          "name": "recording_notice_acceptances_owner_versao_unique",
-          "columns": [
-            "owner_id",
-            "versao_do_aviso"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "recording_notice_acceptances_id": {
-          "name": "recording_notice_acceptances_id",
           "columns": [
             "id"
           ]

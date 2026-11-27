@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, Link } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { EncerrarNegociacao } from "@/components/EncerrarNegociacao";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -198,6 +199,19 @@ export default function DealRoom() {
             </div>
           ))}
         </div>
+
+        {/* A11 / etapa 12 — encerrar registrando o negócio e a comissão. Só depois
+            que as duas partes aceitaram o acordo: antes disso não há negociação
+            para encerrar. Quem só acompanha (Ouro) vê o registro, não o formulário. */}
+        {room.status !== "awaiting_nda" && (
+          <div className="mb-6">
+            <EncerrarNegociacao
+              roomId={roomId}
+              ehParte={room.ownerId === user?.id || room.interestedId === user?.id}
+              onEncerrada={() => refetchRoom()}
+            />
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-1 mb-4 bg-white/5 rounded-xl p-1">

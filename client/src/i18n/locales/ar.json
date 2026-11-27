@@ -1480,7 +1480,27 @@
     "sendDocsSecurely": "أرسل المستندات السرية بأمان.",
     "youLabel": "أنت",
     "docsProtectedNotice": "جميع المستندات المشتركة في هذه الغرفة محمية بموجب اتفاقية عدم الإفصاح الموقّعة. مشاركتها خارج هذه المنصة يخالف الشروط المتفق عليها.",
-    "fileSizeKb": "{{size}} كيلوبايت"
+    "fileSizeKb": "{{size}} كيلوبايت",
+    "encerrarBotao": "إنهاء وتسجيل الصفقة",
+    "encerrarTitulo": "تسجيل الصفقة المبرمة",
+    "encerrarSubtitulo": "الدفع يتم خارج المنصّة. ما يبقى هنا هو سجل ما تم الاتفاق عليه.",
+    "campoMoeda": "العملة",
+    "campoValor": "قيمة الصفقة",
+    "campoPercentual": "العمولة المتفق عليها (٪)",
+    "campoComissao": "العمولة المستحقة",
+    "campoObservacoes": "ملاحظات",
+    "campoObservacoesPlaceholder": "ما يساعد على التعرّف على الصفقة لاحقًا",
+    "avisoComissaoTitulo": "العمولة المستحقة لـ Marquesa Global Match",
+    "avisoComissaoDetalhe": "تُحتسب على أتعاب الوساطة، بحد أقصى 50%.",
+    "erroTetoComissao": "لا يمكن أن تتجاوز العمولة المتفق عليها 50% من أتعاب الوساطة.",
+    "encerrarConfirmar": "تسجيل وإنهاء",
+    "encerrarCancelar": "إلغاء",
+    "encerrarSucesso": "تم تسجيل الصفقة وإنهاء التفاوض.",
+    "encerrarFalha": "تعذّر تسجيل الصفقة.",
+    "encerradaTitulo": "انتهى التفاوض",
+    "encerradaPagamentoFora": "الدفع يتم خارج المنصّة؛ هذا سجل ما تم الاتفاق عليه.",
+    "campoHonorarios": "أتعاب الوساطة",
+    "erroHonorariosMaior": "لا يمكن أن تتجاوز أتعاب الوساطة قيمة الصفقة."
   },
   "meetings": {
     "participants": {
@@ -4651,5 +4671,18 @@
     "lembreteDaAcao": "تذكير: موعد خطوة تالية اليوم",
     "lembreteDaReuniao": "تذكير: اجتماع الساعة {{hora}}",
     "corpo": "اضغط للفتح في Marquesa Global Match."
+  },
+  "local": {
+    "estado": "الولاية / المقاطعة",
+    "paisPlaceholder": "ابحثي عن الدولة",
+    "estadoPlaceholder": "ابحثي عن الولاية",
+    "cidadePlaceholder": "ابحثي عن المدينة أو اكتبيها",
+    "escolhaOPais": "اختاري الدولة أولاً.",
+    "escolhaOEstado": "اختاري الولاية أولاً.",
+    "carregando": "جارٍ تحميل المدن…",
+    "semLista": "لا توجد قائمة لهذه الدولة: اكتبي اسم المدينة.",
+    "semResultado": "لم يُعثر على شيء. يمكنك كتابة الاسم والمتابعة.",
+    "creditoPaises": "بيانات الدول:",
+    "creditoCidades": "بيانات المدن:"
   }
 }
