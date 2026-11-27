@@ -42,7 +42,7 @@ const {
 } = await import("../drizzle/schema");
 const {
   deletePrivateMeeting, getPrivateMeeting, iniciarReprocessamento, limparGravacoesVencidas,
-  ARQUIVO_SEM_PRAZO, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA, PRAZO_DOS_ARQUIVOS_ATE_26_11_MS, ReprocessamentoRecusado, tirarOPrazoDosArquivosDeAntes,
+  ARQUIVO_SEM_PRAZO, FOLGA_DO_PRAZO_ANTIGO_MS, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA, PRAZO_DOS_ARQUIVOS_ATE_26_11_MS, ReprocessamentoRecusado, tirarOPrazoDosArquivosDeAntes,
 } = await import("./meeting-service");
 const { iniciarReuniaoEmPartes, receberParte } = await import("./fatias-de-reuniao");
 const { CONCORRENCIA_DO_EXPURGO_DO_AUDIO } = await import("./storage");
@@ -490,6 +490,32 @@ describe.skipIf(!temBanco)("Retenção do áudio de reunião no banco (integraç
       expect(await gravacoesDe(marcada)).toHaveLength(0);
       expect(await gravacoesDe(antiga)).toHaveLength(1);
       expect(ainda.chave).not.toBe(saindo.chave);
+    });
+
+    it("a corrida com a exclusão: a marca de saída gravada logo depois de o boot ler o relógio não vira sem prazo, e a varredura a tira", async () => {
+      // A exclusão grava expires_at = Date.now(). Se ela corre entre a leitura do
+      // relógio e os UPDATEs, a marca fica alguns instantes à frente do relógio
+      // lido. Sem a folga, ela passava no corte e o arquivo que a dona mandou
+      // apagar ficava no bucket para sempre.
+      const inicio = agora();
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(inicio);
+      const excluida = await reuniao("deleted");
+      const marca = await gravacao(excluida, inicio + 2_000);
+      const noLimite = await reuniao("ready");
+      const dentroDaFolga = await gravacao(noLimite, inicio + FOLGA_DO_PRAZO_ANTIGO_MS);
+      try {
+        expect(await tirarOPrazoDosArquivosDeAntes({ ownerId: DONA })).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+      expect((await gravacoesDe(excluida))[0].expiresAt).toBe(inicio + 2_000);
+      expect((await gravacoesDe(noLimite))[0].expiresAt).toBe(inicio + FOLGA_DO_PRAZO_ANTIGO_MS);
+
+      await varrer();
+      expect(chavesExpurgadas()).toContain(marca.chave);
+      expect(await gravacoesDe(excluida)).toHaveLength(0);
+      expect(dentroDaFolga.chave).not.toBe(marca.chave);
     });
 
     it("reprocessar a reunião em partes com o áudio a minutos de vencer é recusado, como no envio único", async () => {

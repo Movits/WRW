@@ -2070,20 +2070,27 @@ async function perfisDeVozSemConta(db: Banco, trecho: TrechoDaVarredura, lote: n
  * do resumo que ainda estavam no prazo passam a ARQUIVO_SEM_PRAZO, e ficam até
  * a dona excluir a reunião ou encerrar a conta, como os gravados depois.
  *
- * Só toca o expires_at no FUTURO e menor que ARQUIVO_SEM_PRAZO, que desde a
- * mudança só a linha de antes tem: a marca de saída (a exclusão que o bucket
- * recusou) é sempre um instante do passado e continua valendo, e a varredura
- * tira o arquivo dela. Rodar de novo não muda nada. Roda na passada do boot
+ * Só toca o expires_at que vence depois de agora + FOLGA_DO_PRAZO_ANTIGO_MS e
+ * é menor que ARQUIVO_SEM_PRAZO, que desde a mudança só a linha de antes tem.
+ * A marca de saída (a exclusão que o bucket recusou) é o instante em que foi
+ * gravada e continua valendo, e a varredura tira o arquivo dela. A folga fecha
+ * a janela da corrida: a exclusão que grave expires_at = Date.now() depois de
+ * esta função ler o relógio (entre a leitura e os UPDATEs) teria a marca no
+ * "futuro" do corte sem folga, e o arquivo que a dona mandou apagar ficaria
+ * no bucket para sempre. A linha de antes que vence dentro da folga sai pela
+ * regra antiga. Rodar de novo não muda nada. Roda na passada do boot
  * (server/varredura-de-gravacoes.ts), antes da varredura do áudio.
  *
  * Varredura de SISTEMA, sem owner_id, como limparGravacoesVencidas; `ownerId`
  * só existe para os testes de integração.
  */
+export const FOLGA_DO_PRAZO_ANTIGO_MS = 5 * 60_000;
+
 export async function tirarOPrazoDosArquivosDeAntes(opcoes: { ownerId?: string } = {}): Promise<number> {
   const db = await exigirDb();
-  const agora = now();
+  const corte = now() + FOLGA_DO_PRAZO_ANTIGO_MS;
   const deAntes = (coluna: { expiresAt: MySqlColumn; ownerId: MySqlColumn }) => and(
-    gt(coluna.expiresAt, agora),
+    gt(coluna.expiresAt, corte),
     lt(coluna.expiresAt, ARQUIVO_SEM_PRAZO),
     opcoes.ownerId ? eq(coluna.ownerId, opcoes.ownerId) : undefined,
   );
