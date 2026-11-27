@@ -1,6 +1,6 @@
-import { descartesDa } from "./descartes-pendentes";
+import { descartesDa, lerDescartes } from "./descartes-pendentes";
 import { enviarPendentes, travaDoNavegador, type Trava } from "./envio-das-partes";
-import { contarPartesDa, type ParteNoAparelho } from "./partes-no-aparelho";
+import { contarPartesDa, contarTodasAsPartes, type ParteNoAparelho } from "./partes-no-aparelho";
 
 /**
  * A retomada da gravação em partes (G9, G13c): as partes que ficaram no
@@ -259,4 +259,29 @@ export async function partesPorEnviar(dona: string): Promise<number> {
   if (typeof indexedDB === "undefined") return 0;
   const descartadas = new Set(descartesDa(dona).map(descarte => descarte.id));
   return contarPartesDa(dona, meetingId => descartadas.has(meetingId));
+}
+
+/**
+ * Há áudio no aparelho que o Sair da conta apagaria? (T19, teste do Gabriel de
+ * 26/11/2026: no iPhone, em modo avião, com a gravação já encerrada e uma parte
+ * ainda no aparelho, o Sair deslogou sem perguntar e a parte foi apagada.) O
+ * registro da sessão ocupada (lib/sessao-ocupada.ts) vive na memória e depende
+ * de uma contagem que pode estar atrasada ou ter falhado (o IndexedDB que o
+ * WebKit às vezes não abre por um instante, a volta da retomada que leu a lista
+ * antes de a parte nova chegar). O aparelho é a fonte: o Sair pergunta a ele
+ * antes de apagar.
+ *
+ * Conta as partes de toda conta, porque o Sair apaga todas, menos as das
+ * gravações descartadas. Sem IndexedDB no navegador nada foi guardado: false.
+ * Com o aparelho ilegível, true: na dúvida, o Sair pergunta, porque apagar é
+ * para sempre.
+ */
+export async function haAudioNoAparelhoParaOSair(): Promise<boolean> {
+  if (typeof indexedDB === "undefined") return false;
+  const descartadas = new Set(lerDescartes().map(descarte => descarte.id));
+  try {
+    return (await contarTodasAsPartes(meetingId => descartadas.has(meetingId))) > 0;
+  } catch {
+    return true;
+  }
 }
