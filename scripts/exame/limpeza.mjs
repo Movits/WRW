@@ -169,6 +169,9 @@ export const PLANO_DE_LIMPEZA = [
   // REAL abre na oportunidade do exame tem ownerId = QA presidente (dealRoom.ts grava
   // ownerId = opp.publishedBy) e não pode cair no DELETE: ela é alertada pelo par
   // deal_rooms.opportunityId acima e fica para decisão humana.
+  // O registro do negócio fechado (A11): o exame não encerra sala, então o DELETE
+  // não encontra nada; se um dia encerrar, sai antes da sala.
+  { tabela: "deal_closures", coluna: "closedByUserId", chave: "id", acao: "apagar" },
   { tabela: "deal_rooms", coluna: "ownerId", chave: "id", acao: "apagar", filtroChave: { coluna: "interestedId", chave: "id" } },
   { tabela: "deal_rooms", coluna: "interestedId", chave: "id", acao: "apagar", filtroChave: { coluna: "ownerId", chave: "id" } },
   { tabela: "connections", coluna: "requesterId", chave: "id", acao: "apagar" },

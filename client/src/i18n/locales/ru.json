@@ -1480,7 +1480,27 @@
     "sendDocsSecurely": "Отправляйте конфиденциальные документы безопасно.",
     "youLabel": "Вы",
     "docsProtectedNotice": "Все документы, которыми обмениваются в этой комнате, защищены подписанным NDA. Передача за пределами этой платформы нарушает согласованные условия.",
-    "fileSizeKb": "{{size}} КБ"
+    "fileSizeKb": "{{size}} КБ",
+    "encerrarBotao": "Завершить и зафиксировать сделку",
+    "encerrarTitulo": "Зафиксировать заключённую сделку",
+    "encerrarSubtitulo": "Оплата происходит вне платформы. Здесь остаётся запись о том, что было согласовано.",
+    "campoMoeda": "Валюта",
+    "campoValor": "Сумма сделки",
+    "campoPercentual": "Согласованная комиссия (%)",
+    "campoComissao": "Комиссия к уплате",
+    "campoObservacoes": "Примечания",
+    "campoObservacoesPlaceholder": "То, что поможет опознать сделку позже",
+    "avisoComissaoTitulo": "Комиссия в пользу Marquesa Global Match",
+    "avisoComissaoDetalhe": "Рассчитывается от вознаграждения за посредничество, не более 50%.",
+    "erroTetoComissao": "Согласованная комиссия не может превышать 50% вознаграждения за посредничество.",
+    "encerrarConfirmar": "Зафиксировать и завершить",
+    "encerrarCancelar": "Отмена",
+    "encerrarSucesso": "Сделка зафиксирована, переговоры завершены.",
+    "encerrarFalha": "Не удалось зафиксировать сделку.",
+    "encerradaTitulo": "Переговоры завершены",
+    "encerradaPagamentoFora": "Оплата идёт вне платформы; это запись о согласованном.",
+    "campoHonorarios": "Вознаграждение за посредничество",
+    "erroHonorariosMaior": "Вознаграждение за посредничество не может превышать сумму сделки."
   },
   "meetings": {
     "participants": {
