@@ -36,6 +36,7 @@ vi.mock("@/components/ConexaoGoogleAgenda", () => ({ ConexaoGoogleAgenda: () => 
 vi.mock("@/components/PerfilDeVoz", () => ({ PerfilDeVoz: () => null }));
 vi.mock("@/components/ChavesDeAcesso", () => ({ ChavesDeAcesso: () => null }));
 vi.mock("@/components/ContaGoogleNoPerfil", () => ({ ContaGoogleNoPerfil: () => null }));
+vi.mock("@/components/TravaDoApp", () => ({ TravaDoApp: () => null }));
 vi.mock("wouter", () => ({ Link: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 

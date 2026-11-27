@@ -3529,6 +3529,13 @@
       "device": "Das Gerät konnte den Passkey nicht verwenden. Versuchen Sie es erneut oder melden Sie sich mit E-Mail und Passwort an."
     }
   },
+  "travaDoApp": {
+    "title": "App mit Face ID oder Fingerabdruck öffnen",
+    "subtitle": "Auf diesem Handy",
+    "switchLabel": "Beim Öffnen der App nach Face ID oder Fingerabdruck fragen",
+    "unavailable": "Auf diesem Handy ist weder Face ID noch Fingerabdruck noch eine Bildschirmsperre eingerichtet. Richten Sie eines davon in den Einstellungen des Handys ein, um die Sperre zu nutzen.",
+    "explanation": "Wenn das eingeschaltet ist, fragt die App beim Öffnen und bei der Rückkehr nach 10 Minuten nach Face ID, Fingerabdruck oder der Bildschirmsperre dieses Handys. Marquesa Global Match erhält keine biometrischen Daten: Die Prüfung übernimmt das Handy selbst."
+  },
   "conta": {
     "excluir": {
       "titulo": "Mein Konto löschen",

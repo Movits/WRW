@@ -29,6 +29,7 @@ vi.mock("@/components/ConexaoGoogleAgenda", () => ({ ConexaoGoogleAgenda: () => 
 vi.mock("@/components/PerfilDeVoz", () => ({ PerfilDeVoz: () => null }));
 vi.mock("@/components/ChavesDeAcesso", () => ({ ChavesDeAcesso: () => <div data-testid="chaves-de-acesso" /> }));
 vi.mock("@/components/ContaGoogleNoPerfil", () => ({ ContaGoogleNoPerfil: () => <div data-testid="conta-google" /> }));
+vi.mock("@/components/TravaDoApp", () => ({ TravaDoApp: () => <div data-testid="trava-do-app" /> }));
 vi.mock("@/components/QualificacaoDoPerfil", () => ({ QualificacaoDoPerfil: () => null }));
 vi.mock("wouter", () => ({ Link: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));

@@ -13,6 +13,7 @@ import { ConexaoGoogleAgenda } from "@/components/ConexaoGoogleAgenda";
 import { PerfilDeVoz } from "@/components/PerfilDeVoz";
 import { ChavesDeAcesso } from "@/components/ChavesDeAcesso";
 import { ContaGoogleNoPerfil } from "@/components/ContaGoogleNoPerfil";
+import { TravaDoApp } from "@/components/TravaDoApp";
 import { AssistenteDeTexto } from "@/components/AssistenteDeTexto";
 import { QualificacaoDoPerfil } from "@/components/QualificacaoDoPerfil";
 import { SugestoesDasReunioes } from "@/components/SugestoesDasReunioes";
@@ -751,6 +752,10 @@ export default function Profile() {
         {/* Entrar com a conta Google (A8): ligar e desligar. Aparece com a função
             ligada no servidor ou com uma conta Google já ligada. */}
         {!editing && <ContaGoogleNoPerfil />}
+
+        {/* A trava do app das lojas (Face ID ou digital ao abrir): só aparece
+            dentro do app, que guarda a escolha e pede a biometria. */}
+        {!editing && <TravaDoApp />}
 
         {/* Zona de risco: o caminho de saída da plataforma (não durante a edição,
             para não competir com o botão de salvar) */}
