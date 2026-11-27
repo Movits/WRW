@@ -32,8 +32,8 @@ import { apagarAvisosDaReuniao } from "./lembretes";
  *   (a varredura, esvaziarLixeiraVencida) excluem pelo caminho de sempre,
  *   deletePrivateMeeting, que leva o áudio do bucket e todos os derivados.
  *
- * O áudio segue o próprio prazo (30 dias desde o envio, MEETING_AUDIO_TTL_MS):
- * a lixeira não o estende nem o encurta.
+ * O áudio não tem prazo (ARQUIVO_SEM_PRAZO, desde 26/11/2026): fica enquanto a
+ * reunião existir, também na lixeira, e sai com ela.
  */
 
 export type ProvaDaLixeira = { userId: number; ipAddress: string; userAgent: string | null | undefined };

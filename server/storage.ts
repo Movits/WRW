@@ -265,7 +265,7 @@ export const CONCORRENCIA_DO_EXPURGO_DO_AUDIO = 6;
  * O B2 guarda versões: o DeleteObject sem VersionId de storageDelete só põe um
  * marcador de exclusão por cima, o GET passa a dar 404 e a versão com o áudio
  * continua guardada e cobrada. Para a voz das participantes sair de verdade
- * depois dos 30 dias, ou quando a dona exclui a reunião ou a conta, cada versão
+ * quando a dona exclui a reunião ou a conta, cada versão
  * e cada marcador da chave saem pelo VersionId. Os outros arquivos seguem com
  * storageDelete.
  *

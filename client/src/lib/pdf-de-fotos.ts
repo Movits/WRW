@@ -4,7 +4,7 @@ import { ambienteDoNavegador, calcularDestino, type AmbienteDeImagem } from "./r
  * As fotos de um texto viram um PDF no próprio aparelho (H12b do desenho do
  * gravador): uma página por foto, na ordem em que a dona as tirou ou escolheu.
  * Assim o servidor recebe sempre um PDF (server/documento-da-reuniao.ts), guarda
- * um arquivo só pelos 30 dias, a IA lê as páginas numa chamada só e a tela
+ * um arquivo só, a IA lê as páginas numa chamada só e a tela
  * mostra as fotos página a página, como o PDF enviado.
  *
  * Cada foto é endireitada pela orientação EXIF, reduzida (o lado maior com até

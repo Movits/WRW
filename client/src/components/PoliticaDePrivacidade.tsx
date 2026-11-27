@@ -11,12 +11,16 @@ import { Link } from "wouter";
 // versão nova de termo pelo scripts/publicar-documento.mjs revoga aceites, e a
 // política não tem aceite próprio (o cadastro só aponta para ela).
 //
-// Cada frase daqui foi conferida no código ou nos docs em 25/11/2026. Mudou o
+// Cada frase daqui foi conferida no código ou nos docs em 25/11/2026; em
+// 26/11/2026 o áudio, o arquivo do documento e as fotos e os desenhos do resumo
+// deixaram de ser apagados aos 30 dias (decisão do Roberto, com a Política
+// revisada pela Cris) e passaram a ficar até a dona excluir a reunião ou
+// encerrar a conta. Mudou o
 // que o código faz com um dado (prazo, fornecedor, escopo da Google, quem vê o
 // quê)? Mude a frase daqui na mesma PR. Fica em pt-BR fixo, como o resto da
 // LegalPage: o documento jurídico só existe em português (client/CLAUDE.md).
 
-export const VERSAO_DA_POLITICA = "Versão provisória de 25/11/2026, em revisão pela assessoria jurídica.";
+export const VERSAO_DA_POLITICA = "Versão provisória de 26/11/2026, em revisão pela assessoria jurídica.";
 
 const LINK = "text-[#c98f70] underline";
 
@@ -135,12 +139,12 @@ export function PoliticaDePrivacidade() {
             inserir dados de terceiros (Termo Geral, cláusula 7.5).
           </Item>
           <Item titulo="Reuniões gravadas.">
-            O áudio que você grava ou importa fica na sua conta por 30 dias, contados da chegada
-            da última parte da gravação, e é apagado automaticamente; a transcrição, o resumo e o que foi extraído deles ficam até você
-            excluir a reunião. Também pode virar reunião um documento (PDF ou fotos de um texto:
-            o arquivo fica 30 dias, o texto lido fica até a exclusão) ou um vídeo público do
+            O áudio que você grava ou importa, a transcrição, o resumo e o que foi extraído deles
+            ficam na sua conta até você excluir a reunião ou encerrar a conta; nada disso é apagado
+            sozinho com o tempo. Também pode virar reunião um documento (PDF ou fotos de um texto:
+            o arquivo e o texto lido ficam até a exclusão) ou um vídeo público do
             YouTube (guardamos o link, a transcrição e o resumo, nunca o vídeo). As fotos e os
-            desenhos que você anexa ao resumo ficam 30 dias. Para quê: transcrever, resumir e
+            desenhos que você anexa ao resumo ficam até você tirá-los ou excluir a reunião. Para quê: transcrever, resumir e
             ligar o que foi dito à sua rede. A reunião é sua e nasce visível só para você. Ela
             passa a ser lida também por quem você escolhe: quem abre o link de compartilhamento,
             se você o ligar; quem recebe o resumo por e-mail que você envia; as participantes que
@@ -153,7 +157,8 @@ export function PoliticaDePrivacidade() {
             Enquanto uma gravação está sendo enviada, cada parte do áudio fica guardada no
             navegador do seu aparelho, para não se perder se a internet cair, e sai de lá quando o
             servidor confirma que a recebeu. Sair da conta ou excluí-la apaga essas cópias. O
-            arquivo de áudio que você baixa fica no seu aparelho e não é apagado aos 30 dias.
+            arquivo de áudio que você baixa fica no seu aparelho e não é apagado quando você exclui
+            a reunião ou a conta.
           </Item>
           <Item titulo="Mensagens, sala de negociação e oportunidades.">
             As mensagens que você troca com outras membras, as oportunidades e os documentos que
@@ -234,7 +239,7 @@ export function PoliticaDePrivacidade() {
         <Citacao>
           Somente grave com o consentimento de todas as pessoas. O áudio é transcrito pela IA do
           Google (Gemini), que pode processá-lo fora do Brasil e separar as falas por pessoa. O
-          áudio fica na sua conta por 30 dias, e a transcrição até você excluir a reunião. Só você
+          áudio e a transcrição ficam na sua conta até você excluir a reunião ou encerrar a conta. Só você
           acessa, a menos que ligue o link de compartilhamento da reunião (o que pede nova
           autorização de quem falou). A administração da Marquesa Global Match só acessa gravações
           por motivo justificado, registrado antes do acesso, e a organizadora é informada da data
@@ -312,8 +317,9 @@ export function PoliticaDePrivacidade() {
 
       <Secao id="retencao" titulo="9. Por quanto tempo guardamos">
         <Lista>
-          <li>Áudio das reuniões: 30 dias desde a chegada da última parte da gravação.</li>
-          <li>Documentos de reunião e fotos e desenhos do resumo: 30 dias desde o envio.</li>
+          <li>Áudio das reuniões: até você excluir a reunião ou encerrar a conta.</li>
+          <li>Documentos de reunião (o arquivo e o texto lido): até você excluir a reunião ou encerrar a conta.</li>
+          <li>Fotos e desenhos do resumo: até você os tirar, excluir a reunião ou encerrar a conta.</li>
           <li>Transcrição, resumo, áudio do resumo e o que foi extraído da reunião: até você excluir a reunião.</li>
           <li>Reunião na lixeira: 30 dias; depois é apagada de vez.</li>
           <li>Perfil de voz: até você desligá-lo ou excluir a conta.</li>

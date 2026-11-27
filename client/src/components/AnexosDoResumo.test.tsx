@@ -72,12 +72,13 @@ afterEach(async () => {
 });
 
 describe("no detalhe da dona", () => {
-  it("mostra as imagens com o texto alternativo, a conta, o prazo dos 30 dias e o aviso do link aberto", async () => {
+  it("mostra as imagens com o texto alternativo, a conta, a guarda até a exclusão (26/11/2026) e o aviso do link aberto", async () => {
     abrir(<AnexosDoResumo meetingId={REUNIAO} comLinkAberto/>);
     expect(await screen.findByAltText("Foto 1")).toHaveAttribute("src", ANEXOS[0].url);
     expect(screen.getByAltText("Desenho 2")).toBeInTheDocument();
     expect(screen.getByText("2/20")).toBeInTheDocument();
-    expect(screen.getByText(/ficam guardados por 30 dias desde o envio; o primeiro sai em/)).toBeInTheDocument();
+    expect(screen.getByText("As fotos e os desenhos ficam guardados até você tirá-los, excluir a reunião ou encerrar a conta, como o áudio da reunião.")).toBeInTheDocument();
+    expect(screen.queryByText(/30 dias|o primeiro sai em/)).not.toBeInTheDocument();
     expect(screen.getByText(/quem tem o link vê estas imagens/)).toBeInTheDocument();
   });
 

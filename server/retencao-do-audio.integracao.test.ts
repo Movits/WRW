@@ -42,7 +42,7 @@ const {
 } = await import("../drizzle/schema");
 const {
   deletePrivateMeeting, getPrivateMeeting, iniciarReprocessamento, limparGravacoesVencidas,
-  MEETING_AUDIO_TTL_MS, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA, ReprocessamentoRecusado,
+  ARQUIVO_SEM_PRAZO, MOTIVO_DA_PARTE_DA_REUNIAO_EXCLUIDA, PRAZO_DOS_ARQUIVOS_ATE_26_11_MS, ReprocessamentoRecusado, tirarOPrazoDosArquivosDeAntes,
 } = await import("./meeting-service");
 const { iniciarReuniaoEmPartes, receberParte } = await import("./fatias-de-reuniao");
 const { CONCORRENCIA_DO_EXPURGO_DO_AUDIO } = await import("./storage");
@@ -449,21 +449,47 @@ describe.skipIf(!temBanco)("Retenção do áudio de reunião no banco (integraç
     });
   });
 
-  describe("o prazo da reunião em partes", () => {
-    it("cada parte que chega leva o prazo de TODAS as partes da reunião para 30 dias depois dela: a gravação vence e sai inteira", async () => {
-      const { id } = await iniciarReuniaoEmPartes(DONA, { title: "Prazo comum", language: "pt-BR", consentNoticeVersion: "2026-11-14", origem: "gravacao" });
+  describe("o áudio fica até a dona excluir (26/11/2026)", () => {
+    it("cada parte nasce sem prazo (ARQUIVO_SEM_PRAZO), e a varredura não a tira, nem depois de 30 dias", async () => {
+      const { id } = await iniciarReuniaoEmPartes(DONA, { title: "Sem prazo", language: "pt-BR", consentNoticeVersion: "2026-11-26", origem: "gravacao" });
       await receberParte({ ownerId: DONA, meetingId: id, seq: 0, mimeType: "audio/wav", bytes: wav(1) });
-      // A primeira parte chegou "ontem": o prazo dela é um dia menor.
-      await (await db()).update(meetingAudioSlices).set({ expiresAt: agora() + MEETING_AUDIO_TTL_MS - DIA }).where(eq(meetingAudioSlices.meetingId, id));
-      const antes = agora();
       await receberParte({ ownerId: DONA, meetingId: id, seq: 1, mimeType: "audio/wav", bytes: wav(1, 3) });
-      const depois = agora();
+      await (await db()).update(meetings).set({ status: "ready" }).where(eq(meetings.id, id));
 
-      const prazos = (await partesDe(id)).map(p => p.expiresAt);
-      expect(prazos).toHaveLength(2);
-      expect(prazos[0]).toBe(prazos[1]);
-      expect(prazos[0]).toBeGreaterThanOrEqual(antes + MEETING_AUDIO_TTL_MS);
-      expect(prazos[0]).toBeLessThanOrEqual(depois + MEETING_AUDIO_TTL_MS);
+      expect((await partesDe(id)).map(p => p.expiresAt)).toEqual([ARQUIVO_SEM_PRAZO, ARQUIVO_SEM_PRAZO]);
+      // 31 dias depois, a varredura não acha nada para tirar.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(agora() + 31 * DIA);
+      try {
+        expect(await varrer()).toEqual({ encontradas: 0, apagadas: 0 });
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(await partesDe(id)).toHaveLength(2);
+      expect(storageApagarTodasAsVersoes).not.toHaveBeenCalled();
+    });
+
+    it("o boot tira o prazo dos 30 dias das linhas de antes, e a marca de saída (no passado) continua saindo", async () => {
+      const antiga = await reuniao("ready");
+      const ainda = await gravacao(antiga, agora() + 10 * DIA);
+      const marcada = await reuniao("ready");
+      const saindo = await gravacao(marcada, agora() - 1_000);
+      const emPartes = await reuniao("ready", { audioPipeline: "slices", expectedSlices: 1 });
+      await parte(emPartes, 0, agora() + PRAZO_DOS_ARQUIVOS_ATE_26_11_MS - DIA);
+
+      expect(await tirarOPrazoDosArquivosDeAntes({ ownerId: DONA })).toBe(2);
+
+      expect((await gravacoesDe(antiga))[0].expiresAt).toBe(ARQUIVO_SEM_PRAZO);
+      expect((await partesDe(emPartes))[0].expiresAt).toBe(ARQUIVO_SEM_PRAZO);
+      expect((await gravacoesDe(marcada))[0].expiresAt).toBeLessThan(agora());
+      // Rodar de novo não muda nada.
+      expect(await tirarOPrazoDosArquivosDeAntes({ ownerId: DONA })).toBe(0);
+
+      await varrer();
+      expect(chavesExpurgadas()).toEqual([saindo.chave]);
+      expect(await gravacoesDe(marcada)).toHaveLength(0);
+      expect(await gravacoesDe(antiga)).toHaveLength(1);
+      expect(ainda.chave).not.toBe(saindo.chave);
     });
 
     it("reprocessar a reunião em partes com o áudio a minutos de vencer é recusado, como no envio único", async () => {

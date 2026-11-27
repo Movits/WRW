@@ -16,6 +16,18 @@ dela. As versões anteriores continuam aceitas.
 O português é o texto de referência. Os outros 9 idiomas são tradução e precisam de
 revisão de tradução.
 
+## Versão documento-2026-11-26 (o arquivo fica até a exclusão)
+
+Decisão do Roberto de 26/11/2026, seguindo a Política de Privacidade revisada pela Cris: o
+arquivo e o texto lido ficam até a organizadora apagar a reunião ou encerrar a conta; o
+arquivo deixou de ser apagado sozinho aos 30 dias. A única mudança no aviso curto é a frase
+da retenção; a caixa é a mesma, e a versão documento-2026-11-19, abaixo, segue aceita.
+
+> Envie só documentos que você pode compartilhar. O arquivo é lido pela IA do Google
+> (Gemini), que pode processá-lo fora do Brasil. O arquivo e o texto lido ficam na sua conta
+> até você excluir a reunião ou encerrar a conta. Só você acessa, a menos que ligue o link
+> de compartilhamento, que mostra o texto e o resumo, mas nunca o arquivo.
+
 ## Versão documento-2026-11-19
 
 ### O aviso curto, como aparece na tela (pt-BR)

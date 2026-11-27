@@ -10,7 +10,7 @@ import { VERSAO_VIGENTE_DO_AVISO_DO_DOCUMENTO } from "@shared/aviso-do-documento
  * autorização do documento no lugar dos da gravação; a lista marca o
  * documento; e o detalhe troca o player e a transcrição pela aba "Texto do
  * documento" e acrescenta a aba "Páginas", com o arquivo guardado pela regra
- * dos 30 dias do áudio. As falhas da leitura chegam como código e saem no
+ * do áudio (até a dona excluir a reunião, desde 26/11/2026). As falhas da leitura chegam como código e saem no
  * idioma da tela.
  *
  * O tRPC é o dublê de Meetings.test.tsx (cada useMutation registra o mutate);
@@ -271,9 +271,10 @@ describe("O detalhe da reunião de documento", () => {
     expect(screen.queryByRole("button", { name: "Transcrição" })).not.toBeInTheDocument();
     expect(container.querySelector("audio")).toBeNull();
     expect(screen.queryByText("Gravação")).not.toBeInTheDocument();
-    // O arquivo, no resumo: até quando fica e o atalho para as páginas.
+    // O arquivo, no resumo: fica até a exclusão (26/11/2026) e o atalho para as páginas.
     expect(screen.getByRole("heading", { name: "Arquivo" })).toBeInTheDocument();
-    expect(screen.getByText("Arquivo guardado até 20/12/2026.")).toBeInTheDocument();
+    expect(screen.getByText("Arquivo guardado até você excluir a reunião.")).toBeInTheDocument();
+    expect(screen.getByText(/Eles ficam guardados até você excluir a reunião ou encerrar a conta/)).toBeInTheDocument();
     expect(screen.getByText(/O link de compartilhamento mostra o texto e o resumo, nunca o arquivo/)).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "Páginas" }).at(-1)!);
     expect(screen.getByTestId("paginas-do-documento")).toHaveTextContent(`${ID} | ${DOCUMENTO.url}`);
@@ -323,17 +324,17 @@ describe("O detalhe da reunião de documento", () => {
     expect(screen.getByText("Escolha um idioma para gerar uma versão traduzida do texto do documento.")).toBeInTheDocument();
   });
 
-  it("a aba das páginas recebe o arquivo e o estado dos 30 dias", () => {
+  it("a aba das páginas recebe o arquivo e o estado do arquivo que saiu", () => {
     abrirDetalhe({}, { documento: null, documentoExpirado: true });
     fireEvent.click(screen.getByRole("button", { name: "Páginas" }));
     expect(duble.paginas).toHaveBeenLastCalledWith({ meetingId: ID, documento: null, documentoExpirado: true, documentoSaindo: false });
   });
 
-  it("o arquivo passou dos 30 dias: o resumo diz que saiu, e o texto lido continua", () => {
+  it("o arquivo saiu pela regra dos 30 dias de antes de 26/11/2026: o resumo diz isso, e o texto lido continua", () => {
     abrirDetalhe({}, { documento: null, documentoExpirado: true });
-    expect(screen.getByText("O arquivo passou dos 30 dias e foi apagado, como o app promete. O texto lido continua aqui.")).toBeInTheDocument();
+    expect(screen.getByText("O arquivo foi apagado pela regra de antes, que apagava o arquivo 30 dias depois do envio. O texto lido continua aqui.")).toBeInTheDocument();
     // Nunca que "a gravação" foi apagada.
-    expect(screen.queryByText(/gravação passou dos 30 dias/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/gravação foi apagada/)).not.toBeInTheDocument();
   });
 
   it("lendo: o aviso diz que lê o documento, e não que transcreve", () => {
@@ -351,7 +352,7 @@ describe("O detalhe da reunião de documento", () => {
     abrirDetalhe({ status: "failed", processingError: "IA_INDISPONIVEL" }, { transcript: null, documento: { ...DOCUMENTO, expiresAt: Date.now() + 10 * DIA } });
     expect(screen.getByText("A IA está sobrecarregada agora. Tente reprocessar daqui a alguns minutos.")).toBeInTheDocument();
     expect(screen.queryByText("IA_INDISPONIVEL")).not.toBeInTheDocument();
-    expect(screen.getByText(/O arquivo deste documento continua guardado até/)).toBeInTheDocument();
+    expect(screen.getByText(/O arquivo deste documento continua guardado. Reprocessar/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Reprocessar/ }));
     expect(duble.mutacoes.reprocess.mutate).toHaveBeenCalledWith({ meetingId: ID });
   });
@@ -361,13 +362,12 @@ describe("O detalhe da reunião de documento", () => {
     expect(screen.getByText("O documento é longo demais para uma leitura só. Divida o arquivo em partes menores e envie cada uma.")).toBeInTheDocument();
     expect(screen.queryByText("DOCUMENTO_LONGO_DEMAIS")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Reprocessar/ })).not.toBeInTheDocument();
-    expect(screen.queryByText(/O arquivo deste documento continua guardado até/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/O arquivo deste documento continua guardado/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Não dá mais para reprocessar/)).not.toBeInTheDocument();
   });
 
   it.each([
     ["o arquivo sumiu do bucket", { processingError: "DOCUMENTO_AUSENTE" }, { documento: DOCUMENTO }],
-    ["o arquivo vence antes de o reprocesso terminar", { processingError: "IA_INDISPONIVEL" }, { documento: { ...DOCUMENTO, expiresAt: Date.now() + 60_000 } }],
     ["não há arquivo", { processingError: "DOCUMENTO_FALHOU" }, { documento: null }],
   ])("falhou e %s: sem o botão, e o texto diz como tentar de novo", (_caso, reuniao, detalhe) => {
     abrirDetalhe({ status: "failed", ...reuniao }, { transcript: null, ...detalhe });
@@ -444,7 +444,7 @@ describe("O detalhe da reunião de documento", () => {
     expect(screen.queryByText(/A IA recusou ler este documento/)).not.toBeInTheDocument();
     expect(screen.queryByText("DOCUMENTO_ILEGIVEL")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Reprocessar/ })).not.toBeInTheDocument();
-    expect(screen.queryByText(/O arquivo deste documento continua guardado até/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/O arquivo deste documento continua guardado/)).not.toBeInTheDocument();
   });
 
   it("a 375 px e em árabe: as abas rolam de lado sem quebrar, e tudo no idioma da tela", async () => {

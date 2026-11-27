@@ -12,6 +12,7 @@ process.env.JWT_SECRET ??= "jwt-secret-somente-para-testes";
  */
 
 const limparGravacoesVencidas = vi.hoisted(() => vi.fn());
+const tirarOPrazoDosArquivosDeAntes = vi.hoisted(() => vi.fn());
 const createAuditLog = vi.hoisted(() => vi.fn(async () => {}));
 // O erro da passada que parou no meio, com o mesmo contrato da classe real
 // (meeting-service.ts): o laço reconhece pelo instanceof e lê o `resultado`.
@@ -23,7 +24,11 @@ const { VarreduraInterrompida } = vi.hoisted(() => ({
     }
   },
 }));
-vi.mock("./meeting-service", () => ({ limparGravacoesVencidas: (...args: unknown[]) => limparGravacoesVencidas(...args), VarreduraInterrompida }));
+vi.mock("./meeting-service", () => ({
+  limparGravacoesVencidas: (...args: unknown[]) => limparGravacoesVencidas(...args),
+  tirarOPrazoDosArquivosDeAntes: (...args: unknown[]) => tirarOPrazoDosArquivosDeAntes(...args),
+  VarreduraInterrompida,
+}));
 vi.mock("./security", () => ({ createAuditLog: (...args: unknown[]) => createAuditLog(...(args as [])) }));
 // A lixeira vencida (H7d) corre no mesmo laço, depois do áudio; o que ela faz
 // no banco está em server/lixeira-de-reunioes.integracao.test.ts.
@@ -49,6 +54,8 @@ beforeEach(async () => {
   vi.resetModules();
   limparGravacoesVencidas.mockReset();
   limparGravacoesVencidas.mockResolvedValue({ encontradas: 0, apagadas: 0 });
+  tirarOPrazoDosArquivosDeAntes.mockReset();
+  tirarOPrazoDosArquivosDeAntes.mockResolvedValue(0);
   esvaziarLixeiraVencida.mockReset();
   esvaziarLixeiraVencida.mockResolvedValue({ encontradas: 0, apagadas: 0 });
   createAuditLog.mockClear();
@@ -71,6 +78,31 @@ afterEach(async () => {
 });
 
 describe("o laço da varredura das gravações", () => {
+  // 26/11/2026: o áudio e os arquivos das reuniões deixam de vencer aos 30 dias.
+  // No boot o laço tira esse prazo das linhas de antes, uma vez, ao lado da
+  // primeira passada, com ou sem bucket; a falha é log e não segura nada.
+  it("no boot tira o prazo dos 30 dias das linhas de antes, uma vez só, sem segurar a passada", async () => {
+    tirarOPrazoDosArquivosDeAntes.mockResolvedValueOnce(3);
+    laco.iniciarVarreduraDeGravacoes();
+    expect(tirarOPrazoDosArquivosDeAntes).toHaveBeenCalledTimes(1);
+    expect(limparGravacoesVencidas).toHaveBeenCalledTimes(1);
+    await esvaziar();
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("3 passaram a ficar até a dona excluir"));
+    await vi.advanceTimersByTimeAsync(laco.INTERVALO_DA_VARREDURA_DE_GRAVACOES_MS * 3);
+    expect(limparGravacoesVencidas.mock.calls.length).toBeGreaterThan(1);
+    expect(tirarOPrazoDosArquivosDeAntes).toHaveBeenCalledTimes(1);
+  });
+
+  it("sem bucket o prazo antigo sai do mesmo jeito, e a falha dele é log, sem derrubar o laço", async () => {
+    delete process.env.STORAGE_BUCKET;
+    tirarOPrazoDosArquivosDeAntes.mockRejectedValueOnce(new Error("banco fora"));
+    laco.iniciarVarreduraDeGravacoes();
+    await esvaziar();
+    expect(tirarOPrazoDosArquivosDeAntes).toHaveBeenCalledTimes(1);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("prazo dos 30 dias"), expect.anything());
+    expect(limparGravacoesVencidas).not.toHaveBeenCalled();
+  });
+
   it("liga e devolve na hora: a passada do boot começa já, sem ser aguardada por quem liga", () => {
     passadaPendente();
     expect(laco.iniciarVarreduraDeGravacoes()).toBeUndefined();

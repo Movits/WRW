@@ -1,18 +1,21 @@
 import { descreverErroDeBanco } from "./banco-indisponivel";
-import { limparGravacoesVencidas, VarreduraInterrompida, type ResultadoDaVarredura } from "./meeting-service";
+import { limparGravacoesVencidas, tirarOPrazoDosArquivosDeAntes, VarreduraInterrompida, type ResultadoDaVarredura } from "./meeting-service";
 import { esvaziarLixeiraVencida } from "./lixeira-de-reunioes";
 import { createAuditLog } from "./security";
 
 /**
- * O laço que cumpre o prazo do áudio das reuniões (30 dias, MEETING_AUDIO_TTL_MS
- * em meeting-service.ts): uma passada de limparGravacoesVencidas no boot e outra
- * 5 min depois do fim de cada passada, no próprio processo.
+ * O laço que tira do bucket o áudio e os arquivos das reuniões que a dona (ou a
+ * exclusão da conta) mandou sair e o bucket recusou na hora: uma passada de
+ * limparGravacoesVencidas no boot e outra 5 min depois do fim de cada passada,
+ * no próprio processo.
  *
- * Antes dele, nada chamava a varredura: o endpoint de cron
- * (/api/scheduled/cleanup-recordings) nunca teve agendador, e o áudio só saía
- * quando a dona reabria a reunião, enquanto o aviso de gravação promete que ele
- * expira em 30 dias. A promessa é sobre a voz de TODAS as participantes, que não
- * têm login e não vão reabrir a reunião.
+ * Desde 26/11/2026 (decisão do Roberto, com a Política revisada pela Cris) nada
+ * disso vence pelo tempo: o áudio, o arquivo do documento e as fotos e os
+ * desenhos do resumo ficam até a dona excluir a reunião ou encerrar a conta
+ * (ARQUIVO_SEM_PRAZO, em meeting-service.ts). Até ali o laço também cumpria o
+ * prazo de 30 dias. No boot, ao lado da primeira passada, o laço tira esse prazo
+ * das linhas gravadas antes (tirarOPrazoDosArquivosDeAntes), com ou sem bucket;
+ * o erro dela é log e não segura o resto.
  *
  * - Boot: a primeira passada começa na hora e não é aguardada, então a subida
  *   não espera o bucket. Uma por vez: a seguinte só é agendada quando a
@@ -22,10 +25,10 @@ import { createAuditLog } from "./security";
  * - Sem STORAGE_BUCKET (dev com banco e sem bucket) não há o que apagar: a
  *   passada é pulada, em vez de deixar cada áudio vencido como aviso no log.
  * - Toda passada que apagou algo vai para a auditoria (CRON_CLEANUP_RECORDINGS,
- *   com a origem): é a prova de que o prazo foi cumprido. A que não apagou nada
+ *   com a origem): é a prova de que o arquivo saiu. A que não apagou nada
  *   não enche audit_logs. A passada que um erro parou no meio registra o que já
  *   tinha apagado antes de o erro subir.
- * - O descumprimento também fica: a passada que achou áudio vencido e não
+ * - O descumprimento também fica: a passada que achou áudio marcado e não
  *   conseguiu tirá-lo do bucket vai para o log de erro e para a auditoria
  *   (status 'failure', só as contagens), no máximo uma vez por hora enquanto a
  *   falha durar, para um bucket fora do ar não encher audit_logs a cada 5 min.
@@ -64,7 +67,7 @@ let ultimaAuditoriaDaFalha: number | null = null;
 
 type Origem = "Boot" | "Varredura";
 
-/** A prova de que o prazo foi cumprido: só as contagens e a origem. */
+/** A prova de que os arquivos marcados saíram: só as contagens e a origem. */
 async function auditarApagadas(origem: Origem, resultado: ResultadoDaVarredura) {
   await createAuditLog({
     userId: null,
@@ -90,6 +93,21 @@ async function passadaDaLixeira(origem: Origem): Promise<void> {
     }
   } catch (erro) {
     console.error(`[${origem}] Não foi possível excluir as reuniões da lixeira vencida:`, descreverErroDeBanco(erro));
+  }
+}
+
+/**
+ * O prazo dos 30 dias das linhas de antes de 26/11/2026 (só no boot, ao lado da
+ * primeira passada, sem segurá-la): nunca lança; o erro vai para o log. A ordem
+ * entre as duas não importa: a linha de antes ainda no prazo tem expires_at no
+ * futuro, e nenhuma passada a tira.
+ */
+async function passadaDoPrazoAntigo(): Promise<void> {
+  try {
+    const linhas = await tirarOPrazoDosArquivosDeAntes();
+    if (linhas > 0) console.warn(`[Boot] Arquivos de reunião com o prazo de 30 dias de antes de 26/11/2026: ${linhas} passaram a ficar até a dona excluir.`);
+  } catch (erro) {
+    console.error("[Boot] Não foi possível tirar o prazo dos 30 dias dos arquivos de reunião antigos:", descreverErroDeBanco(erro));
   }
 }
 
@@ -160,6 +178,7 @@ export function iniciarVarreduraDeGravacoes(intervaloMs = INTERVALO_DA_VARREDURA
     timer = setTimeout(() => rodar("Varredura"), intervaloMs);
     timer.unref?.();
   };
+  void passadaDoPrazoAntigo();
   rodar("Boot");
 }
 

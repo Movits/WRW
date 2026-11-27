@@ -132,10 +132,10 @@ describe("página pública de Privacidade", () => {
     expect(document.body.textContent ?? "").not.toMatch(/sendo redigida/i);
   });
 
-  it("diz no topo que é a versão provisória de 25/11/2026, em revisão jurídica", () => {
+  it("diz no topo que é a versão provisória de 26/11/2026, em revisão jurídica", () => {
     render(<PrivacyPage />);
 
-    expect(screen.getByText("Versão provisória de 25/11/2026, em revisão pela assessoria jurídica.")).toBeInTheDocument();
+    expect(screen.getByText("Versão provisória de 26/11/2026, em revisão pela assessoria jurídica.")).toBeInTheDocument();
   });
 
   it("tem as seções principais da política", () => {
@@ -172,11 +172,18 @@ describe("página pública de Privacidade", () => {
     expect(texto).toContain("wrw@wrwglobal.org");
   });
 
-  it("diz os prazos que o código cumpre: áudio 30 dias, transcrição até a exclusão", () => {
+  it("diz os prazos que o código cumpre: áudio, documento, anexos e transcrição até a exclusão (26/11/2026)", () => {
+    // Até 26/11/2026 o áudio, o arquivo do documento e as fotos e os desenhos
+    // do resumo eram apagados aos 30 dias; desde então ficam até a dona excluir
+    // a reunião ou encerrar a conta. Só a lixeira segue com 30 dias.
     render(<PrivacyPage />);
 
     const texto = document.body.textContent ?? "";
-    expect(texto).toMatch(/[áa]udio[^.]*30 dias/i);
+    expect(texto).toMatch(/[ÁA]udio das reuni[õo]es: at[ée] voc[êe] excluir a reuni[ãa]o ou encerrar a conta/);
+    expect(texto).toMatch(/Documentos de reuni[ãa]o[^.]*at[ée] voc[êe] excluir a reuni[ãa]o ou encerrar a conta/);
+    expect(texto).toMatch(/Fotos e desenhos do resumo: at[ée] voc[êe] os tirar/);
+    expect(texto).not.toMatch(/(fica|ficam)[^.]*30 dias/i);
+    expect(texto).toMatch(/Reuni[ãa]o na lixeira: 30 dias/);
     expect(texto).toMatch(/transcri[çc][ãa]o[^.]*at[ée] voc[êe] excluir a reuni[ãa]o/i);
     expect(texto).toContain("art. 33 da LGPD");
     expect(texto).toContain("art. 18 da LGPD");

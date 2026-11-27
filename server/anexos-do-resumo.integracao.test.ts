@@ -22,7 +22,7 @@ const { gerarTokenDoLink, novaSenhaDoLink } = await import("./link-aberto-da-reu
 const { entrarNoLink } = await import("./entrada-no-link-aberto");
 const { chaveDoAnexoDoLink, tetoDosAnexos } = await import("./anexos-do-resumo");
 const { comCookiesDoPedido } = await import("./senha-do-link-aberto");
-const { deletePrivateMeeting, limparGravacoesVencidas } = await import("./meeting-service");
+const { ARQUIVO_SEM_PRAZO, deletePrivateMeeting, limparGravacoesVencidas } = await import("./meeting-service");
 const { ANEXOS_POR_REUNIAO_MAX, RECUSAS_DOS_ANEXOS } = await import("@shared/anexos-do-resumo");
 const { RECUSAS_DA_LIXEIRA } = await import("@shared/lixeira-de-reunioes");
 type TrpcContext = import("./_core/context").TrpcContext;
@@ -106,12 +106,12 @@ describe.skipIf(!temBanco)("Anexos do resumo (integração)", () => {
     await banco.delete(users).where(inArray(users.openId, donas));
   });
 
-  it("anexa a foto e o desenho: sobem sem o EXIF, com a chave da dona, 30 dias de prazo e a auditoria; a lista os devolve na ordem", async () => {
+  it("anexa a foto e o desenho: sobem sem o EXIF, com a chave da dona, sem prazo (até a exclusão, desde 26/11/2026) e a auditoria; a lista os devolve na ordem", async () => {
     const { id } = await reuniaoPronta(DONA);
     const foto = await anexar(id);
     const desenho = await anexar(id, "drawing");
     expect(foto).toMatchObject({ tipo: "photo", mimeType: "image/jpeg", url: `/manus-storage/meetings/${DONA}/${id}/anexo-${foto.id}.jpg` });
-    expect(foto.expiraEm - foto.criadoEm).toBe(30 * 24 * 60 * 60_000);
+    expect(foto.expiraEm).toBe(ARQUIVO_SEM_PRAZO);
     const [chave, bytes, tipo, opcoes] = subir.mock.calls[0] as unknown as [string, Buffer, string, { chaveExata: boolean }];
     expect(chave).toBe(`meetings/${DONA}/${id}/anexo-${foto.id}.jpg`);
     expect(tipo).toBe("image/jpeg");
@@ -227,7 +227,7 @@ describe.skipIf(!temBanco)("Anexos do resumo (integração)", () => {
     expect(await (await db()).select().from(meetingAttachments).where(eq(meetingAttachments.meetingId, id))).toEqual([]);
   });
 
-  it("a varredura dos 30 dias tira o anexo vencido da reunião que segue no ar, e deixa o que ainda vale", async () => {
+  it("a varredura tira o anexo marcado para sair (expires_at no passado) da reunião que segue no ar, e deixa o que ainda vale", async () => {
     const { id } = await reuniaoPronta(DONA);
     const velho = await anexar(id);
     const novo = await anexar(id);

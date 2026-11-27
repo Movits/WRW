@@ -11,8 +11,13 @@
  * rascunho jurídico de cada versão fica em docs/termos/aviso-do-documento-rascunho.md,
  * para a Cris.
  */
-export const VERSOES_DO_AVISO_DO_DOCUMENTO = ["documento-2026-11-19"] as const;
+export const VERSOES_DO_AVISO_DO_DOCUMENTO = ["documento-2026-11-19", "documento-2026-11-26"] as const;
 
 export type VersaoDoAvisoDoDocumento = (typeof VERSOES_DO_AVISO_DO_DOCUMENTO)[number];
 
-export const VERSAO_VIGENTE_DO_AVISO_DO_DOCUMENTO: VersaoDoAvisoDoDocumento = "documento-2026-11-19";
+/**
+ * A documento-2026-11-26 muda a retenção: o arquivo deixa de sair aos 30 dias e
+ * fica, com o texto lido, até a dona excluir a reunião ou encerrar a conta
+ * (decisão do Roberto de 26/11/2026, com a Política revisada pela Cris).
+ */
+export const VERSAO_VIGENTE_DO_AVISO_DO_DOCUMENTO: VersaoDoAvisoDoDocumento = "documento-2026-11-26";

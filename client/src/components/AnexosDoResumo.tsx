@@ -20,7 +20,8 @@ import {
  * A foto é reduzida no aparelho antes de subir (client/src/lib/reduzir-imagem.ts,
  * a régua da #149, 1600 px no lado maior), o que também tira o EXIF com o GPS;
  * o servidor confere o conteúdo e tira o que sobrar. As imagens seguem a regra
- * dos 30 dias dos arquivos da reunião, e a tela diz isso (texto para a Cris).
+ * dos arquivos da reunião (ficam até a dona tirá-las, excluir a reunião ou
+ * encerrar a conta, desde 26/11/2026), e a tela diz isso (texto para a Cris).
  */
 
 type TranslateFn = (chave: string, opcoes?: Record<string, unknown>) => string;
@@ -72,7 +73,7 @@ function Grade({ imagens, aoTirar, tirando, aoFalharImagem }: { imagens: Imagem[
 }
 
 function AnexosDaDona({ meetingId, comLinkAberto }: { meetingId: string; comLinkAberto?: boolean }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const utils = trpc.useUtils();
   const consulta = trpc.meetings.anexos.useQuery({ meetingId });
   const anexar = trpc.meetings.anexarAoResumo.useMutation();
@@ -144,8 +145,6 @@ function AnexosDaDona({ meetingId, comLinkAberto }: { meetingId: string; comLink
     }
   };
 
-  // A data em que a primeira imagem sai (as outras saem depois dela).
-  const primeiraSai = anexos.length ? Math.min(...anexos.map(a => a.expiraEm)) : null;
   return <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5" aria-labelledby="anexos-do-resumo">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h2 id="anexos-do-resumo" className="text-base font-semibold">{t("meetings.attachments.heading")} <span className="text-sm font-normal text-white/45">{anexos.length}/{ANEXOS_POR_REUNIAO_MAX}</span></h2>
@@ -168,9 +167,7 @@ function AnexosDaDona({ meetingId, comLinkAberto }: { meetingId: string; comLink
       : anexos.length ? <Grade imagens={anexos} aoTirar={id => void tirarAnexo(id)} tirando={tirando}/>
       : <p className="mt-3 text-sm text-white/45">{t("meetings.attachments.empty")}</p>}
     {/* Textos de guarda e de compartilhamento: a Cris revisa. */}
-    <p className="mt-4 text-xs text-white/45">{primeiraSai
-      ? t("meetings.attachments.retentionUntil", { date: new Date(primeiraSai).toLocaleDateString(i18n.language) })
-      : t("meetings.attachments.retention")}</p>
+    <p className="mt-4 text-xs text-white/45">{t("meetings.attachments.retention")}</p>
     {comLinkAberto && <p className="mt-1 text-xs text-amber-100/70">{t("meetings.attachments.linkNotice")}</p>}
     <TelaDeDesenho aberta={desenhando} aoFechar={() => setDesenhando(false)} aoGuardar={guardarDesenho}/>
   </section>;

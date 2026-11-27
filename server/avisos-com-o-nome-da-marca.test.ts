@@ -12,7 +12,8 @@ import { VERSAO_VIGENTE_DO_AVISO_DO_YOUTUBE, VERSOES_DO_AVISO_DO_YOUTUBE } from 
  * da legenda e do YouTube cita a plataforma pelo nome; mudou o texto, a versão
  * é nova, e as anteriores seguem aceitas para a aba aberta antes do deploy (o
  * servidor grava a que veio). Aqui: os 10 idiomas dizem o nome novo, nenhum diz
- * o de 23/11, e a versão vigente é a de 24/11, com as anteriores na lista.
+ * o de 23/11, e a versão vigente é a mais nova (no aviso de gravação, a de
+ * 26/11, que mudou a retenção do áudio), com as anteriores na lista.
  */
 
 const LOCALES = fileURLToPath(new URL("../client/src/i18n/locales/", import.meta.url));
@@ -29,7 +30,7 @@ function texto(idioma: string, caminho: string): string {
 }
 
 const AVISOS = [
-  { nome: "gravação", chave: "meetings.consentNotice", vigente: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO, versoes: VERSOES_DO_AVISO_DE_GRAVACAO as readonly string[], nova: "2026-11-24", anteriores: ["2026-11-14", "2026-11-23"] },
+  { nome: "gravação", chave: "meetings.consentNotice", vigente: VERSAO_VIGENTE_DO_AVISO_DE_GRAVACAO, versoes: VERSOES_DO_AVISO_DE_GRAVACAO as readonly string[], nova: "2026-11-26", anteriores: ["2026-11-14", "2026-11-23", "2026-11-24"] },
   { nome: "legenda", chave: "meetings.caption.noticeBrowser", vigente: VERSAO_VIGENTE_DO_AVISO_DA_LEGENDA, versoes: VERSOES_DO_AVISO_DA_LEGENDA as readonly string[], nova: "legenda-2026-11-24", anteriores: ["legenda-2026-11-22", "legenda-2026-11-23"] },
   { nome: "YouTube", chave: "meetings.youtube.notice", vigente: VERSAO_VIGENTE_DO_AVISO_DO_YOUTUBE, versoes: VERSOES_DO_AVISO_DO_YOUTUBE as readonly string[], nova: "youtube-2026-11-24", anteriores: ["youtube-2026-11-20"] },
 ];

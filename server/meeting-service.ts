@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
+import type { MySqlColumn } from "drizzle-orm/mysql-core";
 import {
   contexts,
   meetingAttachments,
@@ -71,19 +72,32 @@ import { apagarSalasDaReuniao } from "./sala-de-video";
 export const MAX_MEETING_AUDIO_BYTES = ENVIO_UNICO_BYTES_MAX;
 export const MAX_MEETING_DURATION_SECONDS = ENVIO_UNICO_SEGUNDOS_MAX;
 /**
- * Quanto o áudio de uma reunião fica guardado: 30 dias contados do envio. No
- * envio único, do momento em que o áudio inteiro chega (a tomada para
- * 'processing'). Na gravação em partes, da chegada da ÚLTIMA parte: a cada
- * parte que chega, o prazo de todas as partes da reunião passa a ser o dela
- * (receberParte, em fatias-de-reuniao.ts), e elas vencem e saem juntas, como o
- * áudio inteiro do envio único. A transcrição fica até a dona excluir a reunião.
+ * O áudio da reunião (as partes e a gravação inteira das reuniões antigas), o
+ * arquivo da reunião de documento e as fotos e os desenhos do resumo ficam até
+ * a dona excluir a reunião (a lixeira, o "Apagar de vez") ou encerrar a conta.
+ * Decisão do Roberto de 26/11/2026, com a Política de Privacidade revisada pela
+ * Cris: nada disso se apaga sozinho com o tempo. Até ali o áudio e os arquivos
+ * venciam 30 dias depois do envio (PRAZO_DOS_ARQUIVOS_ATE_26_11_MS).
  *
- * Quem cumpre o prazo é a varredura (limparGravacoesVencidas), no boot e a cada
- * 5 min (server/varredura-de-gravacoes.ts), e a leitura da reunião vencida
- * (gravacaoParaOuvir). As duas tiram o objeto do bucket com todas as versões
- * antes de apagar a linha.
+ * A coluna expires_at das quatro tabelas segue no schema com outro papel: é a
+ * MARCA DE SAÍDA. Toda linha nasce com ARQUIVO_SEM_PRAZO e só passa a um
+ * instante do passado quando alguém manda o arquivo sair (a exclusão da
+ * reunião ou da conta, a junção, o anexo removido) e o bucket recusou; aí a
+ * varredura (limparGravacoesVencidas, no boot e a cada 5 min,
+ * server/varredura-de-gravacoes.ts) e a leitura (gravacaoParaOuvir) tiram o
+ * objeto com todas as versões e só então a linha.
+ *
+ * É o maior inteiro exato do JavaScript, que cabe no BIGINT da coluna: toda
+ * comparação "expires_at > agora" continua dizendo que o arquivo vale.
  */
-export const MEETING_AUDIO_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const ARQUIVO_SEM_PRAZO = Number.MAX_SAFE_INTEGER;
+/**
+ * O prazo de antes de 26/11/2026 (30 dias desde o envio). Só serve para ler o
+ * passado: a reunião sem linha de áudio ou de arquivo e mais velha que ele teve
+ * o arquivo apagado por aquela regra (gravacaoParaOuvir, documentoParaVer e o
+ * "Baixar o áudio"), e a tela diz isso, em vez de "nunca houve áudio".
+ */
+export const PRAZO_DOS_ARQUIVOS_ATE_26_11_MS = 30 * 24 * 60 * 60 * 1000;
 /**
  * A recusa da duração no envio único. Dizia "No modo atual, cada reunião pode
  * ter no máximo 10 minutos", o que deixou de valer na G13b (a reunião em partes
@@ -966,7 +980,7 @@ export async function processMeetingRecording(input: {
         mimeType: input.mimeType,
         sizeBytes: audio.length,
         durationSeconds: duracaoMedida,
-        expiresAt: ficha + MEETING_AUDIO_TTL_MS,
+        expiresAt: ARQUIVO_SEM_PRAZO,
         createdAt: ficha,
       });
     } catch (erro) {
@@ -1007,7 +1021,7 @@ export async function processMeetingRecording(input: {
  * bucket e em meeting_recordings: transcrição, extração, releitura, escritas e
  * promoção. Serve ao envio original (logo depois do upload) e ao
  * reprocessamento (com os bytes lidos de volta do bucket). Nunca grava áudio,
- * nunca mexe na gravação nem no prazo de 30 dias dela.
+ * nunca mexe na gravação.
  *
  * `limparAntes`: no reprocessamento a reunião pode ter derivados de uma
  * tentativa que falhou no meio (transcrição gravada e sugestões não, por
@@ -1275,10 +1289,8 @@ function recusaPeloStatus(meeting: Reuniao): ReprocessamentoRecusado | null {
 
 /**
  * A chave do áudio que dá para reprocessar, ou null. A gravação tem de:
- * existir; durar ao menos mais LIMITE_PROCESSAMENTO_MS (a leitura vencida e a
- * varredura não apagam o áudio de reunião em 'processing', mas reprocessar áudio
- * a minutos de vencer o guardaria além dos 30 dias, e a tela também não oferece
- * o botão); ter o tipo e o tamanho que o envio original aceita; e
+ * existir e não estar marcada para sair (expires_at no passado: a exclusão
+ * que o bucket recusou; ver ARQUIVO_SEM_PRAZO); ter o tipo e o tamanho que o envio original aceita; e
  * estar no espaço DESTA reunião DESTA dona no bucket, para uma linha legada ou
  * corrompida (a tabela veio do backup do Manus) não virar leitura de chave
  * arbitrária.
@@ -1300,16 +1312,13 @@ function chaveReprocessavel(gravacao: Gravacao | undefined, ownerId: string, mee
  * bucket ou nunca subiu) seguem como lacuna. Sem parte nenhuma, não há o que
  * reprocessar. Responde na hora: a tela acompanha pelo status.
  *
- * O prazo, como no envio único (chaveReprocessavel), mas com a margem que
- * cresce com a gravação (margemDoReprocesso, em shared/const.ts): a fila
- * transcreve uma parte por vez, e enquanto a reunião está em 'uploading' ou
- * 'processing' o áudio vencido não sai. Com 15 min para qualquer tamanho, o
- * reprocesso de 72 partes aceito a 20 min do prazo passava dele, e a fila
- * seguia lendo áudio que já deveria ter saído. A tela esconde o botão com a
- * mesma conta, sobre a mesma coluna (`esperadas`, a expected_slices que ela
- * recebe); sem ela, contam as partes até a maior que chegou. Vale a parte que
- * vence primeiro: as partes gravadas desde esta regra vencem juntas, e as de
- * antes podem diferir por alguns minutos.
+ * A conferência do expires_at, como no envio único (chaveReprocessavel), com a
+ * margem que cresce com a gravação (margemDoReprocesso, em shared/const.ts),
+ * vinha do prazo de 30 dias de antes de 26/11/2026. Com ARQUIVO_SEM_PRAZO ela
+ * só recusa a reunião com alguma parte marcada para sair (expires_at no
+ * passado). A tela esconde o botão com a mesma conta, sobre a mesma coluna
+ * (`esperadas`, a expected_slices que ela recebe); sem ela, contam as partes
+ * até a maior que chegou.
  */
 async function reprocessarEmPartes(db: Banco, ownerId: string, meetingId: string, esperadas: number | null): Promise<{ trabalho: Promise<void> }> {
   const [partes] = await db.select({
@@ -1347,7 +1356,7 @@ async function reprocessarEmPartes(db: Banco, ownerId: string, meetingId: string
  * guardado. Só LÊ até tomar a reunião ('failed' → 'processing', com a ficha) e
  * devolve logo: o trabalho — ler os bytes do bucket, IA, escritas — segue em
  * segundo plano, e a tela acompanha por meetings.get. Reprocessar não grava
- * áudio, não cria gravação e não renova o prazo de 30 dias.
+ * áudio nem cria gravação.
  *
  * `trabalho` NUNCA rejeita. Fora da requisição não há quem capture o erro, e
  * uma rejeição sem tratamento derruba o processo inteiro no Node 20 — junto
@@ -1681,24 +1690,22 @@ type ReuniaoDoAudio = { createdAt: number; status: Reuniao["status"]; emPartes: 
 /**
  * Status em que o áudio vencido da reunião em partes NÃO sai, nem na leitura nem
  * na varredura: em 'processing' a fila ou o reprocesso pode estar lendo o
- * áudio; em 'recording' e 'uploading' a reunião ainda recebe partes, e cada
- * parte que chega renova o prazo de todas (renovação pendente). Nesses estados
- * o áudio vencido só deixa de ser servido, e sai quando a reunião os deixar. No
+ * áudio; em 'recording' e 'uploading' a reunião ainda recebe partes e a fila
+ * as transcreve. Nesses estados o áudio marcado para sair só deixa de ser servido, e sai quando a reunião os deixar. No
  * envio único, só 'processing' segura.
  */
 const STATUS_QUE_SEGURAM_AS_PARTES: Reuniao["status"][] = ["recording", "uploading", "processing"];
 
 /**
- * A gravação que se pode ouvir agora e, quando não há, o porquê: o áudio passou
- * do prazo e saiu (`recordingExpired`), passou do prazo e ainda está saindo
- * (`recordingDeletionPending`), ou não há áudio guardado.
+ * A gravação que se pode ouvir agora e, quando não há, o porquê: o áudio saiu
+ * (`recordingExpired`: a regra dos 30 dias de antes de 26/11/2026, ou a marca de
+ * saída), está saindo (`recordingDeletionPending`), ou não há áudio guardado.
  *
- * Vencido, o áudio deixa de ser servido e sai aqui mesmo, com todas as versões
- * e só então a linha: a promessa dos 30 dias vale também para quem abre a
- * reunião antes da próxima varredura. Se o bucket recusar, a linha fica, a tela
- * diz que o áudio está saindo (e não que "foi apagado"), e a varredura tenta de
- * novo. Antes, a tela dizia "passou dos 30 dias e foi apagada" na reunião em
- * partes sem nada ter saído do bucket.
+ * Desde 26/11/2026 o áudio não vence (ARQUIVO_SEM_PRAZO). A linha com a marca
+ * de saída (expires_at no passado) deixa de ser servida e sai aqui mesmo, com
+ * todas as versões e só então a linha. Se o bucket recusar, a linha fica, a
+ * tela diz que o áudio está saindo (e não que "foi apagado"), e a varredura
+ * tenta de novo.
  *
  * Sai só o que a tela precisa: `storageKey` fica no servidor. A `url` é o
  * caminho do proxy autenticado (/manus-storage/...), que confere sessão e posse
@@ -1712,7 +1719,7 @@ export async function gravacaoParaOuvir(db: Banco, ownerId: string, meetingId: s
   // reunião distingue os dois casos sem guardar nada a mais (o prazo conta de um
   // instante posterior à criação); sem isto a tela passaria a dizer "nunca houve
   // áudio" logo depois de explicar que ele tinha sido apagado.
-  const semLinha = () => semAudio(reuniao.createdAt + MEETING_AUDIO_TTL_MS <= agora);
+  const semLinha = () => semAudio(reuniao.createdAt + PRAZO_DOS_ARQUIVOS_ATE_26_11_MS <= agora);
 
   if (reuniao.emPartes) {
     const linhas = await db.select({
@@ -1850,7 +1857,7 @@ export async function documentoParaVer(db: Banco, ownerId: string, meetingId: st
   }).from(meetingDocuments)
     .where(and(eq(meetingDocuments.meetingId, meetingId), eq(meetingDocuments.ownerId, ownerId)))
     .limit(1);
-  if (!linha) return { documento: null, documentoExpirado: reuniao.createdAt + MEETING_AUDIO_TTL_MS <= agora, documentoSaindo: false };
+  if (!linha) return { documento: null, documentoExpirado: reuniao.createdAt + PRAZO_DOS_ARQUIVOS_ATE_26_11_MS <= agora, documentoSaindo: false };
   if (linha.expiresAt <= agora) {
     if (reuniao.status !== "processing" && await apagarArquivoDaGravacao(linha.storageKey)) {
       await db.delete(meetingDocuments).where(and(eq(meetingDocuments.id, linha.id), eq(meetingDocuments.ownerId, ownerId)));
@@ -2058,26 +2065,57 @@ async function perfisDeVozSemConta(db: Banco, trecho: TrechoDaVarredura, lote: n
 }
 
 /**
- * A varredura que faz os 30 dias valerem para TODO áudio de reunião, não só para
- * o que alguém reabre: sem ela, o áudio de uma reunião que ninguém visita mais
- * (o caso comum) ficaria no bucket para sempre. A voz das outras participantes
- * não pode depender de a dona voltar na página.
+ * Tira o prazo dos 30 dias das linhas gravadas antes de 26/11/2026: o áudio
+ * (partes e gravação inteira), o arquivo do documento e as fotos e os desenhos
+ * do resumo que ainda estavam no prazo passam a ARQUIVO_SEM_PRAZO, e ficam até
+ * a dona excluir a reunião ou encerrar a conta, como os gravados depois.
+ *
+ * Só toca o expires_at no FUTURO e menor que ARQUIVO_SEM_PRAZO, que desde a
+ * mudança só a linha de antes tem: a marca de saída (a exclusão que o bucket
+ * recusou) é sempre um instante do passado e continua valendo, e a varredura
+ * tira o arquivo dela. Rodar de novo não muda nada. Roda na passada do boot
+ * (server/varredura-de-gravacoes.ts), antes da varredura do áudio.
+ *
+ * Varredura de SISTEMA, sem owner_id, como limparGravacoesVencidas; `ownerId`
+ * só existe para os testes de integração.
+ */
+export async function tirarOPrazoDosArquivosDeAntes(opcoes: { ownerId?: string } = {}): Promise<number> {
+  const db = await exigirDb();
+  const agora = now();
+  const deAntes = (coluna: { expiresAt: MySqlColumn; ownerId: MySqlColumn }) => and(
+    gt(coluna.expiresAt, agora),
+    lt(coluna.expiresAt, ARQUIVO_SEM_PRAZO),
+    opcoes.ownerId ? eq(coluna.ownerId, opcoes.ownerId) : undefined,
+  );
+  const sem = { expiresAt: ARQUIVO_SEM_PRAZO };
+  const resultados = [
+    await db.update(meetingRecordings).set(sem).where(deAntes(meetingRecordings)),
+    await db.update(meetingAudioSlices).set(sem).where(deAntes(meetingAudioSlices)),
+    await db.update(meetingDocuments).set(sem).where(deAntes(meetingDocuments)),
+    await db.update(meetingAttachments).set(sem).where(deAntes(meetingAttachments)),
+  ];
+  return resultados.reduce((soma, resultado) => soma + linhasAfetadas(resultado), 0);
+}
+
+/**
+ * A varredura que tira do bucket o arquivo que a dona (ou a exclusão da conta)
+ * mandou sair e o bucket recusou na hora, sem depender de alguém reabrir a
+ * reunião. Desde 26/11/2026 nada vence pelo tempo (ARQUIVO_SEM_PRAZO): a
+ * linha só tem expires_at no passado quando alguém a marcou para sair.
  *
  * Sai, com todas as versões e só então a linha:
- * - a gravação do envio único e a parte da gravação em partes cujo prazo
- *   venceu, menos as da reunião que ainda pode precisar delas: 'processing'
+ * - a gravação do envio único e a parte da gravação em partes com a marca de
+ *   saída, menos as da reunião que ainda pode precisar delas: 'processing'
  *   (a execução ou a fila pode estar lendo o áudio) e, nas partes, também
- *   'recording' e 'uploading' (renovação pendente: cada parte que chega renova
- *   o prazo de todas, e a fila ainda as transcreve). As partes de uma reunião
- *   vencem no mesmo instante (ver MEETING_AUDIO_TTL_MS) e saem na mesma passada;
+ *   'recording' e 'uploading' (a fila ainda as transcreve);
  * - na hora, o áudio cuja reunião já não existe ou está sendo excluída
  *   ('deleted'): é o ponteiro que a exclusão da reunião ou da conta deixou
  *   quando o bucket recusou, ou a gravação de uma execução que terminou depois
  *   da exclusão;
  * - pela mesma regra da gravação do envio único, o PDF da reunião de documento
- *   (H12, meeting_documents), que guarda a mesma promessa dos 30 dias;
- * - as fotos e os desenhos do resumo (H4g e H4h, meeting_attachments), com o
- *   mesmo prazo, em qualquer estado da reunião;
+ *   (H12, meeting_documents);
+ * - as fotos e os desenhos do resumo (H4g e H4h, meeting_attachments), com a
+ *   marca de saída, em qualquer estado da reunião;
  * - o MP3 do resumo (H19b, resumo_em_audio) da reunião que não existe mais ou
  *   está sendo excluída (a junção e a recusa do bucket na exclusão): sai o
  *   objeto, e a linha fica sem a chave, para o teto;
@@ -2260,8 +2298,8 @@ export async function getPrivateMeeting(ownerId: string, meetingId: string) {
   }));
   const emPartes = meeting.audioPipeline === "slices";
   // A reunião de documento (H12) não tem áudio: no lugar da gravação, o PDF,
-  // com a mesma regra dos 30 dias. Sem isto, a reunião de documento com mais
-  // de 30 dias diria que "a gravação foi apagada".
+  // com a mesma regra do áudio. Sem isto, a reunião de documento diria que "a
+  // gravação foi apagada".
   // O audioParaBaixar é só da dona (H8c): o link aberto não o repassa. A
   // reunião de documento não tem áudio, e nada para baixar.
   const ehDocumento = ehReuniaoDeDocumento(meeting.origem);
@@ -2520,7 +2558,7 @@ export async function apagarDerivadosDoAlvoDaJuncao(tx: BancoOuTransacao, ownerI
 /**
  * Quando a exclusão vem da lixeira (H7d, server/lixeira-de-reunioes.ts): o
  * "Apagar de vez" só toma a reunião que continua na lixeira (`soDaLixeira`), e
- * a varredura do fim dos 30 dias, só a que está lá desde antes do corte
+ * a varredura do fim dos 30 dias na lixeira, só a que está lá desde antes do corte
  * (`naLixeiraAte`). A reunião restaurada no meio fica, e a resposta é false.
  */
 export type CondicaoDaExclusao = { soDaLixeira?: boolean; naLixeiraAte?: number };

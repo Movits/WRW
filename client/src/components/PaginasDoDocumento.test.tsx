@@ -69,7 +69,7 @@ describe("PaginasDoDocumento", () => {
     expect(pagina).toBe(1);
     expect(canvas).toBeInstanceOf(HTMLCanvasElement);
     expect(largura).toBeGreaterThan(0);
-    expect(screen.getByText("Arquivo guardado até 20/12/2026.")).toBeInTheDocument();
+    expect(screen.getByText("Arquivo guardado até você excluir a reunião.")).toBeInTheDocument();
   });
 
   it("anterior e próxima andam uma página e param nas pontas", async () => {
@@ -143,7 +143,7 @@ describe("PaginasDoDocumento", () => {
   it("o arquivo saiu do bucket (404): diz que está saindo, sem tentar de novo", async () => {
     duble.buscar.mockRejectedValue(new FalhaAoBuscarODocumento(404, "SEM_DOCUMENTO"));
     mostrar();
-    expect(await screen.findByRole("alert")).toHaveTextContent("O arquivo passou dos 30 dias e já não pode ser aberto.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("O arquivo já não pode ser aberto.");
     expect(screen.queryByRole("button", { name: /Tentar novamente/ })).not.toBeInTheDocument();
     expect(duble.buscar).toHaveBeenCalledTimes(1);
   });
@@ -158,8 +158,8 @@ describe("PaginasDoDocumento", () => {
   });
 
   it.each([
-    ["passou dos 30 dias e saiu", { documentoExpirado: true }, "O arquivo passou dos 30 dias e foi apagado, como o app promete. O texto lido continua aqui."],
-    ["passou dos 30 dias e está saindo", { documentoSaindo: true }, "O arquivo passou dos 30 dias e já não pode ser aberto. O app ainda está apagando o arquivo do armazenamento."],
+    ["saiu pela regra dos 30 dias de antes de 26/11/2026", { documentoExpirado: true }, "O arquivo foi apagado pela regra de antes, que apagava o arquivo 30 dias depois do envio. O texto lido continua aqui."],
+    ["está saindo", { documentoSaindo: true }, "O arquivo já não pode ser aberto. O app ainda está apagando o arquivo do armazenamento."],
     ["não há arquivo", {}, "Nenhum arquivo guardado para este documento."],
   ])("sem o arquivo (%s): diz isso e nem pede os bytes", (_caso, estado, frase) => {
     mostrar({ documento: null, ...estado });

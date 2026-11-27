@@ -60,7 +60,7 @@ import { useImportacaoEmPartes, type AndamentoDaImportacao } from "@/hooks/useIm
 import { ImportacaoEmAndamento } from "@/components/ImportacaoEmAndamento";
 import type { CodigoDaRecusaDoCorte, FormatoDoArquivo, RecusaDoCorte, TipoDaParte } from "@/lib/corte-comum";
 import { ocupar } from "@/lib/sessao-ocupada";
-import { CODIGO_ERRO_INTERROMPIDO, PARTE_NO_SERVIDOR_BYTES_MAX, PARTE_NO_SERVIDOR_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX, margemDoReprocesso, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
+import { CODIGO_ERRO_INTERROMPIDO, PARTE_NO_SERVIDOR_BYTES_MAX, PARTE_NO_SERVIDOR_SEGUNDOS_MAX, GRAVACAO_EM_PARTES_SEGUNDOS_MAX, MENSAGEM_AUDIO_GUARDADO_AUSENTE, nomesDosFalantes, TITULO_DA_REUNIAO_MAX, TITULO_DA_REUNIAO_MIN } from "@shared/const";
 import { PARAMETRO_DA_AGENDADA, PARAMETRO_DA_LIXEIRA, ROTA_DAS_REUNIOES, ROTA_GRAVAR, rotaDaLixeira, rotaDaReuniao } from "@shared/rotas";
 import { podeIrParaALixeira } from "@shared/lixeira-de-reunioes";
 import { ReuniaoDaAgendaNoGravador } from "@/components/ReuniaoDaAgendaNoGravador";
@@ -1266,13 +1266,13 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
   // O áudio sumiu do bucket: reprocessar de novo não adianta.
   const audioGuardadoAusente = meeting.processingError === MENSAGEM_AUDIO_GUARDADO_AUSENTE;
   // H8c: baixar o áudio só com a gravação encerrada (gravando ou recebendo
-  // partes, o arquivo sairia pela metade) e no prazo dos 30 dias; depois dele o
-  // botão some, mesmo com a página aberta desde antes. O servidor recusa os
+  // partes, o arquivo sairia pela metade) e com o áudio guardado (desde
+  // 26/11/2026 ele fica até a dona excluir a reunião). O servidor recusa os
   // mesmos casos com código traduzido (server/baixar-audio-da-reuniao.ts). O
   // botão segue o `audioParaBaixar` do servidor, e não a gravação que toca: as
   // partes que falharam na IA não tocam no player, mas o áudio delas está
   // guardado e sai no arquivo (na reunião que falhou inteira, só ele existe).
-  const podeBaixarAudio = !!audioParaBaixar && meeting.status !== "recording" && meeting.status !== "uploading" && audioParaBaixar.expiresAt > Date.now();
+  const podeBaixarAudio = !!audioParaBaixar && meeting.status !== "recording" && meeting.status !== "uploading";
   const botaoDoAudio = podeBaixarAudio && audioParaBaixar
     ? <BaixarAudioDaReuniao meetingId={meetingId} duracaoSegundos={audioParaBaixar.duracaoSegundos}
         nomeSugerido={nomeDoArquivo({ titulo: meeting.title, criadaEm: meeting.createdAt })}/>
@@ -1285,7 +1285,7 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
   // a reunião, logo acima da seção que oferecia baixar esse mesmo áudio. O
   // servidor manda o `audioParaBaixar` sempre que há o que tocar; a gravação
   // fica só de reserva.
-  const audioGuardado: { expiresAt: number } | null = audioParaBaixar ?? recording;
+  const audioGuardado = audioParaBaixar ?? recording;
   const motivoDaFalha = causaDaFalha(t, meeting.processingError) ?? t("meetings.processingFailedFallback");
   // Resumo e perguntas leem a transcrição: só com a reunião pronta e com texto.
   const prontaComTranscricao = meeting.status === "ready" && !!transcript?.transcript?.trim();
@@ -1377,14 +1377,13 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
         linkComSenha={!!meeting.linkComSenha} linkComAudio={meeting.linkComAudio !== false} documento={ehDocumento} youtube={!!idDoVideo}/>}
     {meeting.status === "failed" && ehDocumento && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>
-      {/* O documento (H12) se reprocessa pelo arquivo guardado, com a mesma
-          margem do reprocesso do áudio: perto de vencer, o servidor recusa. A
-          falha que se repete com o mesmo arquivo (o texto que não cabe numa
+      {/* O documento (H12) se reprocessa pelo arquivo guardado, como o
+          áudio. A falha que se repete com o mesmo arquivo (o texto que não cabe numa
           resposta) não tem botão: o motivo já diz o que fazer, e o servidor
           também recusa. */}
-      {falhaDoDocumentoSeRepete(meeting.processingError) ? null : documento && !documentoAusente && documento.expiresAt - Date.now() > margemDoReprocesso(null) ? (
+      {falhaDoDocumentoSeRepete(meeting.processingError) ? null : documento && !documentoAusente ? (
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-red-100/75">{t("meetings.document.reprocessHint", { date: new Date(documento.expiresAt).toLocaleDateString(i18n.language) })}</p>
+          <p className="text-sm text-red-100/75">{t("meetings.document.reprocessHint")}</p>
           <button type="button" onClick={() => reprocessar.mutate({ meetingId })} disabled={reprocessar.isPending}
             className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8] disabled:opacity-60">
             <RefreshCw size={15} className={reprocessar.isPending ? "animate-spin" : ""}/> {t("meetings.reprocessButton")}
@@ -1410,13 +1409,11 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
     </div>}
     {meeting.status === "failed" && !ehDocumento && !idDoVideo && <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-red-200">
       <p>{motivoDaFalha}</p>
-      {/* Reprocessar só com áudio guardado que ainda dura mais que o
-          reprocesso inteiro, que cresce com as partes da gravação: perto de
-          vencer, o reprocesso seguraria o áudio além dos 30 dias, e o servidor
-          recusa o pedido com a mesma conta (margemDoReprocesso). */}
-      {audioGuardado && !audioGuardadoAusente && audioGuardado.expiresAt - Date.now() > margemDoReprocesso(meeting.expectedSlices) ? (
+      {/* Reprocessar só com áudio guardado (desde 26/11/2026 ele fica até a
+          dona excluir a reunião). */}
+      {audioGuardado && !audioGuardadoAusente ? (
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-red-100/75">{t("meetings.reprocessHint", { date: new Date(audioGuardado.expiresAt).toLocaleDateString(i18n.language) })}</p>
+          <p className="text-sm text-red-100/75">{t("meetings.reprocessHint")}</p>
           <button type="button" onClick={() => reprocessar.mutate({ meetingId })} disabled={reprocessar.isPending}
             className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#c98f70] px-4 py-2 text-sm font-bold text-[#1a120c] hover:bg-[#efcba8] disabled:opacity-60">
             <RefreshCw size={15} className={reprocessar.isPending ? "animate-spin" : ""}/> {t("meetings.reprocessButton")}
@@ -1453,15 +1450,15 @@ function MeetingDetail({ meetingId, onBack, aoExcluir, aoAbrirALixeira, etiqueta
         aoIrPara={partesParaOuvir.length ? segundo => player.current?.irPara(segundo) : undefined} linkDoTempo={linkDoTempo}/>
     </div>}
     {tab === "summary" && <div className="grid md:grid-cols-2 gap-4"><section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{ehDocumento ? t("meetings.document.entitiesHeading") : t("meetings.entitiesHeading")}</h2><div className="flex flex-wrap gap-2 mt-4">{entities.length ? entities.map(entity => { const tipo = TIPOS_DE_ENTIDADE[entity.entityType as TipoEntidade]; return <span key={entity.id} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${tipo ? tipo.classes : "border border-white/10 bg-white/5 text-white/75"}`}>{tipo && <span className="text-[10px] font-semibold uppercase tracking-wider opacity-75">{t(tipo.chave)}</span>}<span>{entity.value}</span></span>; }) : <p className="text-sm text-white/45">{t("meetings.noEntities")}</p>}</div></section>{ehDocumento ? <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><h2 className="text-base font-semibold">{t("meetings.document.fileHeading")}</h2>
-      {/* O arquivo do documento (H12b) segue a regra dos 30 dias do áudio. */}
+      {/* O arquivo do documento (H12b) segue a regra do áudio: fica até a dona excluir a reunião. */}
       <p className="text-sm text-white/50 mt-3">{documento
-        ? t("meetings.document.availableUntil", { date: new Date(documento.expiresAt).toLocaleDateString(i18n.language) })
+        ? t("meetings.document.fileStored")
         : documentoExpirado ? t("meetings.document.fileExpired") : documentoSaindo ? t("meetings.document.fileDeletionPending") : t("meetings.document.noFileStored")}</p>
       {documento && <button type="button" onClick={() => setTab("pages")} className="mt-3 inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm text-white/75 hover:bg-white/5"><Files size={15}/> {t("meetings.document.pagesTab")}</button>}
       <p className="text-sm text-white/50 mt-3">{t("meetings.document.privacyNotice")}</p></section> : <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5">{idDoVideo ? <VideoDoYoutube id={idDoVideo}/> : <><h2 className="text-base font-semibold">{t("meetings.recordingHeading")}</h2>
       {recording ? <>
         {/* O player fica no rodapé (BarraDoPlayer), um só para todas as abas. */}
-        <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {formatDuration(recording.durationSeconds)} {t("meetings.availableUntil")} {new Date(recording.expiresAt).toLocaleDateString(i18n.language)}</p>
+        <p className="text-xs text-white/45 mt-2">{t("meetings.durationLabel")} {formatDuration(recording.durationSeconds)} {t("meetings.storedUntilDeleted")}</p>
         {/* Só a dona baixa o áudio: este detalhe é o dela, e a página do link aberto (ReuniaoAberta.tsx) não tem o botão. */}
         {botaoDoAudio}
       </> : recordingExpired ? (
