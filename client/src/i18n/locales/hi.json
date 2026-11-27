@@ -1480,7 +1480,27 @@
     "sendDocsSecurely": "गोपनीय दस्तावेज़ सुरक्षित रूप से भेजें।",
     "youLabel": "आप",
     "docsProtectedNotice": "इस कमरे में साझा किए गए सभी दस्तावेज़ हस्ताक्षरित NDA द्वारा सुरक्षित हैं। इस प्लेटफ़ॉर्म के बाहर साझा करना सहमत शर्तों का उल्लंघन है।",
-    "fileSizeKb": "{{size}} KB"
+    "fileSizeKb": "{{size}} KB",
+    "encerrarBotao": "सौदा दर्ज कर बंद करें",
+    "encerrarTitulo": "तय हुआ सौदा दर्ज करें",
+    "encerrarSubtitulo": "भुगतान प्लेटफ़ॉर्म के बाहर होता है। यहाँ जो रहता है वह तय बातों का रिकॉर्ड है।",
+    "campoMoeda": "मुद्रा",
+    "campoValor": "सौदे का मूल्य",
+    "campoPercentual": "तय कमीशन (%)",
+    "campoComissao": "देय कमीशन",
+    "campoObservacoes": "टिप्पणियाँ",
+    "campoObservacoesPlaceholder": "जो बाद में इस सौदे को पहचानने में मदद करे",
+    "avisoComissaoTitulo": "Marquesa Global Match को देय कमीशन",
+    "avisoComissaoDetalhe": "मध्यस्थता शुल्क पर गणना, अधिकतम 50%।",
+    "erroTetoComissao": "सहमत कमीशन मध्यस्थता शुल्क के 50% से अधिक नहीं हो सकता।",
+    "encerrarConfirmar": "दर्ज करें और बंद करें",
+    "encerrarCancelar": "रद्द करें",
+    "encerrarSucesso": "सौदा दर्ज हुआ और बातचीत बंद हुई।",
+    "encerrarFalha": "सौदा दर्ज नहीं किया जा सका।",
+    "encerradaTitulo": "बातचीत बंद",
+    "encerradaPagamentoFora": "भुगतान प्लेटफ़ॉर्म के बाहर होता है; यह तय बातों का रिकॉर्ड है।",
+    "campoHonorarios": "मध्यस्थता शुल्क",
+    "erroHonorariosMaior": "मध्यस्थता शुल्क सौदे के मूल्य से अधिक नहीं हो सकता।"
   },
   "meetings": {
     "participants": {
