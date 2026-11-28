@@ -281,7 +281,7 @@ describe("E-mail de retorno — a prévia", () => {
     const gmail = screen.getByRole("link", { name: /Abrir no Gmail/ });
     const outlook = screen.getByRole("link", { name: /Abrir no Outlook/ });
     expect(gmail).toHaveAttribute("href", `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(titulo)}&body=${encodeURIComponent(corpo)}`);
-    expect(outlook).toHaveAttribute("href", `https://outlook.office.com/mail/deeplink/compose?subject=${encodeURIComponent(titulo)}&body=${encodeURIComponent(corpo)}`);
+    expect(outlook).toHaveAttribute("href", `https://outlook.cloud.microsoft/mail/deeplink/compose?subject=${encodeURIComponent(titulo)}&body=${encodeURIComponent(corpo)}`);
     for (const link of [gmail, outlook]) {
       expect(link).toHaveAttribute("target", "_blank");
       expect(link).toHaveAttribute("rel", "noopener noreferrer");
@@ -368,13 +368,13 @@ describe("linksDoRascunhoNaWeb (T33)", () => {
   it("o assunto e o texto codificados, com espaço como %20 e o + do texto preservado; longo demais, só o assunto", () => {
     expect(linksDoRascunhoNaWeb("Oi & tchau", "1 + 1\nfim")).toEqual({
       gmail: "https://mail.google.com/mail/?view=cm&fs=1&su=Oi%20%26%20tchau&body=1%20%2B%201%0Afim",
-      outlook: "https://outlook.office.com/mail/deeplink/compose?subject=Oi%20%26%20tchau&body=1%20%2B%201%0Afim",
+      outlook: "https://outlook.cloud.microsoft/mail/deeplink/compose?subject=Oi%20%26%20tchau&body=1%20%2B%201%0Afim",
       completo: true,
     });
     const chines = "会议".repeat(Math.ceil(LIMITE_DO_LINK_DE_EMAIL_NA_WEB / 18) + 1);
     expect(linksDoRascunhoNaWeb("主题", chines)).toEqual({
       gmail: `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent("主题")}`,
-      outlook: `https://outlook.office.com/mail/deeplink/compose?subject=${encodeURIComponent("主题")}`,
+      outlook: `https://outlook.cloud.microsoft/mail/deeplink/compose?subject=${encodeURIComponent("主题")}`,
       completo: false,
     });
   });

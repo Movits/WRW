@@ -143,6 +143,13 @@ export const LIMITE_DO_LINK_DE_EMAIL_NA_WEB = 7_000;
  * Gmail no navegador) clicava em "Abrir no e-mail" e nada abria: o mailto: só
  * funciona com um app de e-mail instalado e escolhido no sistema. Texto longo
  * demais vai sem o corpo (completo = false), como no mailto.
+ *
+ * O Outlook vai pelo endereço novo da Microsoft (outlook.cloud.microsoft). Pelo
+ * antigo (outlook.office.com), quem tem mais de uma conta Microsoft no navegador
+ * caía na escolha de conta e, depois dela, na caixa de entrada vazia: o rascunho
+ * se perdia. Pelo novo, testado em 27/11 com quatro contas de trabalho ou escola
+ * (Microsoft 365), o rascunho abre com assunto, corpo, quebras de linha e acentos.
+ * Conta pessoal (Hotmail, Outlook.com) ainda não foi testada.
  */
 export function linksDoRascunhoNaWeb(assunto: string, corpo: string): { gmail: string; outlook: string; completo: boolean } {
   const montar = (comCorpo: boolean) => {
@@ -150,7 +157,7 @@ export function linksDoRascunhoNaWeb(assunto: string, corpo: string): { gmail: s
     const outlook = new URLSearchParams({ subject: assunto, ...(comCorpo ? { body: corpo } : {}) });
     return {
       gmail: `https://mail.google.com/mail/?${gmail.toString().replace(/\+/g, "%20")}`,
-      outlook: `https://outlook.office.com/mail/deeplink/compose?${outlook.toString().replace(/\+/g, "%20")}`,
+      outlook: `https://outlook.cloud.microsoft/mail/deeplink/compose?${outlook.toString().replace(/\+/g, "%20")}`,
     };
   };
   const completos = montar(true);
