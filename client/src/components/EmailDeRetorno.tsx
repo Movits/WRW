@@ -147,8 +147,9 @@ export const LIMITE_DO_LINK_DE_EMAIL_NA_WEB = 7_000;
  * O Outlook vai pelo endereço novo da Microsoft (outlook.cloud.microsoft). Pelo
  * antigo (outlook.office.com), quem tem mais de uma conta Microsoft no navegador
  * caía na escolha de conta e, depois dela, na caixa de entrada vazia: o rascunho
- * se perdia. Pelo novo, testado em 27/11 com quatro contas, o rascunho abre com
- * assunto, corpo, quebras de linha e acentos.
+ * se perdia. Pelo novo, testado em 27/11 com quatro contas de trabalho ou escola
+ * (Microsoft 365), o rascunho abre com assunto, corpo, quebras de linha e acentos.
+ * Conta pessoal (Hotmail, Outlook.com) ainda não foi testada.
  */
 export function linksDoRascunhoNaWeb(assunto: string, corpo: string): { gmail: string; outlook: string; completo: boolean } {
   const montar = (comCorpo: boolean) => {
